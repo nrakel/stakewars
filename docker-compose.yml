@@ -1,0 +1,59 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: stakewars
+      POSTGRES_USER: stakewars
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stakewars -d stakewars"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      PUBLIC_ORIGIN: https://stakewars.phisystems.ai
+      DATABASE_URL: postgres://stakewars:${POSTGRES_PASSWORD}@db:5432/stakewars
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
+      WEEKLY_BANKROLL_CENTS: ${WEEKLY_BANKROLL_CENTS:-100000}
+      AI_USERNAME: ${AI_USERNAME:-stakewars_ai}
+      PARLAY_API_BASE_URL: ${PARLAY_API_BASE_URL:-https://parlay-api.com/v1}
+      PARLAY_API_KEY: ${PARLAY_API_KEY:-}
+      PARLAY_BOOKMAKERS: ${PARLAY_BOOKMAKERS:-bovada}
+    expose:
+      - "3000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/stakewars.conf:/etc/nginx/conf.d/default.conf:ro
+      - certbot_www:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+
+  certbot:
+    image: certbot/certbot:v2.11.0
+    volumes:
+      - certbot_www:/var/www/certbot
+      - letsencrypt:/etc/letsencrypt
+
+volumes:
+  postgres_data:
+  certbot_www:
+  letsencrypt:

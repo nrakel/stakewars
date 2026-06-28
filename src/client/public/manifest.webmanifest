@@ -1,0 +1,51 @@
+{
+  "name": "StakeWars",
+  "short_name": "StakeWars",
+  "id": "/",
+  "description": "Weekly bankroll contests against public sports lines and the StakeWars AI Bot.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "launch_handler": {
+    "client_mode": "navigate-existing"
+  },
+  "display_override": ["standalone", "minimal-ui"],
+  "display": "standalone",
+  "background_color": "#f4f6f2",
+  "theme_color": "#14201c",
+  "orientation": "portrait",
+  "categories": ["sports", "games", "entertainment"],
+  "shortcuts": [
+    {
+      "name": "Leaderboard",
+      "short_name": "Leaders",
+      "url": "/?view=leaderboard",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Available Lines",
+      "short_name": "Lines",
+      "url": "/?view=lines",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
