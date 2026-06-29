@@ -81,8 +81,7 @@ const configureStakeWarsForm = Devvit.createForm({
       name: "sharedSecret",
       label: "StakeWars shared secret",
       helpText: "Use REDDIT_DEVVIT_SHARED_SECRET from /etc/stakewars/stakewars.env.",
-      required: true,
-      isSecret: true
+      required: true
     }
   ]
 }, async (event, context) => {

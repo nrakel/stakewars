@@ -18,6 +18,9 @@ These values are stored in Devvit Redis for the app. The app also declares these
 as app settings, but the Reddit Developer Portal may not expose the settings UI
 for this app.
 
+The fallback form does not mask the shared secret while typing because Devvit
+only allows masked secret fields in app settings, not regular action forms.
+
 Fallback app settings, if the portal exposes them later:
 
 - `stakewars-origin`: `https://stakewars.phisystems.ai`
