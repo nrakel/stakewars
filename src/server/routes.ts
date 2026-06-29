@@ -7,7 +7,7 @@ import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { getLiveMlbStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendTestPush, updatePushPreferences } from "./push.js";
-import { buildRedditPreview, createRedditAuthUrl, exchangeRedditCode, getRedditConnection, isRedditConfigured, submitRedditPost } from "./reddit.js";
+import { buildRedditPreview, claimNextRedditPost, completeRedditPost, failRedditPost, isRedditConfigured, submitRedditPost } from "./reddit.js";
 import type { MarketKey, SportKey } from "../shared/types.js";
 
 const registerSchema = z.object({
@@ -80,6 +80,14 @@ const redditPostSchema = z.object({
   dryRun: z.boolean().default(true)
 });
 
+const redditResultSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["posted", "failed"]),
+  redditFullname: z.string().trim().min(1).max(120).nullable().optional(),
+  redditUrl: z.string().trim().url().nullable().optional(),
+  errorMessage: z.string().trim().min(1).max(1000).nullable().optional()
+});
+
 const isAdminUser = (user: Express.Request["user"]) => Boolean(
   user
   && (user.role === "admin" || config.adminUsernames.includes(user.username.toLowerCase()))
@@ -99,32 +107,18 @@ const requireAdmin = (req: Parameters<typeof requireAuth>[0], res: Parameters<ty
   });
 };
 
-export const registerRoutes = (router: Router) => {
-  router.get("/admin/reddit/callback", async (req, res, next) => {
-    try {
-      const error = typeof req.query.error === "string" ? req.query.error : null;
-      if (error) {
-        res.status(400).send(`Reddit authorization failed: ${error}`);
-        return;
-      }
-      const code = z.string().min(1).parse(req.query.code);
-      const state = z.string().min(1).parse(req.query.state);
-      const result = await exchangeRedditCode({ code, state });
-      res.send(`
-        <!doctype html>
-        <html>
-          <head><title>Reddit connected</title></head>
-          <body>
-            <h1>Reddit connected</h1>
-            <p>Connected ${result.redditUsername ?? "Reddit"} to StakeWars. You can close this tab and return to StakeWars.</p>
-          </body>
-        </html>
-      `);
-    } catch (error) {
-      next(error);
-    }
-  });
+const requireDevvit = (req: Parameters<typeof requireAuth>[0], res: Parameters<typeof requireAuth>[1], next: Parameters<typeof requireAuth>[2]) => {
+  const expected = config.redditDevvitSharedSecret;
+  const header = req.header("authorization");
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : "";
+  if (!expected || token !== expected) {
+    res.status(401).json({ error: "Devvit authentication required" });
+    return;
+  }
+  next();
+};
 
+export const registerRoutes = (router: Router) => {
   router.post("/auth/register", async (req, res, next) => {
     try {
       const input = registerSchema.parse(req.body);
@@ -342,24 +336,15 @@ export const registerRoutes = (router: Router) => {
 
   router.get("/admin/reddit/status", requireAdmin, async (req, res, next) => {
     try {
-      const connection = await getRedditConnection(req.user!.id);
       res.json({
         configured: isRedditConfigured(),
-        connected: Boolean(connection),
-        redditUsername: connection?.reddit_username ?? null,
-        connectedAt: connection?.connected_at ?? null,
-        scopes: connection?.scopes ?? [],
+        mode: "devvit",
+        connected: isRedditConfigured(),
+        redditUsername: null,
+        connectedAt: null,
+        scopes: [],
         defaultSubreddits: config.redditDefaultSubreddits
       });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/admin/reddit/connect", requireAdmin, async (req, res, next) => {
-    try {
-      const authUrl = await createRedditAuthUrl(req.user!.id);
-      res.json({ authUrl });
     } catch (error) {
       next(error);
     }
@@ -393,6 +378,42 @@ export const registerRoutes = (router: Router) => {
         dryRun: input.dryRun
       });
       res.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/devvit/reddit/claim", requireDevvit, async (_req, res, next) => {
+    try {
+      const post = await claimNextRedditPost();
+      res.json({ post });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/devvit/reddit/result", requireDevvit, async (req, res, next) => {
+    try {
+      const input = redditResultSchema.parse(req.body);
+      if (input.status === "posted" && !input.redditUrl) {
+        res.status(400).json({ error: "redditUrl is required for posted results" });
+        return;
+      }
+      const ok = input.status === "posted"
+        ? await completeRedditPost({
+          id: input.id,
+          redditFullname: input.redditFullname ?? null,
+          redditUrl: input.redditUrl!
+        })
+        : await failRedditPost({
+          id: input.id,
+          errorMessage: input.errorMessage ?? "Devvit reported Reddit post failure"
+        });
+      if (!ok) {
+        res.status(404).json({ error: "Queued Reddit post not found" });
+        return;
+      }
+      res.json({ ok: true });
     } catch (error) {
       next(error);
     }

@@ -34,6 +34,7 @@ type PushPreferences = {
 
 type RedditStatus = {
   configured: boolean;
+  mode: "devvit";
   connected: boolean;
   redditUsername: string | null;
   connectedAt: string | null;
@@ -1112,17 +1113,6 @@ function App() {
     }
   };
 
-  const connectReddit = async () => {
-    setRedditNotice("");
-    try {
-      const result = await api<{ authUrl: string }>("/admin/reddit/connect", { method: "POST" }, token);
-      window.open(result.authUrl, "_blank", "noopener,noreferrer");
-      setRedditNotice("Reddit authorization opened in a new tab. Return here after approving it.");
-    } catch (err) {
-      setRedditNotice((err as Error).message);
-    }
-  };
-
   const generateRedditPreview = async () => {
     setRedditNotice("");
     try {
@@ -1154,7 +1144,7 @@ function App() {
       }, token);
       setRedditNotice(dryRun
         ? "Dry run logged."
-        : `Posted to Reddit${result.redditUrl ? `: ${result.redditUrl}` : "."}`);
+        : "Queued for Devvit to post to Reddit.");
     } catch (err) {
       setRedditNotice((err as Error).message);
     }
@@ -1667,14 +1657,11 @@ function App() {
                   <strong>Reddit Posting</strong>
                   <span>
                     {redditStatus?.configured
-                      ? redditStatus.connected
-                        ? `Connected${redditStatus.redditUsername ? ` as u/${redditStatus.redditUsername}` : ""}.`
-                        : "Reddit credentials are configured. Connect an account before posting."
-                      : "Add Reddit credentials to the server env before connecting."}
+                      ? "Devvit handoff is configured. Approved posts will be queued for the Reddit app."
+                      : "Add REDDIT_DEVVIT_SHARED_SECRET to the server env before queueing live posts."}
                   </span>
                 </div>
                 <div className="notification-actions">
-                  <button className="secondary-action" onClick={connectReddit} disabled={!redditStatus?.configured}>Connect Reddit</button>
                   <button className="secondary-action" onClick={refreshRedditStatus}>Refresh status</button>
                 </div>
                 <div className="reddit-editor">
@@ -1693,10 +1680,10 @@ function App() {
                   </label>
                   <div className="notification-actions">
                     <button className="secondary-action" disabled={!redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(true)}>Dry run</button>
-                    <button className="primary" disabled={!redditStatus?.connected || !redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(false)}>Post to Reddit</button>
+                    <button className="primary" disabled={!redditStatus?.connected || !redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(false)}>Queue for Reddit</button>
                   </div>
                 </div>
-                {redditNotice && <p className={redditNotice.includes("Posted") || redditNotice.includes("generated") || redditNotice.includes("opened") || redditNotice.includes("Dry run") ? "success" : "error"}>{redditNotice}</p>}
+                {redditNotice && <p className={redditNotice.includes("Queued") || redditNotice.includes("generated") || redditNotice.includes("Dry run") ? "success" : "error"}>{redditNotice}</p>}
               </div>
             )}
             <div className="account-grid">

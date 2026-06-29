@@ -30,9 +30,7 @@ export const config = {
     .split(",")
     .map((username) => username.trim().toLowerCase())
     .filter(Boolean),
-  redditClientId: process.env.REDDIT_CLIENT_ID,
-  redditClientSecret: process.env.REDDIT_CLIENT_SECRET,
-  redditUserAgent: process.env.REDDIT_USER_AGENT ?? "StakeWars/0.1 by nrakel",
+  redditDevvitSharedSecret: process.env.REDDIT_DEVVIT_SHARED_SECRET,
   redditDefaultSubreddits: (process.env.REDDIT_DEFAULT_SUBREDDITS ?? "")
     .split(",")
     .map((subreddit) => subreddit.trim().replace(/^r\//i, ""))
