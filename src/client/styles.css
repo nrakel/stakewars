@@ -1509,6 +1509,22 @@ textarea {
   margin-top: 14px;
 }
 
+.line-move-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  color: #43524c;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.line-move-option input {
+  width: 16px;
+  height: 16px;
+  accent-color: #f97316;
+}
+
 .open-bets {
   display: grid;
   gap: 10px;

@@ -24,6 +24,26 @@ type Bankroll = {
 type SlipLeg = {
   gameLineId: string;
   selectedTeam: string;
+  expectedSpread: string;
+  expectedOddsAmerican: number;
+};
+
+type LineMoveNotice = {
+  oldGameLineId: string;
+  newGameLineId: string;
+  game: string;
+  selectedTeam: string;
+  marketKey: GameLine["marketKey"];
+  oldSpread: string;
+  newSpread: string;
+  oldOddsAmerican: number;
+  newOddsAmerican: number;
+};
+
+type LineMoveErrorBody = {
+  error: string;
+  code: "LINE_MOVED";
+  lineMoves: LineMoveNotice[];
 };
 
 type PushPreferences = {
@@ -54,6 +74,31 @@ const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { m
 const americanOdds = (odds: number) => `${odds > 0 ? "+" : ""}${odds}`;
 
 const americanToDecimal = (odds: number) => odds > 0 ? 1 + odds / 100 : 1 + 100 / Math.abs(odds);
+
+const linePriceText = (marketKey: GameLine["marketKey"], spread: string, odds: number) => {
+  if (marketKey === "h2h") return americanOdds(odds);
+  if (marketKey === "totals") return `${spread} ${americanOdds(odds)}`;
+  return `${Number(spread) > 0 ? `+${spread}` : spread} ${americanOdds(odds)}`;
+};
+
+const isLineMoveErrorBody = (body: unknown): body is LineMoveErrorBody =>
+  Boolean(
+    body
+    && typeof body === "object"
+    && (body as LineMoveErrorBody).code === "LINE_MOVED"
+    && Array.isArray((body as LineMoveErrorBody).lineMoves)
+  );
+
+const lineMovePrompt = (moves: LineMoveNotice[]) => {
+  if (moves.length === 1) {
+    const move = moves[0];
+    return `The line for ${move.game} has changed from ${linePriceText(move.marketKey, move.oldSpread, move.oldOddsAmerican)} to ${linePriceText(move.marketKey, move.newSpread, move.newOddsAmerican)}.\n\nDo you accept the new price?`;
+  }
+  const details = moves.map((move) =>
+    `${move.game} ${move.selectedTeam}: ${linePriceText(move.marketKey, move.oldSpread, move.oldOddsAmerican)} -> ${linePriceText(move.marketKey, move.newSpread, move.newOddsAmerican)}`
+  ).join("\n");
+  return `The lines for these selections have changed:\n\n${details}\n\nDo you accept the new prices?`;
+};
 
 const statusLabel = (status: string) => status === "void" ? "No Action" : status;
 
@@ -111,10 +156,12 @@ const LegStatusIcon = ({ status }: { status: string }) => {
 
 class ApiError extends Error {
   status: number;
+  body: unknown;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, body?: unknown) {
     super(message);
     this.status = status;
+    this.body = body;
   }
 }
 
@@ -331,7 +378,7 @@ const api = async <T,>(path: string, options: RequestInit = {}, token?: string):
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new ApiError(body.error ?? "Request failed", response.status);
+    throw new ApiError(body.error ?? "Request failed", response.status, body);
   }
   return body as T;
 };
@@ -615,6 +662,7 @@ function App() {
   const [singleStakes, setSingleStakes] = useState<Record<string, string>>({});
   const [includedLegIds, setIncludedLegIds] = useState<Set<string>>(() => new Set());
   const [slip, setSlip] = useState<SlipLeg[]>([]);
+  const [acceptLineMoves, setAcceptLineMoves] = useState(false);
   const [notice, setNotice] = useState("");
   const [activePage, setActivePage] = useState<AppPage>("lines");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(() => window.matchMedia("(max-width: 860px)").matches);
@@ -908,7 +956,12 @@ function App() {
       if (singleStakeAll.trim()) {
         setSingleStakes((stakes) => ({ ...stakes, [line.id]: singleStakeAll }));
       }
-      return [...nextSlip, { gameLineId: line.id, selectedTeam: line.team }];
+      return [...nextSlip, {
+        gameLineId: line.id,
+        selectedTeam: line.team,
+        expectedSpread: line.spread,
+        expectedOddsAmerican: line.oddsAmerican
+      }];
     });
   };
 
@@ -1004,8 +1057,9 @@ function App() {
   const hasConfirmedLineups = (game: GameCard) =>
     Boolean(game.awayLineup?.confirmed && game.homeLineup?.confirmed);
 
-  const placeWager = async () => {
+  const placeWager = async (forceAcceptLineMoves = false) => {
     setNotice("");
+    const shouldAcceptLineMoves = acceptLineMoves || forceAcceptLineMoves;
     try {
       if (kind === "straight") {
         const wagers = slip
@@ -1029,7 +1083,7 @@ function App() {
 
         await Promise.all(wagers.map((wager) => api("/wagers", {
           method: "POST",
-          body: JSON.stringify({ kind: "straight", stakeCents: wager.stakeCents, legs: [wager.leg] })
+          body: JSON.stringify({ kind: "straight", stakeCents: wager.stakeCents, acceptLineMoves: shouldAcceptLineMoves, legs: [wager.leg] })
         }, token)));
       } else {
         if (includedSlip.length < 2) {
@@ -1063,6 +1117,7 @@ function App() {
             kind,
             stakeCents: parlayStakeCents,
             roundRobinMaxLegs: kind === "round_robin" ? effectiveRoundRobinMaxLegs : undefined,
+            acceptLineMoves: shouldAcceptLineMoves,
             legs: includedSlip
           })
         }, token);
@@ -1074,6 +1129,21 @@ function App() {
       setNotice(kind === "straight" ? "Wagers placed." : "Wager placed.");
       await refresh();
     } catch (err) {
+      if (
+        !shouldAcceptLineMoves
+        && err instanceof ApiError
+        && err.status === 409
+        && isLineMoveErrorBody(err.body)
+      ) {
+        const accepted = window.confirm(lineMovePrompt(err.body.lineMoves));
+        if (accepted) {
+          await placeWager(true);
+          return;
+        }
+        setNotice("Wager not placed.");
+        await refresh().catch(() => undefined);
+        return;
+      }
       setNotice((err as Error).message);
     }
   };
@@ -1498,6 +1568,16 @@ function App() {
                     );
                   })}
                 </div>
+                {slip.length > 0 && (
+                  <label className="line-move-option">
+                    <input
+                      type="checkbox"
+                      checked={acceptLineMoves}
+                      onChange={(event) => setAcceptLineMoves(event.target.checked)}
+                    />
+                    Always accept line moves when placing wagers
+                  </label>
+                )}
                 {kind !== "straight" && (
                   <div className="combined-stake-box">
                     <span>{includedSlip.length} checked / {MAX_CHECKED_LEGS} max</span>
@@ -1530,7 +1610,7 @@ function App() {
                   </div>
                 )}
                 {notice && <p className={notice.endsWith("placed.") ? "success" : "error"}>{notice}</p>}
-                <button className="primary" disabled={slip.length === 0} onClick={placeWager}>Place wager</button>
+                <button className="primary" disabled={slip.length === 0} onClick={() => placeWager()}>Place wager</button>
               </div>
               <div className="panel">
                 <div className="panel-title">

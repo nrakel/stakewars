@@ -41,13 +41,58 @@ const placeWagerSchema = z.object({
   kind: z.enum(["straight", "parlay", "round_robin"]),
   stakeCents: z.number().int().positive().max(100_000_000),
   roundRobinMaxLegs: z.number().int().min(2).max(8).optional(),
+  acceptLineMoves: z.boolean().default(false),
   legs: z.array(
     z.object({
       gameLineId: z.string().uuid(),
-      selectedTeam: z.string().min(1).max(120)
+      selectedTeam: z.string().min(1).max(120),
+      expectedSpread: z.string().max(40).optional(),
+      expectedOddsAmerican: z.number().int().optional()
     })
   ).min(1).max(8)
 });
+
+type WagerLineRow = {
+  id: string;
+  sport: SportKey;
+  starts_at: Date;
+  home_team: string;
+  away_team: string;
+  favorite_team: string;
+  spread: string;
+  odds_american: number;
+  market_key: MarketKey;
+  is_active: boolean;
+};
+
+type LineMove = {
+  oldGameLineId: string;
+  newGameLineId: string;
+  game: string;
+  selectedTeam: string;
+  marketKey: MarketKey;
+  oldSpread: string;
+  newSpread: string;
+  oldOddsAmerican: number;
+  newOddsAmerican: number;
+};
+
+class LineMoveError extends Error {
+  body: {
+    error: string;
+    code: "LINE_MOVED";
+    lineMoves: LineMove[];
+  };
+
+  constructor(lineMoves: LineMove[]) {
+    super("Line changed");
+    this.body = {
+      error: "One or more selected lines have changed",
+      code: "LINE_MOVED",
+      lineMoves
+    };
+  }
+}
 
 const historyQuerySchema = z.object({
   period: z.enum(["day", "week", "all"]).default("week"),
@@ -1016,18 +1061,8 @@ export const registerRoutes = (router: Router) => {
           throw new Error("Insufficient bankroll");
         }
 
-        const lineResult = await client.query<{
-          id: string;
-          sport: SportKey;
-          starts_at: Date;
-          home_team: string;
-          away_team: string;
-          favorite_team: string;
-          spread: string;
-          odds_american: number;
-          market_key: MarketKey;
-        }>(
-          "SELECT id, sport, starts_at, home_team, away_team, favorite_team, spread, odds_american, market_key FROM game_line WHERE id = ANY($1::uuid[]) AND is_active = true AND starts_at > now() FOR SHARE",
+        const lineResult = await client.query<WagerLineRow>(
+          "SELECT id, sport, starts_at, home_team, away_team, favorite_team, spread, odds_american, market_key, is_active FROM game_line WHERE id = ANY($1::uuid[]) FOR SHARE",
           [input.legs.map((leg) => leg.gameLineId)]
         );
 
@@ -1035,8 +1070,78 @@ export const registerRoutes = (router: Router) => {
           throw new Error("One or more selected lines are unavailable");
         }
 
-        const lines = new Map(lineResult.rows.map((line) => [line.id, line]));
-        const selectedLines = input.legs.map((leg) => lines.get(leg.gameLineId)!);
+        const requestedLines = new Map(lineResult.rows.map((line) => [line.id, line]));
+        const selectedLines: WagerLineRow[] = [];
+        const lineMoves: LineMove[] = [];
+
+        for (const leg of input.legs) {
+          const requestedLine = requestedLines.get(leg.gameLineId);
+          if (!requestedLine) {
+            throw new Error("One or more selected lines are unavailable");
+          }
+          if (leg.selectedTeam !== requestedLine.favorite_team) {
+            throw new Error("Selected outcome is not available");
+          }
+          if (requestedLine.starts_at.getTime() <= Date.now()) {
+            throw new Error("One or more selected games have already started");
+          }
+
+          let currentLine = requestedLine;
+          if (!requestedLine.is_active) {
+            const replacementResult = await client.query<WagerLineRow>(
+              `
+                SELECT id, sport, starts_at, home_team, away_team, favorite_team, spread, odds_american, market_key, is_active
+                FROM game_line
+                WHERE is_active = true
+                  AND starts_at > now()
+                  AND sport = $1
+                  AND away_team = $2
+                  AND home_team = $3
+                  AND market_key = $4
+                  AND favorite_team = $5
+                  AND starts_at BETWEEN $6::timestamptz - interval '3 hours' AND $6::timestamptz + interval '3 hours'
+                ORDER BY abs(extract(epoch from starts_at - $6::timestamptz)) ASC, fetched_at DESC
+                LIMIT 1
+                FOR SHARE
+              `,
+              [
+                requestedLine.sport,
+                requestedLine.away_team,
+                requestedLine.home_team,
+                requestedLine.market_key,
+                requestedLine.favorite_team,
+                requestedLine.starts_at
+              ]
+            );
+            if (replacementResult.rowCount !== 1) {
+              throw new Error("One or more selected lines are unavailable");
+            }
+            currentLine = replacementResult.rows[0];
+          }
+
+          const expectedSpread = leg.expectedSpread ?? requestedLine.spread;
+          const expectedOddsAmerican = leg.expectedOddsAmerican ?? requestedLine.odds_american;
+          if (currentLine.id !== leg.gameLineId || currentLine.spread !== expectedSpread || currentLine.odds_american !== expectedOddsAmerican) {
+            lineMoves.push({
+              oldGameLineId: leg.gameLineId,
+              newGameLineId: currentLine.id,
+              game: `${currentLine.away_team} @ ${currentLine.home_team}`,
+              selectedTeam: leg.selectedTeam,
+              marketKey: currentLine.market_key,
+              oldSpread: expectedSpread,
+              newSpread: currentLine.spread,
+              oldOddsAmerican: expectedOddsAmerican,
+              newOddsAmerican: currentLine.odds_american
+            });
+          }
+          selectedLines.push(currentLine);
+        }
+
+        if (lineMoves.length > 0 && !input.acceptLineMoves) {
+          throw new LineMoveError(lineMoves);
+        }
+
+        const lines = new Map(input.legs.map((leg, index) => [leg.gameLineId, selectedLines[index]]));
         for (let leftIndex = 0; leftIndex < selectedLines.length; leftIndex += 1) {
           for (let rightIndex = leftIndex + 1; rightIndex < selectedLines.length; rightIndex += 1) {
             const left = selectedLines[leftIndex];
@@ -1061,9 +1166,6 @@ export const registerRoutes = (router: Router) => {
         }
         const odds = input.legs.map((leg) => {
           const line = lines.get(leg.gameLineId)!;
-          if (leg.selectedTeam !== line.favorite_team) {
-            throw new Error("Selected outcome is not available");
-          }
           return line.odds_american;
         });
 
@@ -1103,7 +1205,7 @@ export const registerRoutes = (router: Router) => {
               INSERT INTO wager_leg (id, wager_id, game_line_id, selected_team, spread, odds_american)
               VALUES ($1, $2, $3, $4, $5, $6)
             `,
-            [randomUUID(), wagerResult.rows[0].id, leg.gameLineId, leg.selectedTeam, line.spread, line.odds_american]
+            [randomUUID(), wagerResult.rows[0].id, line.id, leg.selectedTeam, line.spread, line.odds_american]
           );
         }
 
@@ -1117,11 +1219,15 @@ export const registerRoutes = (router: Router) => {
 
       res.status(201).json({ wager });
     } catch (error) {
+      if (error instanceof LineMoveError) {
+        res.status(409).json(error.body);
+        return;
+      }
       if ((error as Error).message === "Insufficient bankroll") {
         res.status(400).json({ error: "Insufficient bankroll" });
         return;
       }
-      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("round robin")) {
+      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("round robin")) {
         res.status(400).json({ error: (error as Error).message });
         return;
       }
