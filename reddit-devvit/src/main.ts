@@ -41,7 +41,9 @@ const stakeWarsOriginKey = "stakewars:origin";
 const stakeWarsSharedSecretKey = "stakewars:shared-secret";
 
 Devvit.configure({
-  http: true,
+  http: {
+    domains: ["stakewars.phisystems.ai"]
+  },
   redditAPI: true
 });
 
