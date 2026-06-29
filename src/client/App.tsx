@@ -32,6 +32,21 @@ type PushPreferences = {
   gameFinalEnabled: boolean;
 };
 
+type RedditStatus = {
+  configured: boolean;
+  connected: boolean;
+  redditUsername: string | null;
+  connectedAt: string | null;
+  scopes: string[];
+  defaultSubreddits: string[];
+};
+
+type RedditPreview = {
+  subreddit: string;
+  title: string;
+  body: string;
+};
+
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
 const americanOdds = (odds: number) => `${odds > 0 ? "+" : ""}${odds}`;
@@ -528,6 +543,11 @@ function App() {
     scoreChangeEnabled: false,
     gameFinalEnabled: false
   });
+  const [redditStatus, setRedditStatus] = useState<RedditStatus | null>(null);
+  const [redditSubreddit, setRedditSubreddit] = useState("");
+  const [redditTitle, setRedditTitle] = useState("");
+  const [redditBody, setRedditBody] = useState("");
+  const [redditNotice, setRedditNotice] = useState("");
 
   const refresh = async (authToken = token) => {
     const [lineResult, boardResult, aiResult, liveResult] = await Promise.all([
@@ -590,6 +610,11 @@ function App() {
     document.getElementById("bet-slip")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const canManageReddit = Boolean(
+    user
+    && (user.role === "admin" || user.username.toLowerCase() === "nathanielrakel@gmail.com")
+  );
+
   useEffect(() => {
     refresh().catch((error) => {
       if (error instanceof ApiError && error.status === 401) {
@@ -602,6 +627,21 @@ function App() {
   useEffect(() => {
     refreshHistory().catch(() => undefined);
   }, [token, historyPeriod, historyIncludeAi]);
+
+  useEffect(() => {
+    if (!token || !canManageReddit) {
+      setRedditStatus(null);
+      return;
+    }
+    api<RedditStatus>("/admin/reddit/status", {}, token)
+      .then((status) => {
+        setRedditStatus(status);
+        if (!redditSubreddit && status.defaultSubreddits[0]) {
+          setRedditSubreddit(status.defaultSubreddits[0]);
+        }
+      })
+      .catch(() => setRedditStatus(null));
+  }, [token, canManageReddit]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 15_000);
@@ -1060,6 +1100,63 @@ function App() {
     } catch (err) {
       setPushPreferences(pushPreferences);
       setPushNotice((err as Error).message);
+    }
+  };
+
+  const refreshRedditStatus = async () => {
+    if (!token || !canManageReddit) return;
+    const status = await api<RedditStatus>("/admin/reddit/status", {}, token);
+    setRedditStatus(status);
+    if (!redditSubreddit && status.defaultSubreddits[0]) {
+      setRedditSubreddit(status.defaultSubreddits[0]);
+    }
+  };
+
+  const connectReddit = async () => {
+    setRedditNotice("");
+    try {
+      const result = await api<{ authUrl: string }>("/admin/reddit/connect", { method: "POST" }, token);
+      window.open(result.authUrl, "_blank", "noopener,noreferrer");
+      setRedditNotice("Reddit authorization opened in a new tab. Return here after approving it.");
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const generateRedditPreview = async () => {
+    setRedditNotice("");
+    try {
+      const result = await api<{ preview: RedditPreview }>("/admin/reddit/preview", {
+        method: "POST",
+        body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined })
+      }, token);
+      setRedditSubreddit(result.preview.subreddit);
+      setRedditTitle(result.preview.title);
+      setRedditBody(result.preview.body);
+      setRedditNotice("Preview generated and logged as a dry run.");
+      await refreshRedditStatus();
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const submitRedditPostFromPreview = async (dryRun: boolean) => {
+    setRedditNotice("");
+    try {
+      const result = await api<{ dryRun: boolean; logId: string; redditUrl: string | null }>("/admin/reddit/post", {
+        method: "POST",
+        body: JSON.stringify({
+          subreddit: redditSubreddit.trim(),
+          title: redditTitle.trim(),
+          body: redditBody.trim(),
+          dryRun
+        })
+      }, token);
+      setRedditNotice(dryRun
+        ? "Dry run logged."
+        : `Posted to Reddit${result.redditUrl ? `: ${result.redditUrl}` : "."}`);
+    } catch (err) {
+      setRedditNotice((err as Error).message);
     }
   };
 
@@ -1564,6 +1661,44 @@ function App() {
               </div>
               {pushNotice && <p className={pushNotice.includes("enabled") || pushNotice.includes("sent") || pushNotice.includes("saved") ? "success" : "error"}>{pushNotice}</p>}
             </div>
+            {canManageReddit && (
+              <div className="notification-card reddit-card">
+                <div>
+                  <strong>Reddit Posting</strong>
+                  <span>
+                    {redditStatus?.configured
+                      ? redditStatus.connected
+                        ? `Connected${redditStatus.redditUsername ? ` as u/${redditStatus.redditUsername}` : ""}.`
+                        : "Reddit credentials are configured. Connect an account before posting."
+                      : "Add Reddit credentials to the server env before connecting."}
+                  </span>
+                </div>
+                <div className="notification-actions">
+                  <button className="secondary-action" onClick={connectReddit} disabled={!redditStatus?.configured}>Connect Reddit</button>
+                  <button className="secondary-action" onClick={refreshRedditStatus}>Refresh status</button>
+                </div>
+                <div className="reddit-editor">
+                  <label>
+                    Subreddit
+                    <input value={redditSubreddit} placeholder="sportsbook" onChange={(event) => setRedditSubreddit(event.target.value)} />
+                  </label>
+                  <button className="secondary-action" onClick={generateRedditPreview}>Generate preview</button>
+                  <label>
+                    Title
+                    <input value={redditTitle} maxLength={300} onChange={(event) => setRedditTitle(event.target.value)} />
+                  </label>
+                  <label>
+                    Body
+                    <textarea value={redditBody} rows={12} onChange={(event) => setRedditBody(event.target.value)} />
+                  </label>
+                  <div className="notification-actions">
+                    <button className="secondary-action" disabled={!redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(true)}>Dry run</button>
+                    <button className="primary" disabled={!redditStatus?.connected || !redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(false)}>Post to Reddit</button>
+                  </div>
+                </div>
+                {redditNotice && <p className={redditNotice.includes("Posted") || redditNotice.includes("generated") || redditNotice.includes("opened") || redditNotice.includes("Dry run") ? "success" : "error"}>{redditNotice}</p>}
+              </div>
+            )}
             <div className="account-grid">
               <label>
                 Preferred payout method

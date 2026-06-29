@@ -26,6 +26,17 @@ export const config = {
     .split(",")
     .map((book) => book.trim())
     .filter(Boolean),
+  adminUsernames: (process.env.ADMIN_USERNAMES ?? "nathanielrakel@gmail.com")
+    .split(",")
+    .map((username) => username.trim().toLowerCase())
+    .filter(Boolean),
+  redditClientId: process.env.REDDIT_CLIENT_ID,
+  redditClientSecret: process.env.REDDIT_CLIENT_SECRET,
+  redditUserAgent: process.env.REDDIT_USER_AGENT ?? "StakeWars/0.1 by nrakel",
+  redditDefaultSubreddits: (process.env.REDDIT_DEFAULT_SUBREDDITS ?? "")
+    .split(",")
+    .map((subreddit) => subreddit.trim().replace(/^r\//i, ""))
+    .filter(Boolean),
   openAiApiKey: process.env.OPENAI_API_KEY,
   openAiModel: process.env.OPENAI_MODEL ?? "gpt-5.4-nano",
   vapidSubject: process.env.VAPID_SUBJECT ?? `mailto:admin@${new URL(process.env.PUBLIC_ORIGIN ?? "http://localhost:3000").hostname}`,

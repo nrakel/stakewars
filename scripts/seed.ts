@@ -17,7 +17,7 @@ await pool.query(
 await pool.query(
   `
     INSERT INTO weekly_entry (id, user_id, week_starts_on, starting_bankroll_cents, balance_cents)
-    SELECT $1, id, (date_trunc('week', now() AT TIME ZONE 'UTC'))::date, $2, $2
+    SELECT $1, id, (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date, $2, $2
     FROM app_user
     WHERE username = $3
     ON CONFLICT (user_id, week_starts_on) DO NOTHING

@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { getLiveMlbStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendTestPush, updatePushPreferences } from "./push.js";
+import { buildRedditPreview, createRedditAuthUrl, exchangeRedditCode, getRedditConnection, isRedditConfigured, submitRedditPost } from "./reddit.js";
 import type { MarketKey, SportKey } from "../shared/types.js";
 
 const registerSchema = z.object({
@@ -68,7 +69,62 @@ const pushPreferencesSchema = z.object({
   gameFinalEnabled: z.boolean()
 });
 
+const redditPreviewSchema = z.object({
+  subreddit: z.string().trim().min(2).max(80).optional()
+});
+
+const redditPostSchema = z.object({
+  subreddit: z.string().trim().min(2).max(80),
+  title: z.string().trim().min(5).max(300),
+  body: z.string().trim().min(20).max(40_000),
+  dryRun: z.boolean().default(true)
+});
+
+const isAdminUser = (user: Express.Request["user"]) => Boolean(
+  user
+  && (user.role === "admin" || config.adminUsernames.includes(user.username.toLowerCase()))
+);
+
+const requireAdmin = (req: Parameters<typeof requireAuth>[0], res: Parameters<typeof requireAuth>[1], next: Parameters<typeof requireAuth>[2]) => {
+  requireAuth(req, res, (error?: unknown) => {
+    if (error) {
+      next(error);
+      return;
+    }
+    if (!isAdminUser(req.user)) {
+      res.status(403).json({ error: "Admin access required" });
+      return;
+    }
+    next();
+  });
+};
+
 export const registerRoutes = (router: Router) => {
+  router.get("/admin/reddit/callback", async (req, res, next) => {
+    try {
+      const error = typeof req.query.error === "string" ? req.query.error : null;
+      if (error) {
+        res.status(400).send(`Reddit authorization failed: ${error}`);
+        return;
+      }
+      const code = z.string().min(1).parse(req.query.code);
+      const state = z.string().min(1).parse(req.query.state);
+      const result = await exchangeRedditCode({ code, state });
+      res.send(`
+        <!doctype html>
+        <html>
+          <head><title>Reddit connected</title></head>
+          <body>
+            <h1>Reddit connected</h1>
+            <p>Connected ${result.redditUsername ?? "Reddit"} to StakeWars. You can close this tab and return to StakeWars.</p>
+          </body>
+        </html>
+      `);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/auth/register", async (req, res, next) => {
     try {
       const input = registerSchema.parse(req.body);
@@ -279,6 +335,64 @@ export const registerRoutes = (router: Router) => {
       );
       const user = result.rows[0];
       res.json({ token: signToken(user), user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/reddit/status", requireAdmin, async (req, res, next) => {
+    try {
+      const connection = await getRedditConnection(req.user!.id);
+      res.json({
+        configured: isRedditConfigured(),
+        connected: Boolean(connection),
+        redditUsername: connection?.reddit_username ?? null,
+        connectedAt: connection?.connected_at ?? null,
+        scopes: connection?.scopes ?? [],
+        defaultSubreddits: config.redditDefaultSubreddits
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/reddit/connect", requireAdmin, async (req, res, next) => {
+    try {
+      const authUrl = await createRedditAuthUrl(req.user!.id);
+      res.json({ authUrl });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/reddit/preview", requireAdmin, async (req, res, next) => {
+    try {
+      const input = redditPreviewSchema.parse(req.body);
+      const preview = await buildRedditPreview(input.subreddit);
+      await submitRedditPost({
+        userId: req.user!.id,
+        subreddit: preview.subreddit,
+        title: preview.title,
+        body: preview.body,
+        dryRun: true
+      });
+      res.json({ preview });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/reddit/post", requireAdmin, async (req, res, next) => {
+    try {
+      const input = redditPostSchema.parse(req.body);
+      const result = await submitRedditPost({
+        userId: req.user!.id,
+        subreddit: input.subreddit,
+        title: input.title,
+        body: input.body,
+        dryRun: input.dryRun
+      });
+      res.json(result);
     } catch (error) {
       next(error);
     }
@@ -517,7 +631,7 @@ export const registerRoutes = (router: Router) => {
       const result = await query(
         `
           WITH current_week AS (
-            SELECT (date_trunc('week', now() AT TIME ZONE 'UTC'))::date AS week_start
+            SELECT (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS week_start
           ),
           ai AS (
             SELECT e.starting_bankroll_cents + e.settled_profit_cents AS leaderboard_cents

@@ -3,7 +3,14 @@ import type pg from "pg";
 import { config } from "./config.js";
 
 export const currentWeekStart = (date = new Date()) => {
-  const copy = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const chicagoParts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const part = (type: string) => chicagoParts.find((item) => item.type === type)?.value ?? "01";
+  const copy = new Date(Date.UTC(Number(part("year")), Number(part("month")) - 1, Number(part("day"))));
   const day = copy.getUTCDay();
   const diff = day === 0 ? -6 : 1 - day;
   copy.setUTCDate(copy.getUTCDate() + diff);
