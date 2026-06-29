@@ -470,11 +470,16 @@ export const registerRoutes = (router: Router) => {
             NULLIF(mgc.home_pitcher_stats #>> '{season,era}', '')::numeric AS "homePitcherEra",
             mgc.context
           FROM game_line gl
-          LEFT JOIN mlb_game_context mgc
-            ON mgc.starts_on = (gl.starts_at AT TIME ZONE 'UTC')::date
-            AND regexp_replace(lower(mgc.away_team), '^(oakland|the)\\s+', '') = regexp_replace(lower(gl.away_team), '^(oakland|the)\\s+', '')
-            AND regexp_replace(lower(mgc.home_team), '^(oakland|the)\\s+', '') = regexp_replace(lower(gl.home_team), '^(oakland|the)\\s+', '')
-            AND mgc.starts_at = gl.starts_at
+          LEFT JOIN LATERAL (
+            SELECT *
+            FROM mlb_game_context candidate
+            WHERE candidate.starts_on = (gl.starts_at AT TIME ZONE 'UTC')::date
+              AND regexp_replace(lower(candidate.away_team), '^(oakland|the)\\s+', '') = regexp_replace(lower(gl.away_team), '^(oakland|the)\\s+', '')
+              AND regexp_replace(lower(candidate.home_team), '^(oakland|the)\\s+', '') = regexp_replace(lower(gl.home_team), '^(oakland|the)\\s+', '')
+              AND abs(extract(epoch from candidate.starts_at - gl.starts_at)) <= 10800
+            ORDER BY abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC
+            LIMIT 1
+          ) mgc ON true
           WHERE gl.is_active = true AND gl.starts_at > now()
           ORDER BY gl.starts_at ASC
           LIMIT 100
