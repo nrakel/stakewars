@@ -34,6 +34,29 @@ The app has been uploaded to Reddit as `stakewars-picks`.
 The Devvit CLI currently uploads the app successfully, but `devvit settings set`
 returns an unimplemented Reddit settings RPC error in this environment.
 
+## Fetch Domains
+
+This app requests the following Devvit HTTP fetch domain:
+
+| Domain | Direction | Purpose |
+| --- | --- | --- |
+| `stakewars.phisystems.ai` | Devvit -> StakeWars | Claim one admin-approved Reddit post from the StakeWars queue and report whether Reddit publishing succeeded or failed. |
+
+The app calls only these StakeWars endpoints:
+
+- `POST https://stakewars.phisystems.ai/api/devvit/reddit/claim`
+- `POST https://stakewars.phisystems.ai/api/devvit/reddit/result`
+
+Both requests use `Authorization: Bearer <stakewars-shared-secret>`. The shared
+secret is configured by a moderator through the `Configure StakeWars` menu item
+and stored in Devvit Redis for the installed app.
+
+StakeWars owns this domain and operates the API. The API does not collect Reddit
+user data. The only payload received by Devvit from StakeWars is an
+admin-approved post draft containing subreddit, title, and body. The result call
+sends back the queue id, post status, Reddit fullname, Reddit URL, or an error
+message so StakeWars can close the queue item.
+
 Useful CLI commands from this directory:
 
 ```bash
