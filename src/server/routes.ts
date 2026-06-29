@@ -5,7 +5,7 @@ import { hashPassword, passwordSchema, requireAuth, signToken, usernameSchema, v
 import { ensureWeeklyEntry, estimatePayoutCents, roundRobinPayoutCents, roundRobinWays } from "./betting.js";
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
-import { getLiveMlbStates } from "./live.js";
+import { getLiveMlbStates, getLiveStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendTestPush, updatePushPreferences } from "./push.js";
 import { buildRedditPreview, claimNextRedditPost, completeRedditPost, failRedditPost, isRedditConfigured, submitRedditPost } from "./reddit.js";
 import type { MarketKey, SportKey } from "../shared/types.js";
@@ -728,6 +728,20 @@ export const registerRoutes = (router: Router) => {
   router.get("/live/mlb", async (_req, res, next) => {
     try {
       const games = await getLiveMlbStates();
+      res.json({ games });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/live/:sport", async (req, res, next) => {
+    try {
+      const sport = req.params.sport.toUpperCase();
+      if (sport !== "WORLDCUP") {
+        res.status(404).json({ error: "Live scoreboard is not available for this sport" });
+        return;
+      }
+      const games = await getLiveStates(sport);
       res.json({ games });
     } catch (error) {
       next(error);

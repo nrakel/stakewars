@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { query, transaction } from "./db.js";
 import { sendPushToUsers } from "./push.js";
+import type { SportKey } from "../shared/types.js";
 
 type LiveNotificationPreference = "game_started_enabled" | "score_change_enabled" | "game_final_enabled";
 
 type LiveState = {
   matchId: string;
   provider: string;
-  sport: "MLB";
+  sport: SportKey;
   eventKey: string | null;
   startsAt: Date | null;
   awayTeam: string;
@@ -160,6 +161,8 @@ const sendGroupedNotification = async ({
   return { delivered: true, key, ...delivery };
 };
 
+const notificationGameKey = (game: LiveState) => game.eventKey ?? game.matchId;
+
 const sendFinalNotifications = async (game: LiveState) => {
   const targets = await usersForGame(game, "game_final_enabled");
   const sent: Array<{ key: string; sent: number }> = [];
@@ -180,7 +183,7 @@ const sendFinalNotifications = async (game: LiveState) => {
       : selectedWon === false
         ? `${selectedTeam} lost ${winningScore}-${losingScore}.`
         : `${scoreText(game)} is final.`;
-    const key = `live-final:${game.matchId}:${target.userId}:${selectedTeam}:${game.awayScore}-${game.homeScore}`;
+    const key = `live-final:${notificationGameKey(game)}:${target.userId}:${selectedTeam}:${game.awayScore}-${game.homeScore}`;
     const logId = await insertNotificationLog({
       key,
       title,
@@ -210,7 +213,10 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
   const results: unknown[] = [];
   for (const change of changes) {
     const game = change.current;
-    if (game.provider !== "mlb-stats-api") {
+    if (game.sport === "MLB" && game.provider !== "mlb-stats-api") {
+      continue;
+    }
+    if (game.sport !== "MLB" && game.provider !== "parlay-api" && game.provider !== "parlay-live") {
       continue;
     }
 
@@ -218,7 +224,7 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
     const gameStarted = game.inPlay && !previous?.inPlay;
     if (gameStarted) {
       results.push(await sendGroupedNotification({
-        key: `live-start:${game.matchId}`,
+        key: `live-start:${notificationGameKey(game)}`,
         title: "Game Started",
         body: `${game.awayTeam} at ${game.homeTeam} is underway.`,
         game,
@@ -235,7 +241,7 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
       && (game.awayScore !== previous?.awayScore || game.homeScore !== previous?.homeScore);
     if (scoreChanged) {
       results.push(await sendGroupedNotification({
-        key: `live-score:${game.matchId}:${game.awayScore}-${game.homeScore}`,
+        key: `live-score:${notificationGameKey(game)}:${game.awayScore}-${game.homeScore}`,
         title: "Score Update",
         body: [scoreText(game), game.description].filter(Boolean).join("\n"),
         game,

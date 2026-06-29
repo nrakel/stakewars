@@ -1,8 +1,9 @@
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { sendLiveGameNotifications, type LiveStateChange } from "./liveNotifications.js";
+import type { SportKey } from "../shared/types.js";
 
-type LiveSport = "MLB";
+type LiveSport = "MLB" | "WORLDCUP";
 
 type ParlayLiveMatch = {
   match_id?: string | number;
@@ -151,7 +152,7 @@ type MlbLiveFeed = {
 
 export type LiveGameState = {
   matchId: string;
-  sport: LiveSport;
+  sport: SportKey;
   eventKey: string | null;
   startsAt: string | null;
   awayTeam: string;
@@ -177,7 +178,8 @@ export type LiveGameState = {
 };
 
 const liveSports: Record<LiveSport, string> = {
-  MLB: "baseball_mlb"
+  MLB: "baseball_mlb",
+  WORLDCUP: "soccer_fifa_world_cup"
 };
 
 const normalizeTeam = (team: string) =>
@@ -395,11 +397,14 @@ const normalizeLiveEvent = async (sport: LiveSport, event: ParlayLiveEvent): Pro
   const startsAt = new Date(event.commence_time);
   const safeStartsAt = Number.isFinite(startsAt.getTime()) ? startsAt : null;
   const lastEventAt = bestBookmakerUpdate(event);
+  const eventKey = event.canonical_event_id
+    ?? await findEventKey(sport, event.away_team, event.home_team, safeStartsAt)
+    ?? event.id;
   return {
     matchId: event.id,
     provider: "parlay-live",
     sport,
-    eventKey: event.id,
+    eventKey,
     startsAt: safeStartsAt,
     awayTeam: event.away_team,
     homeTeam: event.home_team,
@@ -586,7 +591,7 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
       const previous = await client.query<{
         matchId: string;
         provider: string;
-        sport: "MLB";
+        sport: SportKey;
         eventKey: string | null;
         startsAt: Date | null;
         awayTeam: string;
@@ -734,16 +739,18 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
   });
 };
 
-export const refreshLiveMlb = async () => {
-  const matches = await fetchLivePoints("MLB");
-  const liveEvents = await fetchParlayLiveEvents("MLB");
-  const parlayNormalized = (await Promise.all(matches.map((match) => normalizeMatch("MLB", match))))
+const refreshLiveSport = async (sport: LiveSport) => {
+  const matches = await fetchLivePoints(sport);
+  const liveEvents = await fetchParlayLiveEvents(sport);
+  const parlayNormalized = (await Promise.all(matches.map((match) => normalizeMatch(sport, match))))
     .filter((match): match is NonNullable<typeof match> => Boolean(match));
-  const liveEventNormalized = (await Promise.all(liveEvents.map((event) => normalizeLiveEvent("MLB", event))))
+  const liveEventNormalized = (await Promise.all(liveEvents.map((event) => normalizeLiveEvent(sport, event))))
     .filter((match): match is NonNullable<typeof match> => Boolean(match));
-  const mlbGames = await fetchMlbStatsLive();
-  const mlbNormalized = (await Promise.all(mlbGames.map((game) => normalizeMlbGame(game))))
-    .filter((match): match is NonNullable<typeof match> => Boolean(match));
+  const mlbGames = sport === "MLB" ? await fetchMlbStatsLive() : [];
+  const mlbNormalized = sport === "MLB"
+    ? (await Promise.all(mlbGames.map((game) => normalizeMlbGame(game))))
+      .filter((match): match is NonNullable<typeof match> => Boolean(match))
+    : [];
   const normalized = [...parlayNormalized, ...liveEventNormalized, ...mlbNormalized];
 
   const changes = await upsertLiveMatches(normalized);
@@ -756,6 +763,7 @@ export const refreshLiveMlb = async () => {
   ).length;
 
   return {
+    sport,
     parlayFetched: matches.length,
     parlayLiveFetched: liveEvents.length,
     mlbFetched: mlbGames.length,
@@ -765,10 +773,28 @@ export const refreshLiveMlb = async () => {
   };
 };
 
-export const getLiveMlbStates = async () => {
+export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "WORLDCUP"]) => {
+  const results = [];
+  for (const sport of sports) {
+    results.push(await refreshLiveSport(sport));
+  }
+  return {
+    sports: results,
+    parlayFetched: results.reduce((sum, result) => sum + result.parlayFetched, 0),
+    parlayLiveFetched: results.reduce((sum, result) => sum + result.parlayLiveFetched, 0),
+    mlbFetched: results.reduce((sum, result) => sum + result.mlbFetched, 0),
+    imported: results.reduce((sum, result) => sum + result.imported, 0),
+    recent: results.reduce((sum, result) => sum + result.recent, 0),
+    notifications: results.reduce((sum, result) => sum + result.notifications, 0)
+  };
+};
+
+export const refreshLiveMlb = async () => refreshLiveSports(["MLB"]);
+
+export const getLiveStates = async (sport: SportKey) => {
   const result = await query<{
     matchId: string;
-    sport: LiveSport;
+    sport: SportKey;
     eventKey: string | null;
     startsAt: Date | null;
     awayTeam: string;
@@ -807,10 +833,13 @@ export const getLiveMlbStates = async () => {
               fetched_at DESC
           ) AS row_rank
         FROM live_game_state
-        WHERE sport = 'MLB'
-          AND provider = 'mlb-stats-api'
+        WHERE sport = $1
+          AND ($1 <> 'MLB' OR provider = 'mlb-stats-api')
           AND in_play = true
-          AND last_event_at > now() - INTERVAL '20 minutes'
+          AND (
+            last_event_at > now() - INTERVAL '20 minutes'
+            OR fetched_at > now() - INTERVAL '20 minutes'
+          )
       )
       SELECT
         match_id AS "matchId",
@@ -842,6 +871,8 @@ export const getLiveMlbStates = async () => {
       ORDER BY COALESCE(starts_at, fetched_at) ASC, away_team ASC
       LIMIT 40
     `
+    ,
+    [sport]
   );
 
   return result.rows.map((row) => ({
@@ -851,3 +882,5 @@ export const getLiveMlbStates = async () => {
     fetchedAt: row.fetchedAt.toISOString()
   })) satisfies LiveGameState[];
 };
+
+export const getLiveMlbStates = async () => getLiveStates("MLB");

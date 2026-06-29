@@ -8,6 +8,7 @@ type AuthMode = "login" | "register";
 type AppPage = "lines" | "scoreboard" | "leaderboard" | "open-bets" | "history" | "rules" | "install" | "account";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
+const MAX_CHECKED_LEGS = 8;
 const sportsMenu: ScoreboardSport[] = ["MLB", "NFL", "NBA", "NHL", "NCAAMB", "NCAAF", "EPL", "WORLDCUP"];
 
 type InstallPromptEvent = Event & {
@@ -129,7 +130,7 @@ const combinations = (n: number, k: number) => {
 };
 
 const roundRobinWays = (legs: number, maxLegs = legs) => {
-  if (legs < 2 || legs > 8 || maxLegs < 2 || maxLegs > legs) return 0;
+  if (legs < 2 || legs > MAX_CHECKED_LEGS || maxLegs < 2 || maxLegs > legs) return 0;
   let total = 0;
   for (let size = 2; size <= maxLegs; size += 1) {
     total += combinations(legs, size);
@@ -551,18 +552,19 @@ function App() {
   const [redditNotice, setRedditNotice] = useState("");
 
   const refresh = async (authToken = token) => {
-    const [lineResult, boardResult, aiResult, liveResult] = await Promise.all([
+    const [lineResult, boardResult, aiResult, liveMlbResult, liveWorldCupResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
       api<{ leaderboard: LeaderboardRow[] }>("/leaderboard"),
       api<{ picks: any[] }>("/ai-picks"),
-      api<{ games: LiveGameState[] }>("/live/mlb")
+      api<{ games: LiveGameState[] }>("/live/mlb"),
+      api<{ games: LiveGameState[] }>("/live/worldcup")
     ]);
     setLines(lineResult.lines);
     setMarkets(lineResult.markets ?? []);
     setGames(lineResult.games ?? []);
     setLeaderboard(boardResult.leaderboard);
     setAiPicks(aiResult.picks);
-    setLiveGames(liveResult.games);
+    setLiveGames([...liveMlbResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
       const [me, openBetResult, pushPreferenceResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
@@ -799,12 +801,12 @@ function App() {
           for (const id of conflictIds) {
             next.delete(id);
           }
-          if (nextSlip.length < 5) {
+          if (nextSlip.length < MAX_CHECKED_LEGS) {
             next.add(line.id);
           }
           return next;
         });
-      } else if (current.length < 5) {
+      } else if (current.length < MAX_CHECKED_LEGS) {
         setIncludedLegIds((included) => new Set(included).add(line.id));
       }
       if (singleStakeAll.trim()) {
@@ -858,6 +860,7 @@ function App() {
     const maxLegs = index + 2;
     return { maxLegs, ways: roundRobinWays(includedSlip.length, maxLegs) };
   });
+  const scoreboardGames = liveGames.filter((game) => game.sport === scoreboardSport);
 
   useEffect(() => {
     if (roundRobinMaxLegs > includedSlip.length) {
@@ -941,8 +944,8 @@ function App() {
           setNotice("One or more selected games have already started. Remove them from the bet slip before placing this wager.");
           return;
         }
-        if (includedSlip.length > 8) {
-          setNotice(`${kind === "parlay" ? "Parlay" : "Round robin"} wagers are limited to 8 checked selections.`);
+        if (includedSlip.length > MAX_CHECKED_LEGS) {
+          setNotice(`${kind === "parlay" ? "Parlay" : "Round robin"} wagers are limited to ${MAX_CHECKED_LEGS} checked selections.`);
           return;
         }
         if (parlayStakeCents <= 0) {
@@ -992,8 +995,8 @@ function App() {
         next.delete(legId);
         return next;
       }
-      if (next.size >= 8) {
-        setNotice("Parlay and round robin wagers are limited to 8 checked selections.");
+      if (next.size >= MAX_CHECKED_LEGS) {
+        setNotice(`Parlay and round robin wagers are limited to ${MAX_CHECKED_LEGS} checked selections.`);
         return current;
       }
       next.add(legId);
@@ -1392,7 +1395,7 @@ function App() {
                 </div>
                 {kind !== "straight" && (
                   <div className="combined-stake-box">
-                    <span>{includedSlip.length} checked / 8 max</span>
+                    <span>{includedSlip.length} checked / {MAX_CHECKED_LEGS} max</span>
                     {kind === "round_robin" && includedSlip.length >= 2 && (
                       <label className="stake-field">
                         Round robin
@@ -1452,9 +1455,9 @@ function App() {
               <Radio size={20} />
               <h2>{scoreboardSport} live box scores</h2>
             </div>
-            {scoreboardSport === "MLB" ? (
+            {scoreboardSport === "MLB" || scoreboardSport === "WORLDCUP" ? (
               <div className="live-list scoreboard-grid">
-                {liveGames.length === 0 ? <p className="muted">No live MLB snapshots yet.</p> : liveGames.map((game) => (
+                {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => (
                   <article className="live-game" key={game.matchId}>
                     <div className="live-score">
                       <span>{game.awayTeam}</span>
@@ -1464,13 +1467,13 @@ function App() {
                       <span>{game.homeTeam}</span>
                       <strong>{game.homeScore ?? "-"}</strong>
                     </div>
-                    <BaseDiamond game={game} />
+                    {game.sport === "MLB" && <BaseDiamond game={game} />}
                     <div className="live-meta">
                       <span>{[game.period ?? game.gameStatus ?? "Live", liveCount(game), liveOuts(game.outs)].filter(Boolean).join(" • ")}</span>
                       <div className="live-details">
-                        {pitcherDetail(game) && <small>{pitcherDetail(game)}</small>}
-                        {batterDetail(game) && <small>{batterDetail(game)}</small>}
-                        {(game.lastPlay ?? game.description) && <small className="last-play">Last play: {game.lastPlay ?? game.description}</small>}
+                        {game.sport === "MLB" && pitcherDetail(game) && <small>{pitcherDetail(game)}</small>}
+                        {game.sport === "MLB" && batterDetail(game) && <small>{batterDetail(game)}</small>}
+                        {(game.lastPlay ?? game.description) && <small className="last-play">{game.sport === "MLB" ? "Last play: " : ""}{game.lastPlay ?? game.description}</small>}
                       </div>
                     </div>
                   </article>

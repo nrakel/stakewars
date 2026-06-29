@@ -96,7 +96,7 @@ export type GameCard = {
 
 export type LiveGameState = {
   matchId: string;
-  sport: "MLB";
+  sport: SportKey;
   eventKey: string | null;
   startsAt: string | null;
   awayTeam: string;
