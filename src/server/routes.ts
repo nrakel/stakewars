@@ -94,6 +94,15 @@ class LineMoveError extends Error {
   }
 }
 
+const wagerMarketLabel = (marketKey: MarketKey) => {
+  if (marketKey === "h2h") return "moneyline";
+  if (marketKey === "totals") return "total";
+  return "spread/run line";
+};
+
+const unavailableLineMessage = (line: WagerLineRow) =>
+  `${line.away_team} @ ${line.home_team} ${line.favorite_team} ${wagerMarketLabel(line.market_key)} is no longer available`;
+
 const historyQuerySchema = z.object({
   period: z.enum(["day", "week", "all"]).default("week"),
   includeAi: z.enum(["true", "false"]).default("false")
@@ -1083,7 +1092,7 @@ export const registerRoutes = (router: Router) => {
             throw new Error("Selected outcome is not available");
           }
           if (requestedLine.starts_at.getTime() <= Date.now()) {
-            throw new Error("One or more selected games have already started");
+            throw new Error(`${requestedLine.away_team} @ ${requestedLine.home_team} has already started`);
           }
 
           let currentLine = requestedLine;
@@ -1114,7 +1123,7 @@ export const registerRoutes = (router: Router) => {
               ]
             );
             if (replacementResult.rowCount !== 1) {
-              throw new Error("One or more selected lines are unavailable");
+              throw new Error(unavailableLineMessage(requestedLine));
             }
             currentLine = replacementResult.rows[0];
           }
@@ -1227,7 +1236,7 @@ export const registerRoutes = (router: Router) => {
         res.status(400).json({ error: "Insufficient bankroll" });
         return;
       }
-      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("round robin")) {
+      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("no longer available") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("round robin")) {
         res.status(400).json({ error: (error as Error).message });
         return;
       }

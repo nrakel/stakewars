@@ -1,4 +1,4 @@
-const CACHE_VERSION = "stakewars-v1";
+const CACHE_VERSION = "stakewars-v2";
 const APP_SHELL = [
   "/",
   "/offline.html",
@@ -49,19 +49,15 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) {
-        return cached;
-      }
-
-      return fetch(request).then((response) => {
+    fetch(request)
+      .then((response) => {
         if (response.ok) {
           const copy = response.clone();
           caches.open(CACHE_VERSION).then((cache) => cache.put(request, copy));
         }
         return response;
-      });
-    })
+      })
+      .catch(async () => (await caches.match(request)) ?? Response.error())
   );
 });
 
