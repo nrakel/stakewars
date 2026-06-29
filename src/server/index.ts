@@ -30,6 +30,72 @@ const addDays = (date: string, days: number) => {
   return copy.toISOString().slice(0, 10);
 };
 
+const legalPage = ({
+  title,
+  sections
+}: {
+  title: string;
+  sections: Array<{ heading: string; body: string }>;
+}) => `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${title} | StakeWars</title>
+    <style>
+      body { margin: 0; background: #f4f6f2; color: #14201c; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; }
+      main { max-width: 860px; margin: 0 auto; padding: 40px 18px; }
+      article { background: #fff; border: 1px solid #dfe5df; border-radius: 8px; padding: 24px; }
+      h1 { margin: 0 0 22px; font-size: 2rem; }
+      section { margin-top: 18px; }
+      h2 { margin: 0 0 4px; font-size: 1rem; color: #111827; }
+      p { margin: 0; color: #43524c; }
+      nav { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 24px; }
+      a { color: #ff6900; font-weight: 800; text-underline-offset: 3px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <article>
+        <h1>${title}</h1>
+        ${sections.map((section) => `<section><h2>${section.heading}</h2><p>${section.body}</p></section>`).join("")}
+        <nav>
+          <a href="/">Return to StakeWars</a>
+          <a href="/terms">Terms and Conditions</a>
+          <a href="/privacy">Privacy Policy</a>
+        </nav>
+      </article>
+    </main>
+  </body>
+</html>`;
+
+const privacyHtml = legalPage({
+  title: "Privacy Policy",
+  sections: [
+    { heading: "Privacy Policy", body: "Effective June 29, 2026. StakeWars is a free sports prediction contest operated at stakewars.phisystems.ai." },
+    { heading: "Information We Collect", body: "We collect account information players provide, including username, password hash, full name, email, display name, payout preference, payout handle, and the last four digits of a phone number when entered for reward validation." },
+    { heading: "Contest Data", body: "We store virtual wagers, bankroll balances, leaderboard results, settled wager history, notification preferences, push subscription records, and account activity needed to run the contest." },
+    { heading: "Reddit Devvit Integration", body: "The StakeWars Reddit app fetches admin-approved post drafts from StakeWars and reports whether the Reddit post succeeded or failed. It does not send Reddit user data to StakeWars, scrape Reddit, vote, message users, or collect Reddit account data." },
+    { heading: "How We Use Information", body: "We use information to authenticate users, operate the contest, display leaderboards and wager history, send requested push notifications, validate rewards, prevent abuse, and publish admin-approved public updates." },
+    { heading: "Sharing", body: "We do not sell personal information. We may share limited information with service providers necessary to host the site, send push notifications, maintain security, or process rewards." },
+    { heading: "Security", body: "Passwords are stored as hashes. Administrative integrations use server-side secrets. No internet service can be guaranteed perfectly secure, but we use reasonable safeguards for the data we store." },
+    { heading: "Contact", body: "Questions about this policy can be sent to the StakeWars operator through the contact method listed in the Reddit app details or the site administrator account." }
+  ]
+});
+
+const termsHtml = legalPage({
+  title: "Terms and Conditions",
+  sections: [
+    { heading: "Terms and Conditions", body: "Effective June 29, 2026. By using StakeWars, you agree to these terms and the contest rules shown on the site." },
+    { heading: "Free Contest", body: "StakeWars is a free virtual-bankroll contest. No purchase, deposit, or real-money wager is required or accepted. Virtual wagers have no cash value." },
+    { heading: "Eligibility and Accounts", body: "Players must provide accurate account information and may not create duplicate accounts, manipulate results, abuse promotions, or interfere with site operations." },
+    { heading: "Rules and Rewards", body: "Weekly rewards, if offered, require players to satisfy the posted rules, including finishing in an eligible leaderboard position and beating the StakeWars AI Bot. Withdrawal eligibility requires a reward balance of at least $20.00 and complete payout details." },
+    { heading: "Line and Scoring Data", body: "StakeWars relies on third-party sports, odds, and scoring data. Site operators may correct obvious data errors, void affected wagers, mark games No Action, or adjust settlement when required for fairness." },
+    { heading: "Reddit Posts", body: "The StakeWars Reddit app may publish admin-approved contest updates, AI picks, and links to StakeWars. Reddit posting is moderator-controlled and does not authorize automated scraping, voting, direct messaging, or collection of Reddit user data." },
+    { heading: "Changes", body: "StakeWars may update these terms, contest rules, features, or reward details. Continued use of the site after updates means you accept the revised terms." }
+  ]
+});
+
 const app = express();
 const api = express.Router();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -45,6 +111,8 @@ app.use("/api/auth", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHe
 
 registerRoutes(api);
 app.use("/api", api);
+app.get("/privacy", (_req, res) => res.type("html").send(privacyHtml));
+app.get("/terms", (_req, res) => res.type("html").send(termsHtml));
 
 cron.schedule("*/10 8-20 * * *", async () => {
   try {

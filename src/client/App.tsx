@@ -375,6 +375,98 @@ function RulesContent() {
   );
 }
 
+function LegalContent({ kind }: { kind: "privacy" | "terms" }) {
+  if (kind === "privacy") {
+    return (
+      <div className="rules-content legal-content">
+        <section>
+          <h2>Privacy Policy</h2>
+          <p>Effective June 29, 2026. StakeWars is a free sports prediction contest operated at stakewars.phisystems.ai.</p>
+        </section>
+        <section>
+          <h2>Information We Collect</h2>
+          <p>We collect account information players provide, including username, password hash, full name, email, display name, payout preference, payout handle, and the last four digits of a phone number when entered for reward validation.</p>
+        </section>
+        <section>
+          <h2>Contest Data</h2>
+          <p>We store virtual wagers, bankroll balances, leaderboard results, settled wager history, notification preferences, push subscription records, and account activity needed to run the contest.</p>
+        </section>
+        <section>
+          <h2>Reddit Devvit Integration</h2>
+          <p>The StakeWars Reddit app fetches admin-approved post drafts from StakeWars and reports whether the Reddit post succeeded or failed. It does not send Reddit user data to StakeWars, scrape Reddit, vote, message users, or collect Reddit account data.</p>
+        </section>
+        <section>
+          <h2>How We Use Information</h2>
+          <p>We use information to authenticate users, operate the contest, display leaderboards and wager history, send requested push notifications, validate rewards, prevent abuse, and publish admin-approved public updates.</p>
+        </section>
+        <section>
+          <h2>Sharing</h2>
+          <p>We do not sell personal information. We may share limited information with service providers necessary to host the site, send push notifications, maintain security, or process rewards.</p>
+        </section>
+        <section>
+          <h2>Security</h2>
+          <p>Passwords are stored as hashes. Administrative integrations use server-side secrets. No internet service can be guaranteed perfectly secure, but we use reasonable safeguards for the data we store.</p>
+        </section>
+        <section>
+          <h2>Contact</h2>
+          <p>Questions about this policy can be sent to the StakeWars operator through the contact method listed in the Reddit app details or the site administrator account.</p>
+        </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rules-content legal-content">
+      <section>
+        <h2>Terms and Conditions</h2>
+        <p>Effective June 29, 2026. By using StakeWars, you agree to these terms and the contest rules shown on the site.</p>
+      </section>
+      <section>
+        <h2>Free Contest</h2>
+        <p>StakeWars is a free virtual-bankroll contest. No purchase, deposit, or real-money wager is required or accepted. Virtual wagers have no cash value.</p>
+      </section>
+      <section>
+        <h2>Eligibility and Accounts</h2>
+        <p>Players must provide accurate account information and may not create duplicate accounts, manipulate results, abuse promotions, or interfere with site operations.</p>
+      </section>
+      <section>
+        <h2>Rules and Rewards</h2>
+        <p>Weekly rewards, if offered, require players to satisfy the posted rules, including finishing in an eligible leaderboard position and beating the StakeWars AI Bot. Withdrawal eligibility requires a reward balance of at least $20.00 and complete payout details.</p>
+      </section>
+      <section>
+        <h2>Line and Scoring Data</h2>
+        <p>StakeWars relies on third-party sports, odds, and scoring data. Site operators may correct obvious data errors, void affected wagers, mark games No Action, or adjust settlement when required for fairness.</p>
+      </section>
+      <section>
+        <h2>Reddit Posts</h2>
+        <p>The StakeWars Reddit app may publish admin-approved contest updates, AI picks, and links to StakeWars. Reddit posting is moderator-controlled and does not authorize automated scraping, voting, direct messaging, or collection of Reddit user data.</p>
+      </section>
+      <section>
+        <h2>Changes</h2>
+        <p>StakeWars may update these terms, contest rules, features, or reward details. Continued use of the site after updates means you accept the revised terms.</p>
+      </section>
+    </div>
+  );
+}
+
+function LegalPage({ kind }: { kind: "privacy" | "terms" }) {
+  return (
+    <main className="legal-shell">
+      <section className="panel legal-panel">
+        <div className="panel-title">
+          <FileText size={20} />
+          <h1>{kind === "privacy" ? "Privacy Policy" : "Terms and Conditions"}</h1>
+        </div>
+        <LegalContent kind={kind} />
+        <div className="legal-actions">
+          <a href="/">Return to StakeWars</a>
+          <a href={kind === "privacy" ? "/terms" : "/privacy"}>{kind === "privacy" ? "Terms and Conditions" : "Privacy Policy"}</a>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function AuthPanel({
   onAuth,
   canInstall,
@@ -467,6 +559,10 @@ function AuthPanel({
         <button className="secondary-action" type="button" onClick={() => canInstall ? onInstall() : setInstallOpen(true)}>
           <Download size={17} /> Install App
         </button>
+        <div className="legal-links">
+          <a href="/terms">Terms and Conditions</a>
+          <a href="/privacy">Privacy Policy</a>
+        </div>
       </form>
       {rulesOpen && (
         <div className="modal-backdrop" role="presentation" onClick={() => setRulesOpen(false)}>
@@ -1175,6 +1271,15 @@ function App() {
       description: "Final result for games tied to one of your open wagers."
     }
   ];
+  const legalPath = window.location.pathname === "/privacy"
+    ? "privacy"
+    : window.location.pathname === "/terms"
+      ? "terms"
+      : null;
+
+  if (legalPath) {
+    return <LegalPage kind={legalPath} />;
+  }
 
   if (!user) {
     return <AuthPanel onAuth={(nextToken, nextUser) => {
