@@ -16,6 +16,10 @@ type DevvitContext = {
   settings: {
     get<T>(name: string): Promise<T | undefined>;
   };
+  redis: {
+    get(key: string): Promise<string | undefined>;
+    set(key: string, value: string): Promise<unknown>;
+  };
   reddit: {
     submitPost(input: {
       subredditName: string;
@@ -32,6 +36,9 @@ type DevvitContext = {
     runJob(input: { name: string; cron: string }): Promise<unknown>;
   };
 };
+
+const stakeWarsOriginKey = "stakewars:origin";
+const stakeWarsSharedSecretKey = "stakewars:shared-secret";
 
 Devvit.configure({
   http: {
@@ -57,6 +64,40 @@ Devvit.addSettings([
   }
 ]);
 
+const configureStakeWarsForm = Devvit.createForm({
+  title: "Configure StakeWars",
+  description: "Stores the StakeWars API origin and shared secret for this Devvit app.",
+  acceptLabel: "Save",
+  fields: [
+    {
+      type: "string",
+      name: "origin",
+      label: "StakeWars origin",
+      required: true,
+      defaultValue: "https://stakewars.phisystems.ai"
+    },
+    {
+      type: "string",
+      name: "sharedSecret",
+      label: "StakeWars shared secret",
+      helpText: "Use REDDIT_DEVVIT_SHARED_SECRET from /etc/stakewars/stakewars.env.",
+      required: true,
+      isSecret: true
+    }
+  ]
+}, async (event, context) => {
+  const origin = String(event.values.origin || "").trim().replace(/\/+$/, "");
+  const sharedSecret = String(event.values.sharedSecret || "").trim();
+  if (!origin || !sharedSecret) {
+    context.ui.showToast("StakeWars origin and shared secret are required.");
+    return;
+  }
+
+  await context.redis.set(stakeWarsOriginKey, origin);
+  await context.redis.set(stakeWarsSharedSecretKey, sharedSecret);
+  context.ui.showToast("StakeWars Reddit settings saved.");
+});
+
 const normalizeOrigin = (origin: string) => origin.replace(/\/+$/, "");
 
 const normalizeRedditUrl = (url?: string) => {
@@ -71,11 +112,14 @@ const normalizeRedditUrl = (url?: string) => {
 
 const stakeWarsFetch = async <T>(context: DevvitContext, path: string, body?: unknown): Promise<T> => {
   const origin = normalizeOrigin(
-    (await context.settings.get<string>("stakewars-origin")) || "https://stakewars.phisystems.ai"
+    (await context.redis.get(stakeWarsOriginKey))
+    || (await context.settings.get<string>("stakewars-origin"))
+    || "https://stakewars.phisystems.ai"
   );
-  const secret = await context.settings.get<string>("stakewars-shared-secret");
+  const secret = (await context.redis.get(stakeWarsSharedSecretKey))
+    || (await context.settings.get<string>("stakewars-shared-secret"));
   if (!secret) {
-    throw new Error("Missing StakeWars shared secret app setting");
+    throw new Error("Missing StakeWars shared secret. Use the Configure StakeWars menu item first.");
   }
 
   const response = await fetch(`${origin}${path}`, {
@@ -141,8 +185,18 @@ Devvit.addSchedulerJob({
 });
 
 Devvit.addMenuItem({
+  label: "Configure StakeWars",
+  location: "subreddit",
+  forUserType: "moderator",
+  onPress: async (_event, context) => {
+    context.ui.showForm(configureStakeWarsForm);
+  }
+});
+
+Devvit.addMenuItem({
   label: "Post next StakeWars draft",
   location: "subreddit",
+  forUserType: "moderator",
   onPress: async (_event, context) => {
     const message = await processQueue(context as DevvitContext);
     context.ui.showToast(message);
@@ -152,6 +206,7 @@ Devvit.addMenuItem({
 Devvit.addMenuItem({
   label: "Start StakeWars queue polling",
   location: "subreddit",
+  forUserType: "moderator",
   onPress: async (_event, context) => {
     await (context as DevvitContext).scheduler.runJob({
       name: "pollStakeWarsQueue",

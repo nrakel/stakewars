@@ -19,6 +19,13 @@
   "menu": {
     "items": [
       {
+        "label": "Configure StakeWars",
+        "description": "Save the StakeWars API origin and shared secret.",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "configureStakeWars"
+      },
+      {
         "label": "Post next StakeWars draft",
         "description": "Publish the next approved StakeWars Reddit queue item.",
         "forUserType": "moderator",

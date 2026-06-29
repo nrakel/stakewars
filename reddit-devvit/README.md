@@ -6,7 +6,19 @@ StakeWars owns the preview, approval, and queue. Devvit owns the actual Reddit A
 
 ## Settings
 
-Configure these app settings after installing the app:
+Configure StakeWars from Reddit after installing the app:
+
+1. Open the installed app menu in the subreddit.
+2. Select `Configure StakeWars`.
+3. Enter:
+   - `StakeWars origin`: `https://stakewars.phisystems.ai`
+   - `StakeWars shared secret`: the same value as `REDDIT_DEVVIT_SHARED_SECRET` in `/etc/stakewars/stakewars.env`
+
+These values are stored in Devvit Redis for the app. The app also declares these
+as app settings, but the Reddit Developer Portal may not expose the settings UI
+for this app.
+
+Fallback app settings, if the portal exposes them later:
 
 - `stakewars-origin`: `https://stakewars.phisystems.ai`
 - `stakewars-shared-secret`: the same value as `REDDIT_DEVVIT_SHARED_SECRET` in `/etc/stakewars/stakewars.env`
@@ -17,8 +29,7 @@ The app has been uploaded to Reddit as `stakewars-picks`.
 - Playtest subreddit: `https://www.reddit.com/r/stakewars_picks_dev`
 
 The Devvit CLI currently uploads the app successfully, but `devvit settings set`
-returns an unimplemented Reddit settings RPC error in this environment. If that
-continues, set the two app settings in the Developer Portal instead.
+returns an unimplemented Reddit settings RPC error in this environment.
 
 Useful CLI commands from this directory:
 
