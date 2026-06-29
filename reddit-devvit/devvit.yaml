@@ -1,0 +1,61 @@
+{
+  "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
+  "name": "stakewars-picks",
+  "server": {
+    "dir": "dist/server",
+    "entry": "main.js"
+  },
+  "permissions": {
+    "http": {
+      "enable": true,
+      "domains": ["stakewars.phisystems.ai"]
+    },
+    "reddit": {
+      "enable": true,
+      "scope": "user"
+    },
+    "redis": true
+  },
+  "menu": {
+    "items": [
+      {
+        "label": "Post next StakeWars draft",
+        "description": "Publish the next approved StakeWars Reddit queue item.",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "postNextStakeWarsDraft"
+      },
+      {
+        "label": "Start StakeWars queue polling",
+        "description": "Check the StakeWars Reddit queue every five minutes.",
+        "forUserType": "moderator",
+        "location": "subreddit",
+        "endpoint": "startStakeWarsQueuePolling"
+      }
+    ]
+  },
+  "scheduler": {
+    "tasks": {
+      "pollStakeWarsQueue": {
+        "endpoint": "pollStakeWarsQueue"
+      }
+    }
+  },
+  "settings": {
+    "global": {
+      "stakewars-origin": {
+        "type": "string",
+        "label": "StakeWars origin",
+        "defaultValue": "https://stakewars.phisystems.ai"
+      },
+      "stakewars-shared-secret": {
+        "type": "string",
+        "label": "StakeWars shared secret",
+        "isSecret": true
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build"
+  }
+}

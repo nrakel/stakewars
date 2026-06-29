@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@devvit/public-api": "0.13.5"
   },
   "devDependencies": {
+    "devvit": "^0.13.5",
     "typescript": "^5.9.3"
   }
 }
