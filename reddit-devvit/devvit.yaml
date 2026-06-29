@@ -6,10 +6,7 @@
     "entry": "main.js"
   },
   "permissions": {
-    "http": {
-      "enable": true,
-      "domains": ["stakewars.phisystems.ai"]
-    },
+    "http": true,
     "reddit": {
       "enable": true,
       "scope": "user"

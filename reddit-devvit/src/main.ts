@@ -41,9 +41,7 @@ const stakeWarsOriginKey = "stakewars:origin";
 const stakeWarsSharedSecretKey = "stakewars:shared-secret";
 
 Devvit.configure({
-  http: {
-    domains: ["stakewars.phisystems.ai"]
-  },
+  http: true,
   redditAPI: true
 });
 
@@ -197,8 +195,13 @@ Devvit.addMenuItem({
   location: "subreddit",
   forUserType: "moderator",
   onPress: async (_event, context) => {
-    const message = await processQueue(context as DevvitContext);
-    context.ui.showToast(message);
+    try {
+      const message = await processQueue(context as DevvitContext);
+      context.ui.showToast(message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      context.ui.showToast(`StakeWars post failed: ${message.slice(0, 160)}`);
+    }
   }
 });
 
@@ -207,11 +210,16 @@ Devvit.addMenuItem({
   location: "subreddit",
   forUserType: "moderator",
   onPress: async (_event, context) => {
-    await (context as DevvitContext).scheduler.runJob({
-      name: "pollStakeWarsQueue",
-      cron: "*/5 * * * *"
-    });
-    context.ui.showToast("StakeWars queue polling scheduled.");
+    try {
+      await (context as DevvitContext).scheduler.runJob({
+        name: "pollStakeWarsQueue",
+        cron: "*/5 * * * *"
+      });
+      context.ui.showToast("StakeWars queue polling scheduled.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      context.ui.showToast(`StakeWars schedule failed: ${message.slice(0, 160)}`);
+    }
   }
 });
 
