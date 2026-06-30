@@ -68,6 +68,8 @@ self.addEventListener("push", (event) => {
     body: data.body || "You have a new StakeWars update.",
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
+    tag: data.tag,
+    renotify: Boolean(data.renotify),
     data: {
       url: data.url || "/"
     }

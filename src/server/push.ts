@@ -22,6 +22,8 @@ type PushPayload = {
   title: string;
   body: string;
   url?: string;
+  tag?: string;
+  renotify?: boolean;
 };
 
 export type PushPreferences = {
@@ -38,7 +40,9 @@ const sendToSubscriptions = async (rows: Array<{ endpoint: string; p256dh: strin
   const body = JSON.stringify({
     title: payload.title,
     body: payload.body,
-    url: payload.url ?? "/"
+    url: payload.url ?? "/",
+    tag: payload.tag,
+    renotify: payload.renotify
   });
 
   for (const row of rows) {

@@ -179,7 +179,9 @@ const sendGroupedNotification = async ({
   body,
   game,
   preference,
-  metadata
+  metadata,
+  tag,
+  renotify = true
 }: {
   key: string;
   title: string;
@@ -187,6 +189,8 @@ const sendGroupedNotification = async ({
   game: LiveState;
   preference: LiveNotificationPreference;
   metadata: Record<string, unknown>;
+  tag?: string;
+  renotify?: boolean;
 }) => {
   const targets = await usersForGame(game, preference);
   if (targets.length === 0) {
@@ -210,7 +214,7 @@ const sendGroupedNotification = async ({
     return { sent: false, reason: "already sent", key };
   }
 
-  const delivery = await sendPushToUsers(targets.map((target) => target.userId), { title, body, url: notificationUrl });
+  const delivery = await sendPushToUsers(targets.map((target) => target.userId), { title, body, url: notificationUrl, tag, renotify });
   await updateNotificationLog(logId, delivery);
   return { delivered: true, key, ...delivery };
 };
@@ -325,7 +329,9 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
         body: [scoreText(game), game.description].filter(Boolean).join("\n"),
         game,
         preference: "score_change_enabled",
-        metadata: { type: "score_change", awayScore: game.awayScore, homeScore: game.homeScore }
+        metadata: { type: "score_change", awayScore: game.awayScore, homeScore: game.homeScore },
+        tag: `score-update:${notificationGameKey(game)}`,
+        renotify: false
       }));
     }
 
