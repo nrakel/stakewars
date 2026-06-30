@@ -814,6 +814,7 @@ export const registerRoutes = (router: Router) => {
         selectedTeam: string;
         spread: string;
         oddsAmerican: number;
+        legStatus: "pending" | "won" | "lost" | "push" | "void";
         marketKey: "spreads" | "h2h";
         sport: SportKey;
         startsAt: Date;
@@ -831,6 +832,7 @@ export const registerRoutes = (router: Router) => {
             wl.selected_team AS "selectedTeam",
             wl.spread,
             wl.odds_american AS "oddsAmerican",
+            wl.status AS "legStatus",
             gl.market_key AS "marketKey",
             gl.sport,
             gl.starts_at AS "startsAt",
@@ -856,6 +858,7 @@ export const registerRoutes = (router: Router) => {
           selectedTeam: string;
           spread: string;
           oddsAmerican: number;
+          status: "pending" | "won" | "lost" | "push" | "void";
           marketKey: "spreads" | "h2h";
           sport: SportKey;
           startsAt: string;
@@ -878,6 +881,7 @@ export const registerRoutes = (router: Router) => {
           selectedTeam: row.selectedTeam,
           spread: row.spread,
           oddsAmerican: row.oddsAmerican,
+          status: row.legStatus,
           marketKey: row.marketKey,
           sport: row.sport,
           startsAt: row.startsAt.toISOString(),

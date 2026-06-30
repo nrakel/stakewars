@@ -135,6 +135,7 @@ export type OpenBetLeg = {
   selectedTeam: string;
   spread: string;
   oddsAmerican: number;
+  status: "pending" | "won" | "lost" | "push" | "void";
   marketKey: MarketKey;
   sport: SportKey;
   startsAt: string;

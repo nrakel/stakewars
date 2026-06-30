@@ -1706,7 +1706,7 @@ function App() {
                       : `${Number(leg.spread) > 0 ? `+${leg.spread}` : leg.spread} ${americanOdds(leg.oddsAmerican)}`;
                     return (
                       <div className="open-bet-leg" key={leg.id}>
-                        <span>{leg.selectedTeam} {marketText}</span>
+                        <span><LegStatusIcon status={leg.status} /> {leg.selectedTeam} {marketText}</span>
                         <small>{leg.awayTeam} @ {leg.homeTeam}</small>
                       </div>
                     );

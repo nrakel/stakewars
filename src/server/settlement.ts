@@ -149,6 +149,7 @@ const normalizeTeamName = (team: string) => {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/\boakland athletics\b/g, "athletics")
     .replace(/\bunited states\b/g, "usa")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();

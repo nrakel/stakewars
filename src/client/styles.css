@@ -1555,6 +1555,12 @@ textarea {
   padding-top: 8px;
 }
 
+.open-bet-leg span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .leaderboard {
   list-style: none;
 }
