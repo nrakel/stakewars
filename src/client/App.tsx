@@ -800,6 +800,45 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let refreshing = false;
+    const refreshVisibleData = async () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine || refreshing) {
+        return;
+      }
+      refreshing = true;
+      try {
+        await refresh();
+        await refreshHistory();
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 401) {
+          localStorage.removeItem("stakewars_token");
+          setToken("");
+        }
+      } finally {
+        refreshing = false;
+      }
+    };
+    const timer = window.setInterval(refreshVisibleData, 30_000);
+    const onFocus = () => {
+      void refreshVisibleData();
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshVisibleData();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("online", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("online", onFocus);
+    };
+  }, [token, historyPeriod, historyIncludeAi]);
+
+  useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     }
