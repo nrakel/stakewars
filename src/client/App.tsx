@@ -399,8 +399,12 @@ function RulesContent() {
         <p>Players can make straight wagers, parlays, and round robins. Parlays and round robins are limited to 8 checked games.</p>
       </section>
       <section>
-        <h2>No Action</h2>
+        <h2>Baseball Settlement</h2>
         <p>Postponed, suspended, cancelled, or shortened MLB games are No Action. MLB games must complete at least 9 innings to settle. A No Action single returns the wager to the player's bankroll. In parlays, the affected leg is dropped; if only one active leg remains, the wager settles as a straight bet.</p>
+      </section>
+      <section>
+        <h2>Soccer Settlement</h2>
+        <p>Soccer moneylines are settled as 3-way markets: Team A, Draw, or Team B. The result is based on the official score at the end of regulation plus stoppage time, not extra time or penalty kicks. If the match is tied at that point, Draw wins and both team moneyline selections lose, even if one team later advances or wins on penalties.</p>
       </section>
       <section>
         <h2>AI Bot</h2>
