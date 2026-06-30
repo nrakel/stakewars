@@ -69,6 +69,16 @@ type RedditPreview = {
   body: string;
 };
 
+type UserDisplayMapRow = {
+  id: string;
+  username: string;
+  email: string | null;
+  displayName: string | null;
+  fullName: string | null;
+  role: SessionUser["role"];
+  createdAt: string;
+};
+
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
 
 const americanOdds = (odds: number) => `${odds > 0 ? "+" : ""}${odds}`;
@@ -698,6 +708,8 @@ function App() {
   const [redditTitle, setRedditTitle] = useState("");
   const [redditBody, setRedditBody] = useState("");
   const [redditNotice, setRedditNotice] = useState("");
+  const [userDisplayMap, setUserDisplayMap] = useState<UserDisplayMapRow[]>([]);
+  const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
 
   const refresh = async (authToken = token) => {
     const [lineResult, boardResult, aiResult, liveMlbResult, liveWorldCupResult] = await Promise.all([
@@ -761,10 +773,8 @@ function App() {
     document.getElementById("bet-slip")?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const canManageReddit = Boolean(
-    user
-    && (user.role === "admin" || user.username.toLowerCase() === "nathanielrakel@gmail.com")
-  );
+  const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
+  const canManageReddit = Boolean(user && (user.role === "admin" || isNateRakelAccount));
 
   useEffect(() => {
     refresh().catch((error) => {
@@ -793,6 +803,20 @@ function App() {
       })
       .catch(() => setRedditStatus(null));
   }, [token, canManageReddit]);
+
+  useEffect(() => {
+    if (!token || !isNateRakelAccount) {
+      setUserDisplayMap([]);
+      setUserDisplayMapNotice("");
+      return;
+    }
+    api<{ users: UserDisplayMapRow[] }>("/admin/user-display-map", {}, token)
+      .then((result) => {
+        setUserDisplayMap(result.users);
+        setUserDisplayMapNotice("");
+      })
+      .catch((err) => setUserDisplayMapNotice((err as Error).message));
+  }, [token, isNateRakelAccount]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 15_000);
@@ -1322,6 +1346,18 @@ function App() {
     setRedditStatus(status);
     if (!redditSubreddit && status.defaultSubreddits[0]) {
       setRedditSubreddit(status.defaultSubreddits[0]);
+    }
+  };
+
+  const refreshUserDisplayMap = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setUserDisplayMapNotice("");
+    try {
+      const result = await api<{ users: UserDisplayMapRow[] }>("/admin/user-display-map", {}, token);
+      setUserDisplayMap(result.users);
+      setUserDisplayMapNotice("User map refreshed.");
+    } catch (err) {
+      setUserDisplayMapNotice((err as Error).message);
     }
   };
 
@@ -1915,6 +1951,47 @@ function App() {
                   </div>
                 </div>
                 {redditNotice && <p className={redditNotice.includes("Queued") || redditNotice.includes("generated") || redditNotice.includes("Dry run") ? "success" : "error"}>{redditNotice}</p>}
+              </div>
+            )}
+            {isNateRakelAccount && (
+              <div className="notification-card user-map-card">
+                <div>
+                  <strong>User Display Map</strong>
+                  <span>Visible only to Nate Rakel. Use this to match public display names to login usernames.</span>
+                </div>
+                <div className="notification-actions">
+                  <button className="secondary-action" onClick={refreshUserDisplayMap}>Refresh users</button>
+                </div>
+                <div className="user-map-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Display Name</th>
+                        <th>Login</th>
+                        <th>Email</th>
+                        <th>Full Name</th>
+                        <th>Role</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {userDisplayMap.map((mappedUser) => (
+                        <tr key={mappedUser.id}>
+                          <td>{mappedUser.displayName || "-"}</td>
+                          <td>{mappedUser.username}</td>
+                          <td>{mappedUser.email || "-"}</td>
+                          <td>{mappedUser.fullName || "-"}</td>
+                          <td>{mappedUser.role}</td>
+                        </tr>
+                      ))}
+                      {userDisplayMap.length === 0 && (
+                        <tr>
+                          <td colSpan={5}>No users found.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {userDisplayMapNotice && <p className={userDisplayMapNotice.includes("refreshed") ? "success" : "error"}>{userDisplayMapNotice}</p>}
               </div>
             )}
             <div className="account-grid">

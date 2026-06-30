@@ -147,6 +147,10 @@ const isAdminUser = (user: Express.Request["user"]) => Boolean(
   && (user.role === "admin" || config.adminUsernames.includes(user.username.toLowerCase()))
 );
 
+const isNateRakelAccount = (user: Express.Request["user"]) => Boolean(
+  user && user.username.toLowerCase() === "nathanielrakel@gmail.com"
+);
+
 const requireAdmin = (req: Parameters<typeof requireAuth>[0], res: Parameters<typeof requireAuth>[1], next: Parameters<typeof requireAuth>[2]) => {
   requireAuth(req, res, (error?: unknown) => {
     if (error) {
@@ -155,6 +159,24 @@ const requireAdmin = (req: Parameters<typeof requireAuth>[0], res: Parameters<ty
     }
     if (!isAdminUser(req.user)) {
       res.status(403).json({ error: "Admin access required" });
+      return;
+    }
+    next();
+  });
+};
+
+const requireNateRakelAccount = (
+  req: Parameters<typeof requireAuth>[0],
+  res: Parameters<typeof requireAuth>[1],
+  next: Parameters<typeof requireAuth>[2]
+) => {
+  requireAuth(req, res, (error?: unknown) => {
+    if (error) {
+      next(error);
+      return;
+    }
+    if (!isNateRakelAccount(req.user)) {
+      res.status(403).json({ error: "Nate Rakel account required" });
       return;
     }
     next();
@@ -330,6 +352,37 @@ export const registerRoutes = (router: Router) => {
       const input = pushPreferencesSchema.parse(req.body);
       const preferences = await updatePushPreferences(req.user!.id, input);
       res.json({ preferences });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/user-display-map", requireNateRakelAccount, async (_req, res, next) => {
+    try {
+      const result = await query<{
+        id: string;
+        username: string;
+        email: string | null;
+        displayName: string | null;
+        fullName: string | null;
+        role: "player" | "admin" | "system";
+        createdAt: string;
+      }>(
+        `
+          SELECT
+            id,
+            username,
+            email,
+            display_name AS "displayName",
+            full_name AS "fullName",
+            role,
+            created_at AS "createdAt"
+          FROM app_user
+          WHERE role <> 'system'
+          ORDER BY lower(COALESCE(NULLIF(display_name, ''), username)), lower(username)
+        `
+      );
+      res.json({ users: result.rows });
     } catch (error) {
       next(error);
     }
