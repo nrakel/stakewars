@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { query, transaction } from "./db.js";
+import { outcomeForSelection } from "./settlement.js";
 import { sendPushToUsers } from "./push.js";
 import type { SportKey } from "../shared/types.js";
 
@@ -101,7 +102,7 @@ const usersForGame = async (game: LiveState, preference: LiveNotificationPrefere
             )
           )
       )
-      SELECT
+      SELECT DISTINCT
         w.user_id AS "userId",
         array_agg(DISTINCT wl.selected_team ORDER BY wl.selected_team) AS "selectedTeams"
       FROM wager w
@@ -112,6 +113,59 @@ const usersForGame = async (game: LiveState, preference: LiveNotificationPrefere
       WHERE w.status = 'pending'
         AND pnp.${preference} = true
       GROUP BY w.user_id
+    `,
+    [game.sport, game.eventKey, game.awayTeam, game.homeTeam, game.startsAt]
+  );
+
+  return result.rows;
+};
+
+const wagerLegsForFinalGame = async (game: LiveState) => {
+  const result = await query<{
+    userId: string;
+    legId: string;
+    selectedTeam: string;
+    spread: string;
+    oddsAmerican: number;
+    marketKey: "h2h" | "spreads" | "totals";
+    awayTeam: string;
+    homeTeam: string;
+  }>(
+    `
+      WITH matching_lines AS (
+        SELECT gl.id
+        FROM game_line gl
+        WHERE gl.sport = $1
+          AND (
+            ($2::text IS NOT NULL AND COALESCE(split_part(gl.provider_event_id, ':', 1), gl.id::text) = $2::text)
+            OR (
+              gl.away_team = $3
+              AND gl.home_team = $4
+              AND (
+                $5::timestamptz IS NULL
+                OR gl.starts_at BETWEEN $5::timestamptz - INTERVAL '8 hours' AND $5::timestamptz + INTERVAL '8 hours'
+              )
+            )
+          )
+      )
+      SELECT
+        w.user_id AS "userId",
+        wl.id AS "legId",
+        wl.selected_team AS "selectedTeam",
+        wl.spread,
+        wl.odds_american AS "oddsAmerican",
+        gl.market_key AS "marketKey",
+        gl.away_team AS "awayTeam",
+        gl.home_team AS "homeTeam"
+      FROM wager w
+      JOIN wager_leg wl ON wl.wager_id = w.id
+      JOIN matching_lines ml ON ml.id = wl.game_line_id
+      JOIN game_line gl ON gl.id = wl.game_line_id
+      JOIN push_notification_preference pnp ON pnp.user_id = w.user_id
+      JOIN push_subscription ps ON ps.user_id = w.user_id
+      WHERE w.status = 'pending'
+        AND pnp.game_final_enabled = true
+      ORDER BY w.user_id, wl.id
     `,
     [game.sport, game.eventKey, game.awayTeam, game.homeTeam, game.startsAt]
   );
@@ -163,27 +217,47 @@ const sendGroupedNotification = async ({
 
 const notificationGameKey = (game: LiveState) => game.eventKey ?? game.matchId;
 
+const americanOdds = (odds: number) => `${odds > 0 ? "+" : ""}${odds}`;
+
+const legDescription = (leg: Awaited<ReturnType<typeof wagerLegsForFinalGame>>[number]) => {
+  if (leg.marketKey === "h2h") {
+    return `${leg.selectedTeam} ${americanOdds(leg.oddsAmerican)}`;
+  }
+  if (leg.marketKey === "totals") {
+    return `${leg.selectedTeam} ${leg.spread} ${americanOdds(leg.oddsAmerican)}`;
+  }
+  return `${leg.selectedTeam} ${Number(leg.spread) > 0 ? `+${leg.spread}` : leg.spread} ${americanOdds(leg.oddsAmerican)}`;
+};
+
 const sendFinalNotifications = async (game: LiveState) => {
-  const targets = await usersForGame(game, "game_final_enabled");
+  const legs = await wagerLegsForFinalGame(game);
   const sent: Array<{ key: string; sent: number }> = [];
-  if (targets.length === 0 || game.awayScore === null || game.homeScore === null) {
+  if (legs.length === 0 || game.awayScore === null || game.homeScore === null) {
     return sent;
   }
 
-  const awayWon = game.awayScore > game.homeScore;
-  const winningScore = Math.max(game.awayScore, game.homeScore);
-  const losingScore = Math.min(game.awayScore, game.homeScore);
-
-  for (const target of targets) {
-    const selectedTeam = target.selectedTeams[0];
-    const selectedWon = selectedTeam === game.awayTeam ? awayWon : selectedTeam === game.homeTeam ? !awayWon : null;
-    const title = selectedWon === true ? "Winner" : selectedWon === false ? "Tough Luck" : "Game Final";
-    const body = selectedWon === true
-      ? `${selectedTeam} won ${winningScore}-${losingScore}.`
-      : selectedWon === false
-        ? `${selectedTeam} lost ${winningScore}-${losingScore}.`
-        : `${scoreText(game)} is final.`;
-    const key = `live-final:${notificationGameKey(game)}:${target.userId}:${selectedTeam}:${game.awayScore}-${game.homeScore}`;
+  for (const leg of legs) {
+    const outcome = outcomeForSelection({
+      selectedTeam: leg.selectedTeam,
+      awayTeam: leg.awayTeam,
+      homeTeam: leg.homeTeam,
+      marketKey: leg.marketKey,
+      spread: Number(leg.spread),
+      game: {
+        startsOn: game.startsAt?.toISOString().slice(0, 10) ?? new Date().toISOString().slice(0, 10),
+        awayTeam: leg.awayTeam,
+        homeTeam: leg.homeTeam,
+        awayScore: game.awayScore,
+        homeScore: game.homeScore
+      }
+    });
+    const title = outcome === "won" ? "Winner" : outcome === "lost" ? "Tough Luck" : "Game Final";
+    const body = outcome === "won"
+      ? `${legDescription(leg)} won. ${scoreText(game)} is final.`
+      : outcome === "lost"
+        ? `${legDescription(leg)} lost. ${scoreText(game)} is final.`
+        : `${legDescription(leg)} is ${outcome === "void" ? "No Action" : "a push"}. ${scoreText(game)} is final.`;
+    const key = `live-final:${notificationGameKey(game)}:${leg.userId}:${leg.legId}:${game.awayScore}-${game.homeScore}`;
     const logId = await insertNotificationLog({
       key,
       title,
@@ -191,7 +265,12 @@ const sendFinalNotifications = async (game: LiveState) => {
       metadata: {
         matchId: game.matchId,
         eventKey: game.eventKey,
-        selectedTeam,
+        legId: leg.legId,
+        selectedTeam: leg.selectedTeam,
+        spread: leg.spread,
+        oddsAmerican: leg.oddsAmerican,
+        marketKey: leg.marketKey,
+        outcome,
         awayTeam: game.awayTeam,
         homeTeam: game.homeTeam,
         awayScore: game.awayScore,
@@ -201,7 +280,7 @@ const sendFinalNotifications = async (game: LiveState) => {
     if (!logId) {
       continue;
     }
-    const delivery = await sendPushToUsers([target.userId], { title, body, url: notificationUrl });
+    const delivery = await sendPushToUsers([leg.userId], { title, body, url: notificationUrl });
     await updateNotificationLog(logId, delivery);
     sent.push({ key, sent: delivery.sent });
   }
