@@ -323,7 +323,7 @@ export const outcomeForSelection = ({
   if (marketKey === "h2h") {
     if (selectedScore > opponentScore) return "won" as const;
     if (selectedScore < opponentScore) return "lost" as const;
-    return "push" as const;
+    return "lost" as const;
   }
 
   const adjusted = selectedScore + spread;
