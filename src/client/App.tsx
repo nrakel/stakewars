@@ -1034,9 +1034,10 @@ function App() {
 
   const marketLabel = (market: GameMarket, side?: GameMarketSide | null) => {
     if (market.marketKey === "h2h" && side?.team === "Draw") return "Draw";
-    if (market.marketKey === "h2h" && side?.team) return `${teamAbbreviation(side.team)} Moneyline`;
+    const teamLabel = side?.team && market.sport === "MLB" ? teamAbbreviation(side.team) : side?.team;
+    if (market.marketKey === "h2h" && teamLabel) return `${teamLabel} Moneyline`;
     if (market.marketKey === "totals") return "Total";
-    return `${side?.team ? `${teamAbbreviation(side.team)} ` : ""}${market.sport === "MLB" ? "Run Line" : "Spread"}`;
+    return `${teamLabel ? `${teamLabel} ` : ""}${market.sport === "MLB" ? "Run Line" : "Spread"}`;
   };
 
   const lineForLeg = (leg: SlipLeg) => lineForId(leg.gameLineId);

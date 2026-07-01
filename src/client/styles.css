@@ -1083,7 +1083,8 @@ textarea {
   font-size: 0.68rem;
   font-weight: 700;
   line-height: 1;
-  white-space: nowrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .market-button span:last-child {
