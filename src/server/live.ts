@@ -9,6 +9,7 @@ type ParlayLiveMatch = {
   match_id?: string | number;
   id?: string | number;
   sport_key?: string;
+  primary_source?: string;
   commence_time?: string;
   start_time?: string;
   home_team?: string;
@@ -191,6 +192,25 @@ const normalizeTeam = (team: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const marketLikeLiveName = (team: string) => {
+  const normalized = normalizeTeam(team);
+  return /^(over|under|even|odd|yes|no|\d+)$/.test(normalized)
+    || /\bby\b/.test(normalized)
+    || /^\d+\s+\d+$/.test(normalized)
+    || team.includes(",");
+};
+
+const isSupportedLivePointSource = (match: ParlayLiveMatch) => {
+  const source = match.primary_source?.toLowerCase();
+  if (!source) {
+    return false;
+  }
+  return source.includes("espn")
+    || source.includes("gameday")
+    || source.includes("sofascore")
+    || source.includes("stats");
+};
+
 const firstString = (...values: Array<unknown>) => {
   for (const value of values) {
     if (typeof value === "string" && value.trim()) {
@@ -324,6 +344,9 @@ const normalizeMatch = async (sport: LiveSport, match: ParlayLiveMatch): Promise
   const awayTeam = firstString(match.away_team, match.away, match.teams?.away, match.team_or_player_a);
   const homeTeam = firstString(match.home_team, match.home, match.teams?.home, match.team_or_player_b);
   if (!matchId || !awayTeam || !homeTeam) {
+    return null;
+  }
+  if (!isSupportedLivePointSource(match) || marketLikeLiveName(awayTeam) || marketLikeLiveName(homeTeam)) {
     return null;
   }
 
