@@ -53,6 +53,7 @@ type WagerOutcome = "won" | "lost" | "push" | "void";
 
 type PendingLeg = {
   wager_id: string;
+  wager_status: WagerOutcome | "pending";
   weekly_entry_id: string;
   kind: "straight" | "parlay" | "round_robin";
   stake_cents: number;
@@ -145,13 +146,23 @@ type EspnScoreboardResponse = {
 const espnLeagueForSport = (sport: "EPL" | "WORLDCUP") => sport === "EPL" ? "eng.1" : "fifa.world";
 
 const normalizeTeamName = (team: string) => {
-  return team
+  const normalized = team
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/\boakland athletics\b/g, "athletics")
-    .replace(/\bunited states\b/g, "usa")
     .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+  return normalized
+    .replace(/\boakland athletics\b/g, "athletics")
+    .replace(/\bunited states of america\b/g, "usa")
+    .replace(/\bunited states\b/g, "usa")
+    .replace(/\bbosnia and herzegovina\b/g, "bosnia herzegovina")
+    .replace(/\bdemocratic republic of the congo\b/g, "congo dr")
+    .replace(/\bdemocratic republic of congo\b/g, "congo dr")
+    .replace(/\bdr congo\b/g, "congo dr")
+    .replace(/\bcote d ivoire\b/g, "ivory coast")
+    .replace(/\s+/g, " ")
     .trim();
 };
 
@@ -655,6 +666,7 @@ const settleWagersForFinals = async ({
       `
         SELECT
           w.id AS wager_id,
+          w.status AS wager_status,
           w.weekly_entry_id,
           w.kind,
           w.stake_cents,
@@ -676,7 +688,7 @@ const settleWagersForFinals = async ({
         FROM wager w
         JOIN wager_leg wl ON wl.wager_id = w.id
         JOIN game_line gl ON gl.id = wl.game_line_id
-        WHERE w.status = 'pending'
+        WHERE (w.status = 'pending' OR (w.status <> 'pending' AND wl.status = 'pending'))
           AND w.kind IN ('straight', 'parlay', 'round_robin')
           AND gl.sport = ANY($1::sport_key[])
           AND NOT EXISTS (
@@ -722,12 +734,21 @@ const settleWagersForFinals = async ({
       }
 
       for (const leg of settledLegs) {
-        await client.query("UPDATE wager_leg SET status = $1 WHERE id = $2", [leg.outcome, leg.leg_id]);
-        settledLegsPartial.push({ wagerId, legId: leg.leg_id, outcome: leg.outcome });
+        const updated = await client.query(
+          "UPDATE wager_leg SET status = $1 WHERE id = $2 AND status = 'pending' RETURNING id",
+          [leg.outcome, leg.leg_id]
+        );
+        if ((updated.rowCount ?? 0) > 0) {
+          settledLegsPartial.push({ wagerId, legId: leg.leg_id, outcome: leg.outcome });
+        }
+      }
+
+      const firstLeg = legs[0];
+      if (firstLeg.wager_status !== "pending") {
+        continue;
       }
 
       if (hasUnmatchedLeg) {
-        const firstLeg = legs[0];
         if (firstLeg.kind === "round_robin") {
           const roundRobin = await settleRoundRobinWays(client, firstLeg, legs, settledLegs);
           for (const way of roundRobin.newlySettled) {
@@ -749,7 +770,6 @@ const settleWagersForFinals = async ({
         continue;
       }
 
-      const firstLeg = legs[0];
       if (firstLeg.kind === "round_robin") {
         const roundRobin = await settleRoundRobinWays(client, firstLeg, legs, settledLegs);
         for (const way of roundRobin.newlySettled) {
