@@ -78,6 +78,21 @@ type SettledLeg = PendingLeg & {
   outcome: WagerOutcome;
 };
 
+type TeamAliasMap = Map<string, string>;
+
+type MatchCandidateSummary = {
+  awayTeam: string;
+  homeTeam: string;
+  startsAt: string | null;
+  awayScore: number;
+  homeScore: number;
+  awayTeamMatch: number;
+  homeTeamMatch: number;
+  score: number;
+  orientation: "same" | "swapped";
+  timeDiffMinutes: number | null;
+};
+
 const yyyyMmDd = (date: Date) => date.toISOString().slice(0, 10);
 
 const isFinal = (game: MlbScheduleGame) => {
@@ -145,14 +160,19 @@ type EspnScoreboardResponse = {
 
 const espnLeagueForSport = (sport: "EPL" | "WORLDCUP") => sport === "EPL" ? "eng.1" : "fifa.world";
 
-const normalizeTeamName = (team: string) => {
-  const normalized = team
+const aliasKey = (sport: string | null | undefined, provider: string | null | undefined, team: string) =>
+  `${sport ?? "*"}:${provider ?? "*"}:${team}`;
+
+const baseNormalizeTeamName = (team: string) => {
+  return team
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+};
 
+const builtInCanonicalTeamName = (normalized: string) => {
   return normalized
     .replace(/\boakland athletics\b/g, "athletics")
     .replace(/\bunited states of america\b/g, "usa")
@@ -166,7 +186,62 @@ const normalizeTeamName = (team: string) => {
     .trim();
 };
 
-const sameTeam = (left: string, right: string) => normalizeTeamName(left) === normalizeTeamName(right);
+const normalizeTeamName = (team: string, sport?: string, provider?: string, aliases?: TeamAliasMap) => {
+  const normalized = builtInCanonicalTeamName(baseNormalizeTeamName(team));
+  if (!aliases) {
+    return normalized;
+  }
+  return aliases.get(aliasKey(sport, provider, normalized))
+    ?? aliases.get(aliasKey(sport, "*", normalized))
+    ?? aliases.get(aliasKey("*", provider, normalized))
+    ?? aliases.get(aliasKey("*", "*", normalized))
+    ?? normalized;
+};
+
+const teamSimilarity = (left: string, right: string, sport?: string, provider?: string, aliases?: TeamAliasMap) => {
+  const normalizedLeft = normalizeTeamName(left, sport, provider, aliases);
+  const normalizedRight = normalizeTeamName(right, sport, provider, aliases);
+  if (normalizedLeft === normalizedRight) {
+    return 1;
+  }
+
+  const leftTokens = new Set(normalizedLeft.split(" ").filter(Boolean));
+  const rightTokens = new Set(normalizedRight.split(" ").filter(Boolean));
+  if (leftTokens.size === 0 || rightTokens.size === 0) {
+    return 0;
+  }
+
+  const intersection = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  return intersection / union;
+};
+
+const loadTeamAliases = async (client: pg.PoolClient, sports: Array<PendingLeg["sport"]>) => {
+  const result = await client.query<{
+    sport: PendingLeg["sport"] | null;
+    provider: string | null;
+    canonicalName: string;
+    aliasName: string;
+  }>(
+    `
+      SELECT sport, provider, canonical_name AS "canonicalName", alias_name AS "aliasName"
+      FROM team_alias
+      WHERE sport IS NULL OR sport = ANY($1::sport_key[])
+    `,
+    [sports]
+  );
+
+  const aliases: TeamAliasMap = new Map();
+  for (const row of result.rows) {
+    const sport = row.sport ?? "*";
+    const provider = row.provider ?? "*";
+    const canonical = builtInCanonicalTeamName(baseNormalizeTeamName(row.canonicalName));
+    const alias = builtInCanonicalTeamName(baseNormalizeTeamName(row.aliasName));
+    aliases.set(aliasKey(sport, provider, alias), canonical);
+    aliases.set(aliasKey(sport, "*", alias), canonical);
+  }
+  return aliases;
+};
 
 const espnDatesParam = (startDate: string, endDate: string) => {
   return `${startDate.replace(/-/g, "")}-${endDate.replace(/-/g, "")}`;
@@ -354,35 +429,101 @@ const outcomeForLeg = (leg: PendingLeg, game: FinalGame) => {
   });
 };
 
-const matchFinalGame = (leg: PendingLeg, finalMap: Map<string, FinalGame>, finals: FinalGame[]) => {
-  const exact = finalMap.get(finalGameKey({ startsOn: leg.starts_on, awayTeam: leg.away_team, homeTeam: leg.home_team }));
-  if (exact) {
-    return exact;
+const candidateSummary = (
+  leg: PendingLeg,
+  game: FinalGame,
+  aliases: TeamAliasMap,
+  orientation: "same" | "swapped"
+): MatchCandidateSummary | null => {
+  if (!game.startsAt) {
+    return null;
   }
 
   const lineStart = new Date(leg.starts_at).getTime();
+  const gameStart = new Date(game.startsAt).getTime();
+  if (Number.isNaN(lineStart) || Number.isNaN(gameStart)) {
+    return null;
+  }
+
+  const timeDiffMinutes = Math.round(Math.abs(gameStart - lineStart) / 60_000);
+  const twelveHoursMinutes = 12 * 60;
+  if (timeDiffMinutes > twelveHoursMinutes) {
+    return null;
+  }
+
+  const awayTeamMatch = orientation === "same"
+    ? teamSimilarity(game.awayTeam, leg.away_team, leg.sport, "espn-scoreboard", aliases)
+    : teamSimilarity(game.homeTeam, leg.away_team, leg.sport, "espn-scoreboard", aliases);
+  const homeTeamMatch = orientation === "same"
+    ? teamSimilarity(game.homeTeam, leg.home_team, leg.sport, "espn-scoreboard", aliases)
+    : teamSimilarity(game.awayTeam, leg.home_team, leg.sport, "espn-scoreboard", aliases);
+  const timeScore = 1 - (timeDiffMinutes / twelveHoursMinutes);
+  const score = (awayTeamMatch * 0.42) + (homeTeamMatch * 0.42) + (timeScore * 0.16);
+
+  return {
+    awayTeam: game.awayTeam,
+    homeTeam: game.homeTeam,
+    startsAt: game.startsAt,
+    awayScore: game.awayScore,
+    homeScore: game.homeScore,
+    awayTeamMatch: Number(awayTeamMatch.toFixed(3)),
+    homeTeamMatch: Number(homeTeamMatch.toFixed(3)),
+    score: Number(score.toFixed(3)),
+    orientation,
+    timeDiffMinutes
+  };
+};
+
+const matchFinalGame = (
+  leg: PendingLeg,
+  finalMap: Map<string, FinalGame>,
+  finals: FinalGame[],
+  aliases: TeamAliasMap
+) => {
+  const exact = finalMap.get(finalGameKey({ startsOn: leg.starts_on, awayTeam: leg.away_team, homeTeam: leg.home_team }));
+  if (exact) {
+    return { game: exact, candidates: [] as MatchCandidateSummary[] };
+  }
+
   const candidates = finals
-    .filter((game) =>
-      game.startsOn === leg.starts_on
-      && sameTeam(game.awayTeam, leg.away_team)
-      && sameTeam(game.homeTeam, leg.home_team)
-      && game.startsAt
-    )
-    .map((game) => ({ game, diffMs: Math.abs(new Date(game.startsAt!).getTime() - lineStart) }))
-    .sort((a, b) => a.diffMs - b.diffMs);
+    .filter((game) => game.startsOn === leg.starts_on)
+    .flatMap((game) => {
+      const same = candidateSummary(leg, game, aliases, "same");
+      const swapped = candidateSummary(leg, game, aliases, "swapped");
+      return [
+        same ? { game, summary: same } : null,
+        swapped ? {
+          game: {
+            ...game,
+            awayTeam: leg.away_team,
+            homeTeam: leg.home_team,
+            awayScore: game.homeScore,
+            homeScore: game.awayScore,
+            metadata: { ...(game.metadata ?? {}), settlementOrientation: "swapped", originalAwayTeam: game.awayTeam, originalHomeTeam: game.homeTeam }
+          },
+          summary: swapped
+        } : null
+      ].filter((candidate): candidate is { game: FinalGame; summary: MatchCandidateSummary } => Boolean(candidate));
+    })
+    .sort((a, b) => b.summary.score - a.summary.score);
 
   if (candidates.length === 0) {
-    return null;
+    return { game: null, candidates: [] as MatchCandidateSummary[] };
   }
 
   const closest = candidates[0];
   const secondClosest = candidates[1];
-  const twelveHoursMs = 12 * 60 * 60 * 1000;
-  if (closest.diffMs > twelveHoursMs || (secondClosest && closest.diffMs === secondClosest.diffMs)) {
-    return null;
+  const minimumScore = 0.9;
+  const minimumTeamScore = 0.82;
+  const clearMargin = 0.08;
+  const teamScoresStrong = closest.summary.awayTeamMatch >= minimumTeamScore && closest.summary.homeTeamMatch >= minimumTeamScore;
+  const hasClearMargin = !secondClosest || closest.summary.score - secondClosest.summary.score >= clearMargin;
+
+  if (closest.summary.score < minimumScore || !teamScoresStrong || !hasClearMargin) {
+    return { game: null, candidates: candidates.slice(0, 3).map((candidate) => candidate.summary) };
   }
 
-  return closest.game;
+  return { game: closest.game, candidates: candidates.slice(0, 3).map((candidate) => candidate.summary) };
 };
 
 const decimalOdds = (americanOdds: number) => {
@@ -662,6 +803,7 @@ const settleWagersForFinals = async ({
   const finalMap = unambiguousFinalGameMap(finals);
 
   return transaction(async (client) => {
+    const aliases = await loadTeamAliases(client, sports);
     const pending = await client.query<PendingLeg>(
       `
         SELECT
@@ -711,7 +853,13 @@ const settleWagersForFinals = async ({
       payoutCents: number;
       profitCents: number;
     }> = [];
-    const unmatched: Array<{ wagerId: string; awayTeam: string; homeTeam: string; startsOn: string }> = [];
+    const unmatched: Array<{
+      wagerId: string;
+      awayTeam: string;
+      homeTeam: string;
+      startsOn: string;
+      candidates: MatchCandidateSummary[];
+    }> = [];
     const wagers = new Map<string, PendingLeg[]>();
 
     for (const leg of pending.rows) {
@@ -723,9 +871,16 @@ const settleWagersForFinals = async ({
       let hasUnmatchedLeg = false;
 
       for (const leg of legs) {
-        const game = matchFinalGame(leg, finalMap, finals);
+        const match = matchFinalGame(leg, finalMap, finals, aliases);
+        const game = match.game;
         if (!game) {
-          unmatched.push({ wagerId: leg.wager_id, awayTeam: leg.away_team, homeTeam: leg.home_team, startsOn: leg.starts_on });
+          unmatched.push({
+            wagerId: leg.wager_id,
+            awayTeam: leg.away_team,
+            homeTeam: leg.home_team,
+            startsOn: leg.starts_on,
+            candidates: match.candidates
+          });
           hasUnmatchedLeg = true;
           continue;
         }
