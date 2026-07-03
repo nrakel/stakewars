@@ -481,7 +481,7 @@ const matchFinalGame = (
   aliases: TeamAliasMap
 ) => {
   const exact = finalMap.get(finalGameKey({ startsOn: leg.starts_on, awayTeam: leg.away_team, homeTeam: leg.home_team }));
-  if (exact) {
+  if (exact && (!exact.startsAt || candidateSummary(leg, exact, aliases, "same"))) {
     return { game: exact, candidates: [] as MatchCandidateSummary[] };
   }
 
