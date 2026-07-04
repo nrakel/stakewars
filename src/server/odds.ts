@@ -191,8 +191,14 @@ const moneylineDeviation = (outcomes: ParlayOutcome[], event: ParlayEvent, conse
   }));
 };
 
+const eventStartKey = (commenceTime: string) => {
+  const date = new Date(commenceTime);
+  date.setUTCMinutes(Math.floor(date.getUTCMinutes() / 5) * 5, 0, 0);
+  return date.toISOString().replace(/[:.]/g, "");
+};
+
 const eventIdentity = (event: ParlayEvent) => {
-  const startKey = new Date(event.commence_time).toISOString().replace(/[:.]/g, "");
+  const startKey = eventStartKey(event.commence_time);
   const teamKey = (team: string) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return [
     event.canonical_event_id ?? event.id,
@@ -216,6 +222,10 @@ const mergeEvents = (eventGroups: ParlayEvent[][]) => {
       if (!existing) {
         merged.set(key, { ...event, bookmakers: [...(event.bookmakers ?? [])] });
         continue;
+      }
+
+      if (new Date(event.commence_time).getTime() < new Date(existing.commence_time).getTime()) {
+        existing.commence_time = event.commence_time;
       }
 
       const bookmakerMap = new Map((existing.bookmakers ?? []).map((bookmaker) => [bookmaker.key, bookmaker]));
