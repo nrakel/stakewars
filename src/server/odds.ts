@@ -191,9 +191,19 @@ const moneylineDeviation = (outcomes: ParlayOutcome[], event: ParlayEvent, conse
   }));
 };
 
+const eventIdentity = (event: ParlayEvent) => {
+  const startKey = new Date(event.commence_time).toISOString().replace(/[:.]/g, "");
+  const teamKey = (team: string) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return [
+    event.canonical_event_id ?? event.id,
+    startKey,
+    teamKey(event.away_team),
+    teamKey(event.home_team)
+  ].join("|");
+};
+
 const eventMergeKey = (event: ParlayEvent) => {
-  return event.canonical_event_id
-    ?? `${event.sport_key}:${event.commence_time}:${event.away_team}:${event.home_team}`;
+  return eventIdentity(event);
 };
 
 const mergeEvents = (eventGroups: ParlayEvent[][]) => {
@@ -291,7 +301,7 @@ const normalizeSpreads = (
   if (!spread) {
     return [];
   }
-  const eventId = event.canonical_event_id ?? event.id;
+  const eventId = eventIdentity(event);
 
   return spread.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
@@ -316,7 +326,7 @@ const normalizeMoneylines = (event: ParlayEvent, bookmakerPriority: string[]): N
   if (!moneyline) {
     return [];
   }
-  const eventId = event.canonical_event_id ?? event.id;
+  const eventId = eventIdentity(event);
 
   return moneyline.outcomes
     .filter((outcome): outcome is PricedOutcome =>
@@ -340,7 +350,7 @@ const normalizeTotals = (event: ParlayEvent, bookmakerPriority: string[]): Norma
   if (!total) {
     return [];
   }
-  const eventId = event.canonical_event_id ?? event.id;
+  const eventId = eventIdentity(event);
 
   return total.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
