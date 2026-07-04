@@ -66,6 +66,7 @@ type PendingLeg = {
   selected_team: string;
   spread: string;
   odds_american: number;
+  leg_status: WagerOutcome | "pending";
   sport: "MLB" | "EPL" | "WORLDCUP";
   market_key: "h2h" | "spreads" | "totals";
   starts_at: string;
@@ -821,6 +822,7 @@ const settleWagersForFinals = async ({
           wl.selected_team,
           wl.spread,
           wl.odds_american,
+          wl.status AS leg_status,
           gl.sport,
           gl.market_key,
           gl.starts_at::text AS starts_at,
@@ -832,13 +834,13 @@ const settleWagersForFinals = async ({
         JOIN game_line gl ON gl.id = wl.game_line_id
         WHERE (w.status = 'pending' OR (w.status <> 'pending' AND wl.status = 'pending'))
           AND w.kind IN ('straight', 'parlay', 'round_robin')
-          AND gl.sport = ANY($1::sport_key[])
-          AND NOT EXISTS (
+          AND EXISTS (
             SELECT 1
-            FROM wager_leg other_wl
-            JOIN game_line other_gl ON other_gl.id = other_wl.game_line_id
-            WHERE other_wl.wager_id = w.id
-              AND other_gl.sport <> ALL($1::sport_key[])
+            FROM wager_leg target_wl
+            JOIN game_line target_gl ON target_gl.id = target_wl.game_line_id
+            WHERE target_wl.wager_id = w.id
+              AND target_wl.status = 'pending'
+              AND target_gl.sport = ANY($1::sport_key[])
           )
       `,
       [sports]
@@ -871,6 +873,16 @@ const settleWagersForFinals = async ({
       let hasUnmatchedLeg = false;
 
       for (const leg of legs) {
+        if (leg.leg_status !== "pending") {
+          settledLegs.push({ ...leg, outcome: leg.leg_status });
+          continue;
+        }
+
+        if (!sports.includes(leg.sport)) {
+          hasUnmatchedLeg = true;
+          continue;
+        }
+
         const match = matchFinalGame(leg, finalMap, finals, aliases);
         const game = match.game;
         if (!game) {
