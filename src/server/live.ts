@@ -3,7 +3,7 @@ import { query, transaction } from "./db.js";
 import { sendLiveGameNotifications, type LiveStateChange } from "./liveNotifications.js";
 import type { SportKey } from "../shared/types.js";
 
-type LiveSport = "MLB" | "WORLDCUP";
+type LiveSport = "MLB" | "EPL" | "WORLDCUP";
 
 type ParlayLiveMatch = {
   match_id?: string | number;
@@ -115,6 +115,49 @@ type MlbScheduleGame = {
   };
 };
 
+type EspnSoccerDetail = {
+  type?: {
+    text?: string;
+  };
+  clock?: {
+    value?: number;
+    displayValue?: string;
+  };
+  scoringPlay?: boolean;
+  yellowCard?: boolean;
+  redCard?: boolean;
+  athletesInvolved?: Array<{
+    displayName?: string;
+    team?: { id?: string };
+  }>;
+  team?: { id?: string };
+};
+
+type EspnSoccerEvent = {
+  id: string;
+  date?: string;
+  status?: {
+    type?: {
+      state?: string;
+      completed?: boolean;
+      description?: string;
+      detail?: string;
+      shortDetail?: string;
+    };
+  };
+  competitions?: Array<{
+    competitors?: Array<{
+      homeAway?: "home" | "away";
+      score?: string;
+      team?: {
+        id?: string;
+        displayName?: string;
+      };
+    }>;
+    details?: EspnSoccerDetail[];
+  }>;
+};
+
 type MlbLiveFeed = {
   liveData?: {
     boxscore?: {
@@ -180,7 +223,13 @@ export type LiveGameState = {
 
 const liveSports: Record<LiveSport, string> = {
   MLB: "baseball_mlb",
+  EPL: "soccer_epl",
   WORLDCUP: "soccer_fifa_world_cup"
+};
+
+const espnSoccerLeagues: Partial<Record<LiveSport, string>> = {
+  EPL: "eng.1",
+  WORLDCUP: "fifa.world"
 };
 
 const normalizeTeam = (team: string) =>
@@ -452,6 +501,86 @@ const normalizeLiveEvent = async (sport: LiveSport, event: ParlayLiveEvent): Pro
   };
 };
 
+const latestSoccerDetail = (details: EspnSoccerDetail[], predicate: (detail: EspnSoccerDetail) => boolean) =>
+  details
+    .filter(predicate)
+    .sort((left, right) => (right.clock?.value ?? 0) - (left.clock?.value ?? 0))[0] ?? null;
+
+const soccerDetailText = (
+  detail: EspnSoccerDetail | null,
+  teamsById: Map<string, string>
+) => {
+  if (!detail) {
+    return null;
+  }
+  const type = detail.type?.text ?? "Event";
+  const player = detail.athletesInvolved?.[0]?.displayName;
+  const teamId = detail.team?.id ?? detail.athletesInvolved?.[0]?.team?.id;
+  const team = teamId ? teamsById.get(teamId) : null;
+  return [type, [player, team ? `(${team})` : null].filter(Boolean).join(" ")].filter(Boolean).join(": ");
+};
+
+const normalizeEspnSoccerEvent = async (sport: Extract<LiveSport, "EPL" | "WORLDCUP">, event: EspnSoccerEvent): Promise<NormalizedLiveMatch | null> => {
+  const competition = event.competitions?.[0];
+  const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+  const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+  const awayTeam = firstString(away?.team?.displayName);
+  const homeTeam = firstString(home?.team?.displayName);
+  if (!event.id || !awayTeam || !homeTeam) {
+    return null;
+  }
+
+  const startsAt = event.date ? new Date(event.date) : null;
+  const safeStartsAt = startsAt && Number.isFinite(startsAt.getTime()) ? startsAt : null;
+  const details = competition?.details ?? [];
+  const latestGoal = latestSoccerDetail(details, (detail) => detail.scoringPlay === true);
+  const latestBooking = latestSoccerDetail(details, (detail) => detail.yellowCard === true || detail.redCard === true);
+  const latestDetail = latestSoccerDetail(details, (detail) => detail.scoringPlay === true || detail.yellowCard === true || detail.redCard === true);
+  const teamsById = new Map(
+    (competition?.competitors ?? [])
+      .map((competitor) => [competitor.team?.id, competitor.team?.displayName] as const)
+      .filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1]))
+  );
+  const latestGoalText = soccerDetailText(latestGoal, teamsById);
+  const latestBookingText = soccerDetailText(latestBooking, teamsById);
+  const latestDetailText = soccerDetailText(latestDetail, teamsById);
+  const status = event.status?.type;
+  const isLive = status?.state === "in";
+
+  return {
+    matchId: `espn:${sport.toLowerCase()}:${event.id}`,
+    provider: "espn-scoreboard",
+    sport,
+    eventKey: await findEventKey(sport, awayTeam, homeTeam, safeStartsAt),
+    startsAt: safeStartsAt,
+    awayTeam,
+    homeTeam,
+    awayScore: numberOrNull(away?.score),
+    homeScore: numberOrNull(home?.score),
+    period: latestDetail?.clock?.displayValue ?? status?.shortDetail ?? status?.detail ?? null,
+    gameStatus: status?.description ?? status?.detail ?? null,
+    description: latestDetailText,
+    lastPlay: latestGoalText,
+    batter: null,
+    pitcher: null,
+    balls: null,
+    strikes: null,
+    outs: null,
+    pitcherPitches: null,
+    batterHits: null,
+    batterAtBats: null,
+    inPlay: isLive,
+    lastEventAt: latestDetail ? new Date() : null,
+    bases: {
+      latestGoal: latestGoalText,
+      latestBooking: latestBookingText,
+      latestDetailType: latestDetail?.type?.text ?? null,
+      latestDetailMinute: latestDetail?.clock?.displayValue ?? null
+    },
+    payload: event
+  };
+};
+
 
 const centralDate = () => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -566,6 +695,24 @@ const fetchMlbStatsLive = async () => {
   return (body.dates ?? []).flatMap((date) => date.games ?? []);
 };
 
+const fetchEspnSoccerLive = async (sport: Extract<LiveSport, "EPL" | "WORLDCUP">) => {
+  const league = espnSoccerLeagues[sport];
+  if (!league) {
+    return [];
+  }
+  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/scoreboard`);
+  url.searchParams.set("dates", centralDate().replace(/-/g, ""));
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`ESPN soccer live ${sport} failed with ${response.status}: ${body.slice(0, 240)}`);
+  }
+
+  const body = await response.json() as { events?: EspnSoccerEvent[] };
+  return body.events ?? [];
+};
+
 const playerStats = (body: MlbLiveFeed, playerId: number | undefined, group: "batting" | "pitching") => {
   if (!playerId) {
     return null;
@@ -621,6 +768,7 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
         homeTeam: string;
         awayScore: number | null;
         homeScore: number | null;
+        period: string | null;
         gameStatus: string | null;
         description: string | null;
         lastPlay: string | null;
@@ -633,6 +781,7 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
         batterHits: number | null;
         batterAtBats: number | null;
         inPlay: boolean;
+        bases: Record<string, unknown>;
       }>(
         `
           SELECT
@@ -645,6 +794,7 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
             home_team AS "homeTeam",
             away_score AS "awayScore",
             home_score AS "homeScore",
+            period,
             game_status AS "gameStatus",
             description,
             last_play AS "lastPlay",
@@ -656,7 +806,8 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
             pitcher_pitches AS "pitcherPitches",
             batter_hits AS "batterHits",
             batter_at_bats AS "batterAtBats",
-            in_play AS "inPlay"
+            in_play AS "inPlay",
+            bases
           FROM live_game_state
           WHERE match_id = $1
           FOR UPDATE
@@ -743,6 +894,7 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
           homeTeam: match.homeTeam,
           awayScore: match.awayScore,
           homeScore: match.homeScore,
+          period: match.period,
           gameStatus: match.gameStatus,
           description: match.description,
           lastPlay: match.lastPlay,
@@ -754,7 +906,8 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
           pitcherPitches: match.pitcherPitches,
           batterHits: match.batterHits,
           batterAtBats: match.batterAtBats,
-          inPlay: match.inPlay
+          inPlay: match.inPlay,
+          bases: match.bases
         }
       });
     }
@@ -774,7 +927,12 @@ const refreshLiveSport = async (sport: LiveSport) => {
     ? (await Promise.all(mlbGames.map((game) => normalizeMlbGame(game))))
       .filter((match): match is NonNullable<typeof match> => Boolean(match))
     : [];
-  const normalized = [...parlayNormalized, ...liveEventNormalized, ...mlbNormalized];
+  const soccerEvents = sport === "EPL" || sport === "WORLDCUP" ? await fetchEspnSoccerLive(sport) : [];
+  const soccerNormalized = sport === "EPL" || sport === "WORLDCUP"
+    ? (await Promise.all(soccerEvents.map((event) => normalizeEspnSoccerEvent(sport, event))))
+      .filter((match): match is NonNullable<typeof match> => Boolean(match))
+    : [];
+  const normalized = [...parlayNormalized, ...liveEventNormalized, ...mlbNormalized, ...soccerNormalized];
 
   const changes = await upsertLiveMatches(normalized);
   const notifications = await sendLiveGameNotifications(changes);
@@ -790,13 +948,14 @@ const refreshLiveSport = async (sport: LiveSport) => {
     parlayFetched: matches.length,
     parlayLiveFetched: liveEvents.length,
     mlbFetched: mlbGames.length,
+    soccerFetched: soccerEvents.length,
     imported: normalized.length,
     recent,
     notifications: notifications.length
   };
 };
 
-export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "WORLDCUP"]) => {
+export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL", "WORLDCUP"]) => {
   const results = [];
   for (const sport of sports) {
     results.push(await refreshLiveSport(sport));
@@ -806,6 +965,7 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "WORLDCUP"
     parlayFetched: results.reduce((sum, result) => sum + result.parlayFetched, 0),
     parlayLiveFetched: results.reduce((sum, result) => sum + result.parlayLiveFetched, 0),
     mlbFetched: results.reduce((sum, result) => sum + result.mlbFetched, 0),
+    soccerFetched: results.reduce((sum, result) => sum + result.soccerFetched, 0),
     imported: results.reduce((sum, result) => sum + result.imported, 0),
     recent: results.reduce((sum, result) => sum + result.recent, 0),
     notifications: results.reduce((sum, result) => sum + result.notifications, 0)
@@ -850,14 +1010,18 @@ export const getLiveStates = async (sport: SportKey) => {
             ORDER BY
               CASE provider
                 WHEN 'mlb-stats-api' THEN 1
-                WHEN 'parlay-live' THEN 2
+                WHEN 'espn-scoreboard' THEN 2
+                WHEN 'parlay-live' THEN 3
                 ELSE 3
               END,
               fetched_at DESC
           ) AS row_rank
         FROM live_game_state
         WHERE sport = $1
-          AND ($1 <> 'MLB' OR provider = 'mlb-stats-api')
+          AND (
+            ($1 = 'MLB' AND provider = 'mlb-stats-api')
+            OR ($1 IN ('EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
+          )
           AND in_play = true
           AND (
             last_event_at > now() - INTERVAL '20 minutes'

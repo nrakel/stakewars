@@ -16,6 +16,7 @@ type LiveState = {
   homeTeam: string;
   awayScore: number | null;
   homeScore: number | null;
+  period: string | null;
   gameStatus: string | null;
   description: string | null;
   lastPlay?: string | null;
@@ -28,6 +29,7 @@ type LiveState = {
   batterHits?: number | null;
   batterAtBats?: number | null;
   inPlay: boolean;
+  bases?: Record<string, unknown>;
 };
 
 export type LiveStateChange = {
@@ -39,6 +41,17 @@ const isFinalStatus = (status: string | null) => (status ?? "").toLowerCase().in
 
 const scoreText = (game: Pick<LiveState, "awayTeam" | "homeTeam" | "awayScore" | "homeScore">) =>
   `${game.awayTeam} ${game.awayScore ?? 0} - ${game.homeTeam} ${game.homeScore ?? 0}`;
+
+const displayScoreText = (game: LiveState) =>
+  [scoreText(game), game.period].filter(Boolean).join(" - ");
+
+const latestBookingText = (game: LiveState) =>
+  typeof game.bases?.latestBooking === "string" ? game.bases.latestBooking : null;
+
+const latestDetailType = (game: LiveState) =>
+  typeof game.bases?.latestDetailType === "string" ? game.bases.latestDetailType.toLowerCase() : "";
+
+const isSoccerSport = (sport: SportKey) => sport === "EPL" || sport === "WORLDCUP";
 
 const notificationUrl = "/scoreboard";
 
@@ -311,7 +324,10 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
     if (game.sport === "MLB" && game.provider !== "mlb-stats-api") {
       continue;
     }
-    if (game.sport !== "MLB" && game.provider !== "parlay-api" && game.provider !== "parlay-live") {
+    if (isSoccerSport(game.sport) && game.provider !== "espn-scoreboard") {
+      continue;
+    }
+    if (game.sport !== "MLB" && !isSoccerSport(game.sport)) {
       continue;
     }
 
@@ -335,14 +351,38 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
       && previous?.homeScore !== null
       && (game.awayScore !== previous?.awayScore || game.homeScore !== previous?.homeScore);
     if (scoreChanged) {
+      const body = isSoccerSport(game.sport)
+        ? [displayScoreText(game), game.lastPlay ?? game.description].filter(Boolean).join("\n")
+        : [displayScoreText(game), game.description].filter(Boolean).join("\n");
       results.push(await sendGroupedNotification({
         key: `live-score:${notificationGameKey(game)}:${game.awayScore}-${game.homeScore}`,
         title: "Score Update",
-        body: [scoreText(game), game.description].filter(Boolean).join("\n"),
+        body,
         game,
         preference: "score_change_enabled",
         metadata: { type: "score_change", awayScore: game.awayScore, homeScore: game.homeScore },
         tag: `score-update:${notificationGameKey(game)}`,
+        renotify: false,
+        ttlSeconds: 2 * 60 * 60
+      }));
+    }
+
+    const bookingText = latestBookingText(game);
+    const previousBookingText = previous ? latestBookingText(previous) : null;
+    const bookingChanged = isSoccerSport(game.sport)
+      && game.inPlay
+      && bookingText
+      && bookingText !== previousBookingText
+      && latestDetailType(game).includes("card");
+    if (bookingChanged) {
+      results.push(await sendGroupedNotification({
+        key: `live-booking:${notificationGameKey(game)}:${bookingText}`,
+        title: "Booking",
+        body: [bookingText, game.period].filter(Boolean).join(" - "),
+        game,
+        preference: "score_change_enabled",
+        metadata: { type: "booking", booking: bookingText, minute: game.period },
+        tag: `booking-update:${notificationGameKey(game)}`,
         renotify: false,
         ttlSeconds: 2 * 60 * 60
       }));

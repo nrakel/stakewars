@@ -712,11 +712,12 @@ function App() {
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
 
   const refresh = async (authToken = token) => {
-    const [lineResult, boardResult, aiResult, liveMlbResult, liveWorldCupResult] = await Promise.all([
+    const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult, liveWorldCupResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
       api<{ leaderboard: LeaderboardRow[] }>("/leaderboard"),
       api<{ picks: any[] }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
+      api<{ games: LiveGameState[] }>("/live/epl"),
       api<{ games: LiveGameState[] }>("/live/worldcup")
     ]);
     setLines(lineResult.lines);
@@ -724,7 +725,7 @@ function App() {
     setGames(lineResult.games ?? []);
     setLeaderboard(boardResult.leaderboard);
     setAiPicks(aiResult.picks);
-    setLiveGames([...liveMlbResult.games, ...liveWorldCupResult.games]);
+    setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
       const [me, openBetResult, pushPreferenceResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
@@ -1719,7 +1720,7 @@ function App() {
               <Radio size={20} />
               <h2>{scoreboardSport} live box scores</h2>
             </div>
-            {scoreboardSport === "MLB" || scoreboardSport === "WORLDCUP" ? (
+            {scoreboardSport === "MLB" || scoreboardSport === "WORLDCUP" || scoreboardSport === "EPL" ? (
               <div className="live-list scoreboard-grid">
                 {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => (
                   <article className="live-game" key={game.matchId}>
