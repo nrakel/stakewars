@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import webPush from "web-push";
 import { config } from "./config.js";
 import { query } from "./db.js";
@@ -24,6 +24,9 @@ type PushPayload = {
   url?: string;
   tag?: string;
   renotify?: boolean;
+  topic?: string;
+  ttlSeconds?: number;
+  urgency?: "very-low" | "low" | "normal" | "high";
 };
 
 export type PushPreferences = {
@@ -32,6 +35,9 @@ export type PushPreferences = {
   scoreChangeEnabled: boolean;
   gameFinalEnabled: boolean;
 };
+
+const coalescingTopic = (value: string) =>
+  createHash("sha256").update(value).digest("base64url").slice(0, 32);
 
 const sendToSubscriptions = async (rows: Array<{ endpoint: string; p256dh: string; auth: string }>, payload: PushPayload) => {
   configureWebPush();
@@ -53,7 +59,11 @@ const sendToSubscriptions = async (rows: Array<{ endpoint: string; p256dh: strin
           p256dh: row.p256dh,
           auth: row.auth
         }
-      }, body);
+      }, body, {
+        TTL: payload.ttlSeconds,
+        urgency: payload.urgency,
+        topic: payload.topic ?? (payload.tag ? coalescingTopic(payload.tag) : undefined)
+      });
       sent.push(row.endpoint);
     } catch (error) {
       const statusCode = (error as { statusCode?: number }).statusCode;
