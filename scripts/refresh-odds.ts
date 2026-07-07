@@ -37,8 +37,7 @@ try {
     placeWagers: true,
     marketKey: "h2h",
     sortBy: "confidence",
-    uniqueGames: true,
-    stakeFractionOfBalance: 0.05
+    uniqueGames: true
   });
   console.log(JSON.stringify({ ...result, mlbContext, snapshot, picks }, null, 2));
 } finally {

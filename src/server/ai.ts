@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
-import { americanToDecimal, ensureWeeklyEntry, estimatePayoutCents } from "./betting.js";
+import { americanToDecimal, ensureWeeklyEntry, estimatePayoutCents, roundRobinPayoutCents, roundRobinWays } from "./betting.js";
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 
@@ -1472,6 +1472,54 @@ const placeAiWager = async (
   return wagerId;
 };
 
+const placeAiRoundRobinWager = async (
+  client: pg.PoolClient,
+  userId: string,
+  candidates: ScoredCandidate[],
+  stakePerWayCents: number
+) => {
+  const entry = await ensureWeeklyEntry(client, userId);
+  const maxLegs = candidates.length;
+  const ways = roundRobinWays(candidates.length, maxLegs, 2);
+  const totalStakeCents = stakePerWayCents * ways;
+  if (!ways || entry.balance_cents < totalStakeCents) {
+    return null;
+  }
+
+  const potentialPayout = roundRobinPayoutCents(
+    stakePerWayCents,
+    candidates.map((candidate) => candidate.odds_american),
+    maxLegs,
+    2
+  );
+  const wagerId = randomUUID();
+
+  await client.query(
+    `
+      INSERT INTO wager (
+        id, user_id, weekly_entry_id, kind, stake_cents, potential_payout_cents,
+        legs_count, round_robin_ways, round_robin_min_legs,
+        round_robin_max_legs, round_robin_stake_per_way_cents
+      )
+      VALUES ($1, $2, $3, 'round_robin', $4, $5, $6, $7, 2, $8, $9)
+    `,
+    [wagerId, userId, entry.id, totalStakeCents, potentialPayout, candidates.length, ways, maxLegs, stakePerWayCents]
+  );
+
+  for (const candidate of candidates) {
+    await client.query(
+      `
+        INSERT INTO wager_leg (id, wager_id, game_line_id, selected_team, spread, odds_american)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [randomUUID(), wagerId, candidate.id, candidate.selected_team, candidate.spread, candidate.odds_american]
+    );
+  }
+
+  await client.query("UPDATE weekly_entry SET balance_cents = balance_cents - $1 WHERE id = $2", [totalStakeCents, entry.id]);
+  return wagerId;
+};
+
 const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_at" | "away_team" | "home_team">) =>
   pick.provider_event_id?.split(":")[0]
     ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
@@ -1486,7 +1534,11 @@ export const generateAiPicks = async ({
   sortBy = "score",
   uniqueGames = false,
   stakeFractionOfBalance,
-  lockWindowMinutes = 60
+  lockWindowMinutes = 60,
+  aiWagerMinConfidence = 0.67,
+  aiStraightBankrollFraction = 0.5,
+  aiRoundRobinBankrollFraction = 0.25,
+  aiRoundRobinPicks = 3
 }: {
   sport?: "MLB" | "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF";
   maxPicks?: number;
@@ -1498,6 +1550,10 @@ export const generateAiPicks = async ({
   uniqueGames?: boolean;
   stakeFractionOfBalance?: number;
   lockWindowMinutes?: number;
+  aiWagerMinConfidence?: number;
+  aiStraightBankrollFraction?: number;
+  aiRoundRobinBankrollFraction?: number;
+  aiRoundRobinPicks?: number;
 } = {}) => {
   const result = await transaction(async (client) => {
     const runId = randomUUID();
@@ -1606,31 +1662,46 @@ export const generateAiPicks = async ({
     );
     const lockedGameKeys = new Set(lockedResult.rows.map((pick) => gameKeyForPick(pick)));
     const openSlots = Math.max(0, maxPicks - lockedGameKeys.size);
-
-    const selected = scored.reduce<ScoredCandidate[]>((acc, candidate) => {
-      if (acc.length >= openSlots) {
-        return acc;
+    const addUniquePick = (acc: ScoredCandidate[], candidate: ScoredCandidate, limit?: number) => {
+      if (limit !== undefined && acc.length >= limit) {
+        return;
       }
       const gameKey = gameKeyForPick(candidate);
       if (lockedGameKeys.has(gameKey)) {
-        return acc;
+        return;
       }
       if (uniqueGames && acc.some((pick) => gameKeyForPick(pick) === gameKey)) {
-        return acc;
+        return;
       }
       acc.push(candidate);
+    };
+
+    const projected = scored.reduce<ScoredCandidate[]>((acc, candidate) => {
+      addUniquePick(acc, candidate, openSlots);
       return acc;
     }, []);
+    const wageringCandidates = scored.reduce<ScoredCandidate[]>((acc, candidate) => {
+      if (candidate.confidence >= aiWagerMinConfidence) {
+        addUniquePick(acc, candidate);
+      }
+      return acc;
+    }, []);
+    const selected = [...projected];
+    for (const candidate of wageringCandidates) {
+      addUniquePick(selected, candidate);
+    }
+
     const aiUser = await client.query<{ id: string }>("SELECT id FROM app_user WHERE username = $1 AND role = 'system'", [
       config.aiUsername
     ]);
     const aiEntry = placeWagers && aiUser.rowCount ? await ensureWeeklyEntry(client, aiUser.rows[0].id) : null;
-    const existingDailyAiWager = placeWagers && aiUser.rowCount
+    const existingDailyAiStraightWager = placeWagers && aiUser.rowCount
       ? await client.query<{ stake_cents: number }>(
         `
           SELECT w.stake_cents
           FROM wager w
           WHERE w.user_id = $1
+            AND w.kind = 'straight'
             AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $2::date
           ORDER BY w.placed_at ASC
           LIMIT 1
@@ -1638,11 +1709,50 @@ export const generateAiPicks = async ({
         [aiUser.rows[0].id, today]
       )
       : null;
-    const dailyStakeCents = existingDailyAiWager?.rowCount
-      ? existingDailyAiWager.rows[0].stake_cents
-      : aiEntry && stakeFractionOfBalance !== undefined
+    const existingDailyAiRoundRobin = placeWagers && aiUser.rowCount
+      ? await client.query<{ id: string; round_robin_stake_per_way_cents: number | null }>(
+        `
+          SELECT w.id, w.round_robin_stake_per_way_cents
+          FROM wager w
+          WHERE w.user_id = $1
+            AND w.kind = 'round_robin'
+            AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $2::date
+          ORDER BY w.placed_at ASC
+          LIMIT 1
+        `,
+        [aiUser.rows[0].id, today]
+      )
+      : null;
+    const dailyAiStake = placeWagers && aiUser.rowCount
+      ? await client.query<{ total_stake_cents: string | null }>(
+        `
+          SELECT COALESCE(sum(w.stake_cents), 0)::text AS total_stake_cents
+          FROM wager w
+          WHERE w.user_id = $1
+            AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $2::date
+        `,
+        [aiUser.rows[0].id, today]
+      )
+      : null;
+    const dailyStartingBankrollCents = aiEntry
+      ? aiEntry.balance_cents + Number(dailyAiStake?.rows[0]?.total_stake_cents ?? 0)
+      : 0;
+    const dailyStraightStakeCents = existingDailyAiStraightWager?.rowCount
+      ? existingDailyAiStraightWager.rows[0].stake_cents
+      : aiEntry && wageringCandidates.length > 0
+        ? Math.max(1, Math.floor((dailyStartingBankrollCents * aiStraightBankrollFraction) / wageringCandidates.length))
+        : aiEntry && stakeFractionOfBalance !== undefined
         ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
         : stakeCents;
+    const roundRobinPicks = wageringCandidates.slice(0, aiRoundRobinPicks);
+    const dailyRoundRobinWays = roundRobinPicks.length === aiRoundRobinPicks
+      ? roundRobinWays(roundRobinPicks.length, roundRobinPicks.length, 2)
+      : 0;
+    const dailyRoundRobinStakePerWayCents = existingDailyAiRoundRobin?.rowCount
+      ? existingDailyAiRoundRobin.rows[0].round_robin_stake_per_way_cents ?? 0
+      : dailyRoundRobinWays > 0
+        ? Math.max(1, Math.floor((dailyStartingBankrollCents * aiRoundRobinBankrollFraction) / dailyRoundRobinWays))
+        : 0;
 
     await client.query(
       `
@@ -1657,26 +1767,70 @@ export const generateAiPicks = async ({
     );
 
     const published: PublishedAiPick[] = [];
+    let dailyRoundRobinWagerId = existingDailyAiRoundRobin?.rows[0]?.id ?? null;
+    const shouldLockRoundRobin = roundRobinPicks.length === aiRoundRobinPicks
+      && dailyRoundRobinWays > 0
+      && now >= new Date(Math.min(...roundRobinPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))
+      && roundRobinPicks.every((pick) => now < pick.starts_at);
+
+    if (
+      shouldLockRoundRobin
+      && placeWagers
+      && aiUser.rowCount
+      && !dailyRoundRobinWagerId
+      && dailyRoundRobinStakePerWayCents > 0
+    ) {
+      dailyRoundRobinWagerId = await placeAiRoundRobinWager(
+        client,
+        aiUser.rows[0].id,
+        roundRobinPicks,
+        dailyRoundRobinStakePerWayCents
+      );
+    }
 
     for (const candidate of selected) {
       const lockAt = new Date(candidate.starts_at.getTime() - lockWindowMinutes * 60 * 1000);
       const shouldLock = now >= lockAt && now < candidate.starts_at;
+      const shouldWagerStraight = shouldLock && candidate.confidence >= aiWagerMinConfidence;
       let wagerId: string | null = null;
 
-      if (shouldLock && placeWagers && aiUser.rowCount) {
+      if (shouldWagerStraight && placeWagers && aiUser.rowCount) {
         const existing = await client.query<{ wager_id: string | null }>(
           `
             SELECT w.id AS wager_id
             FROM wager w
             JOIN wager_leg wl ON wl.wager_id = w.id
+            JOIN game_line gl ON gl.id = wl.game_line_id
             WHERE w.user_id = $1 AND wl.game_line_id = $2
+              AND w.kind = 'straight'
+              AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $3::date
+            UNION ALL
+            SELECT w.id AS wager_id
+            FROM wager w
+            JOIN wager_leg wl ON wl.wager_id = w.id
+            JOIN game_line gl ON gl.id = wl.game_line_id
+            WHERE w.user_id = $1
+              AND w.kind = 'straight'
+              AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $3::date
+              AND gl.sport = $4
+              AND gl.away_team = $5
+              AND gl.home_team = $6
+              AND gl.starts_at BETWEEN $7::timestamptz - interval '3 hours' AND $7::timestamptz + interval '3 hours'
             LIMIT 1
           `,
-          [aiUser.rows[0].id, candidate.id]
+          [
+            aiUser.rows[0].id,
+            candidate.id,
+            today,
+            candidate.sport,
+            candidate.away_team,
+            candidate.home_team,
+            candidate.starts_at
+          ]
         );
         wagerId = existing.rows[0]?.wager_id ?? null;
         if (!wagerId) {
-          wagerId = await placeAiWager(client, aiUser.rows[0].id, candidate, dailyStakeCents);
+          wagerId = await placeAiWager(client, aiUser.rows[0].id, candidate, dailyStraightStakeCents);
         }
       }
 
@@ -1735,7 +1889,7 @@ export const generateAiPicks = async ({
         score: Number(candidate.score.toFixed(4)),
         confidence: Number(candidate.confidence.toFixed(4)),
         edge: Number(candidate.edge.toFixed(4)),
-        stakeCents: shouldLock && placeWagers ? dailyStakeCents : 0,
+        stakeCents: shouldWagerStraight && placeWagers ? dailyStraightStakeCents : 0,
         locked: shouldLock,
         wagerId,
         reasons: candidate.reasons,

@@ -130,8 +130,7 @@ cron.schedule("*/10 8-20 * * *", async () => {
       placeWagers: true,
       marketKey: "h2h",
       sortBy: "confidence",
-      uniqueGames: true,
-      stakeFractionOfBalance: 0.05
+      uniqueGames: true
     });
   } catch (error) {
     console.error("Scheduled odds refresh failed", error);

@@ -54,8 +54,7 @@ const run = async () => {
     marketKey: "h2h",
     forDate: todayCentral,
     sortBy: "confidence",
-    uniqueGames: true,
-    stakeFractionOfBalance: 0.05
+    uniqueGames: true
   });
 
   return {

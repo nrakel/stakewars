@@ -16,7 +16,15 @@ try {
     forDate: args.get("date"),
     sortBy: (args.get("sort") ?? "score") as "score" | "confidence",
     uniqueGames: args.get("unique-games") === "true",
-    stakeFractionOfBalance: args.has("stake-fraction") ? Number(args.get("stake-fraction")) : undefined
+    stakeFractionOfBalance: args.has("stake-fraction") ? Number(args.get("stake-fraction")) : undefined,
+    aiWagerMinConfidence: args.has("min-confidence") ? Number(args.get("min-confidence")) : undefined,
+    aiStraightBankrollFraction: args.has("straight-bankroll-fraction")
+      ? Number(args.get("straight-bankroll-fraction"))
+      : undefined,
+    aiRoundRobinBankrollFraction: args.has("round-robin-bankroll-fraction")
+      ? Number(args.get("round-robin-bankroll-fraction"))
+      : undefined,
+    aiRoundRobinPicks: args.has("round-robin-picks") ? Number(args.get("round-robin-picks")) : undefined
   });
   console.log(JSON.stringify(result, null, 2));
 } finally {
