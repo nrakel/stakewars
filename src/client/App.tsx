@@ -971,10 +971,9 @@ function App() {
   );
   const conflictsWithLine = (selectedLine: GameLine, existingLine: GameLine | undefined) => {
     if (!sameGame(selectedLine, existingLine) || !existingLine) return false;
-    if (selectedLine.marketKey === "totals") {
-      return existingLine.marketKey === "totals" && existingLine.favoriteTeam !== selectedLine.favoriteTeam;
-    }
-    return existingLine.marketKey !== "totals" && existingLine.favoriteTeam !== selectedLine.favoriteTeam;
+    return selectedLine.marketKey === "totals"
+      ? existingLine.marketKey === "totals"
+      : existingLine.marketKey !== "totals";
   };
 
   const addLeg = (line: GameMarketSide) => {

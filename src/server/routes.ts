@@ -103,6 +103,9 @@ const wagerMarketLabel = (marketKey: MarketKey) => {
 const unavailableLineMessage = (line: WagerLineRow) =>
   `${line.away_team} @ ${line.home_team} ${line.favorite_team} ${wagerMarketLabel(line.market_key)} is no longer available`;
 
+const sameGameKey = (line: Pick<WagerLineRow, "sport" | "away_team" | "home_team" | "starts_at">) =>
+  `${line.sport}:${line.away_team}:${line.home_team}:${line.starts_at.toISOString()}`;
+
 const historyQuerySchema = z.object({
   period: z.enum(["day", "week", "all"]).default("week"),
   includeAi: z.enum(["true", "false"]).default("false")
@@ -1208,27 +1211,19 @@ export const registerRoutes = (router: Router) => {
         }
 
         const lines = new Map(input.legs.map((leg, index) => [leg.gameLineId, selectedLines[index]]));
-        for (let leftIndex = 0; leftIndex < selectedLines.length; leftIndex += 1) {
-          for (let rightIndex = leftIndex + 1; rightIndex < selectedLines.length; rightIndex += 1) {
-            const left = selectedLines[leftIndex];
-            const right = selectedLines[rightIndex];
-            const sameGame = left.sport === right.sport
-              && left.away_team === right.away_team
-              && left.home_team === right.home_team
-              && left.starts_at.getTime() === right.starts_at.getTime();
-            if (!sameGame) {
-              continue;
-            }
-            const conflictingTotals = left.market_key === "totals"
-              && right.market_key === "totals"
-              && left.favorite_team !== right.favorite_team;
-            const conflictingSides = left.market_key !== "totals"
-              && right.market_key !== "totals"
-              && left.favorite_team !== right.favorite_team;
-            if (conflictingTotals || conflictingSides) {
-              throw new Error("Selected outcomes conflict for the same game");
-            }
+        const sameGameSelections = new Map<string, { teamMarkets: number; totals: number }>();
+        for (const line of selectedLines) {
+          const key = sameGameKey(line);
+          const summary = sameGameSelections.get(key) ?? { teamMarkets: 0, totals: 0 };
+          if (line.market_key === "totals") {
+            summary.totals += 1;
+          } else {
+            summary.teamMarkets += 1;
           }
+          if (summary.teamMarkets > 1 || summary.totals > 1) {
+            throw new Error("Only one team pick and one over/under are allowed for the same game");
+          }
+          sameGameSelections.set(key, summary);
         }
         const odds = input.legs.map((leg) => {
           const line = lines.get(leg.gameLineId)!;
@@ -1293,7 +1288,7 @@ export const registerRoutes = (router: Router) => {
         res.status(400).json({ error: "Insufficient bankroll" });
         return;
       }
-      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("no longer available") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("round robin")) {
+      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("no longer available") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("Only one team pick") || (error as Error).message.includes("round robin")) {
         res.status(400).json({ error: (error as Error).message });
         return;
       }
