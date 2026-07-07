@@ -951,6 +951,8 @@ function App() {
   const lockedAiPicks = aiPicks.filter((pick) => Boolean(pick.lockedAt));
   const projectedAiPicks = aiPicks.filter((pick) => !pick.lockedAt);
   const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.beatAi);
+  const rewardShares = [50, 35, 15];
+  const rewardShareByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [row.rank, rewardShares[index] ?? 0]));
   const leaderboardWinner = qualifiedLeaderboardRows[0];
 
   useEffect(() => {
@@ -1842,8 +1844,8 @@ function App() {
                   <span>
                     {row.rank}. {row.displayName}
                     {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && (
-                      <small className={row.beatAi ? "qualified-badge" : "disqualified-badge"}>
-                        {row.beatAi ? "Qualified" : "Did not beat AI"}
+                      <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
+                        {row.beatAi ? `${rewardShareByRank.get(row.rank) ?? 0}% reward` : "Did not beat AI"}
                       </small>
                     )}
                   </span>

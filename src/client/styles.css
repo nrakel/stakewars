@@ -491,7 +491,7 @@ textarea {
   flex-wrap: wrap;
 }
 
-.qualified-badge,
+.reward-share-badge,
 .disqualified-badge {
   display: inline-flex;
   align-items: center;
@@ -502,7 +502,7 @@ textarea {
   font-weight: 800;
 }
 
-.qualified-badge {
+.reward-share-badge {
   background: #d7f36b;
   color: #14201c;
 }
