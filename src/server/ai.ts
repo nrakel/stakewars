@@ -214,6 +214,23 @@ const storedContextExactKey = (startsAt: Date | string, awayTeam: string, homeTe
 const storedContextDateKey = (startsOn: string, awayTeam: string, homeTeam: string) =>
   `${startsOn}:${awayTeam}:${homeTeam}`;
 
+const nearestStoredContext = (
+  line: Pick<CandidateLine, "starts_at" | "away_team" | "home_team">,
+  contexts: Array<MlbStoredContext & { away_team: string; home_team: string }>,
+  toleranceMinutes = 90
+) => {
+  const candidates = contexts
+    .filter((context) => context.away_team === line.away_team && context.home_team === line.home_team)
+    .map((context) => ({
+      context,
+      diffMs: Math.abs(context.starts_at.getTime() - line.starts_at.getTime())
+    }))
+    .filter((candidate) => candidate.diffMs <= toleranceMinutes * 60 * 1000)
+    .sort((left, right) => left.diffMs - right.diffMs);
+
+  return candidates[0]?.context;
+};
+
 const centralDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Chicago",
@@ -1027,6 +1044,30 @@ export const scoreLine = (
       reasons.push("Starting pitcher command concern");
     }
 
+    const dominantStarterEdgeSignals = [
+      (context.starterEraDiff ?? 0) <= -2,
+      (context.starterWhipDiff ?? 0) <= -0.4,
+      (context.starterHomeRunsPer9Diff ?? 0) <= -0.4,
+      (context.starterStrikeoutsPer9Diff ?? 0) >= 3,
+      (context.starterWalksPer9Diff ?? 0) <= -1,
+      (context.starterKbbDiff ?? 0) >= 2.5
+    ].filter(Boolean).length;
+    const dominantStarterConcernSignals = [
+      (context.starterEraDiff ?? 0) >= 2,
+      (context.starterWhipDiff ?? 0) >= 0.4,
+      (context.starterHomeRunsPer9Diff ?? 0) >= 0.4,
+      (context.starterStrikeoutsPer9Diff ?? 0) <= -3,
+      (context.starterWalksPer9Diff ?? 0) >= 1,
+      (context.starterKbbDiff ?? 0) <= -2.5
+    ].filter(Boolean).length;
+    if (dominantStarterEdgeSignals >= 4) {
+      fair += 0.04;
+      reasons.push("Dominant starting pitcher mismatch edge");
+    } else if (dominantStarterConcernSignals >= 4) {
+      fair -= 0.04;
+      reasons.push("Dominant starting pitcher mismatch concern");
+    }
+
     if ((context.starterRecentEraDiff ?? 0) <= -0.75) {
       fair += 0.003;
       reasons.push("Recent starting pitcher ERA edge");
@@ -1112,7 +1153,7 @@ export const scoreLine = (
 
   fair = clamp(fair, 0.02, 0.92);
   const edge = fair - implied;
-  const confidence = clamp(0.45 + edge * 4, 0.1, 0.82);
+  const confidence = clamp(fair + Math.max(edge, 0) * 2, 0.1, 0.9);
   const score = edge * 100 + confidence * 10;
 
   return {
@@ -1302,7 +1343,7 @@ const buildMlbContexts = async (client: pg.PoolClient, lines: CandidateLine[]) =
     [dates[0], end, teams]
   );
   const storedByExactGame = new Map<string, MlbStoredContext>();
-  const storedByDateGame = new Map<string, MlbStoredContext[]>();
+  const storedByDateGame = new Map<string, Array<MlbStoredContext & { away_team: string; home_team: string }>>();
   for (const context of storedContexts.rows) {
     storedByExactGame.set(storedContextExactKey(context.starts_at, context.away_team, context.home_team), context);
     const dateKey = storedContextDateKey(context.starts_on, context.away_team, context.home_team);
@@ -1358,7 +1399,9 @@ const buildMlbContexts = async (client: pg.PoolClient, lines: CandidateLine[]) =
     const selectedSide = selected === line.away_team ? "away" : "home";
     const exactStored = storedByExactGame.get(storedContextExactKey(line.starts_at, line.away_team, line.home_team));
     const dateStored = storedByDateGame.get(storedContextDateKey(startsOn, line.away_team, line.home_team)) ?? [];
-    const stored = exactStored ?? (dateStored.length === 1 ? dateStored[0] : undefined);
+    const stored = exactStored
+      ?? nearestStoredContext(line, dateStored)
+      ?? (dateStored.length === 1 ? dateStored[0] : undefined);
 
     contexts.set(line.id, contextFromStored({
       winPctDiff7: diffOrNull(selected7?.winPct, opponent7?.winPct),
@@ -1429,8 +1472,9 @@ const placeAiWager = async (
   return wagerId;
 };
 
-const gameKeyForPick = (pick: Pick<CandidateLine, "starts_at" | "away_team" | "home_team">) =>
-  `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
+const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_at" | "away_team" | "home_team">) =>
+  pick.provider_event_id?.split(":")[0]
+    ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
 
 export const generateAiPicks = async ({
   sport = "MLB",
@@ -1544,13 +1588,14 @@ export const generateAiPicks = async ({
 
     const lockedResult = await client.query<{
       game_line_id: string;
+      provider_event_id: string | null;
       starts_at: Date;
       away_team: string;
       home_team: string;
       selected_team: string;
     }>(
       `
-        SELECT p.game_line_id, gl.starts_at, gl.away_team, gl.home_team, p.selected_team
+        SELECT p.game_line_id, gl.provider_event_id, gl.starts_at, gl.away_team, gl.home_team, p.selected_team
         FROM ai_pick p
         JOIN game_line gl ON gl.id = p.game_line_id
         WHERE p.published_for = $1
