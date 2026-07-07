@@ -954,6 +954,9 @@ function App() {
   const rewardShares = [50, 35, 15];
   const rewardShareByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [row.rank, rewardShares[index] ?? 0]));
   const leaderboardWinner = qualifiedLeaderboardRows[0];
+  const winnerRank = leaderboardIsCurrentWeek
+    ? leaderboard.find((row) => row.rank === 1)?.rank
+    : leaderboardWinner?.rank;
 
   useEffect(() => {
     if (firstAvailableSport && !sportsWithLines.has(lineSport)) {
@@ -1842,7 +1845,9 @@ function App() {
               {leaderboard.map((row) => (
                 <li key={`${row.rank}-${row.displayName}`}>
                   <span>
-                    {row.rank}. {row.displayName}
+                    {row.rank}. {row.rank === winnerRank && (
+                      <img className="leaderboard-crown" src="/images/stakewars-crown.png" alt="" aria-hidden="true" />
+                    )}{row.displayName}
                     {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && (
                       <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
                         {row.beatAi ? `${rewardShareByRank.get(row.rank) ?? 0}% reward` : "Did not beat AI"}

@@ -491,6 +491,13 @@ textarea {
   flex-wrap: wrap;
 }
 
+.leaderboard-crown {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
 .reward-share-badge,
 .disqualified-badge {
   display: inline-flex;
@@ -510,6 +517,13 @@ textarea {
 .disqualified-badge {
   background: #fee2e2;
   color: #991b1b;
+}
+
+@media (min-width: 861px) {
+  .leaderboard-crown {
+    width: 24px;
+    height: 24px;
+  }
 }
 
 .panel-title span {
