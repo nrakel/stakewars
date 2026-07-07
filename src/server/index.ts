@@ -96,6 +96,17 @@ const termsHtml = legalPage({
   ]
 });
 
+const redditApiHtml = legalPage({
+  title: "StakeWars Reddit API",
+  sections: [
+    { heading: "Purpose", body: "This hostname is used only by the StakeWars Reddit Devvit app to publish admin-approved public contest posts from Reddit's server runtime." },
+    { heading: "Endpoints", body: "The Devvit app calls POST /api/devvit/reddit/claim to claim one approved draft and POST /api/devvit/reddit/result to report whether Reddit publishing succeeded or failed." },
+    { heading: "Authentication", body: "Both endpoints require Authorization: Bearer <shared secret>. The shared secret is configured by a subreddit moderator and is not exposed publicly." },
+    { heading: "Data", body: "The claim response contains only the queue id, subreddit, title, body, and created timestamp for an admin-approved draft. The result request sends only the queue id, status, Reddit post id or URL when available, and an error message when publishing fails." },
+    { heading: "Reddit User Data", body: "This API does not collect Reddit user data, scrape Reddit, vote, send direct messages, or read private subreddit data. Reddit is used only as the publishing destination for moderator-approved public posts." }
+  ]
+});
+
 const app = express();
 const api = express.Router();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -113,6 +124,13 @@ registerRoutes(api);
 app.use("/api", api);
 app.get("/privacy", (_req, res) => res.type("html").send(privacyHtml));
 app.get("/terms", (_req, res) => res.type("html").send(termsHtml));
+app.get("/", (req, res, next) => {
+  if (req.hostname === "reddit-api.stakewars.phisystems.ai") {
+    res.type("html").send(redditApiHtml);
+    return;
+  }
+  next();
+});
 
 cron.schedule("*/10 8-20 * * *", async () => {
   try {

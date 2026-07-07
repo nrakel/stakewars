@@ -39,10 +39,11 @@ type DevvitContext = {
 
 const stakeWarsOriginKey = "stakewars:origin";
 const stakeWarsSharedSecretKey = "stakewars:shared-secret";
+const defaultStakeWarsOrigin = "https://reddit-api.stakewars.phisystems.ai";
 
 Devvit.configure({
   http: {
-    domains: ["stakewars.phisystems.ai"]
+    domains: ["reddit-api.stakewars.phisystems.ai"]
   },
   redditAPI: true
 });
@@ -53,7 +54,7 @@ Devvit.addSettings([
     name: "stakewars-origin",
     label: "StakeWars origin",
     scope: SettingScope.App,
-    defaultValue: "https://stakewars.phisystems.ai"
+    defaultValue: defaultStakeWarsOrigin
   },
   {
     type: "string",
@@ -74,7 +75,7 @@ const configureStakeWarsForm = Devvit.createForm({
       name: "origin",
       label: "StakeWars origin",
       required: true,
-      defaultValue: "https://stakewars.phisystems.ai"
+      defaultValue: defaultStakeWarsOrigin
     },
     {
       type: "string",
@@ -113,7 +114,7 @@ const stakeWarsFetch = async <T>(context: DevvitContext, path: string, body?: un
   const origin = normalizeOrigin(
     (await context.redis.get(stakeWarsOriginKey))
     || (await context.settings.get<string>("stakewars-origin"))
-    || "https://stakewars.phisystems.ai"
+    || defaultStakeWarsOrigin
   );
   const secret = (await context.redis.get(stakeWarsSharedSecretKey))
     || (await context.settings.get<string>("stakewars-shared-secret"));

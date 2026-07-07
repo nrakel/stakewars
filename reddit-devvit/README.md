@@ -11,7 +11,7 @@ Configure StakeWars from Reddit after installing the app:
 1. Open the installed app menu in the subreddit.
 2. Select `Configure StakeWars`.
 3. Enter:
-   - `StakeWars origin`: `https://stakewars.phisystems.ai`
+   - `StakeWars origin`: `https://reddit-api.stakewars.phisystems.ai`
    - `StakeWars shared secret`: the same value as `REDDIT_DEVVIT_SHARED_SECRET` in `/etc/stakewars/stakewars.env`
 
 These values are stored in Devvit Redis for the app. The app also declares these
@@ -23,7 +23,7 @@ only allows masked secret fields in app settings, not regular action forms.
 
 Fallback app settings, if the portal exposes them later:
 
-- `stakewars-origin`: `https://stakewars.phisystems.ai`
+- `stakewars-origin`: `https://reddit-api.stakewars.phisystems.ai`
 - `stakewars-shared-secret`: the same value as `REDDIT_DEVVIT_SHARED_SECRET` in `/etc/stakewars/stakewars.env`
 
 The app has been uploaded to Reddit as `stakewars-picks`.
@@ -40,12 +40,18 @@ This app requests the following Devvit HTTP fetch domain:
 
 | Domain | Direction | Purpose |
 | --- | --- | --- |
-| `stakewars.phisystems.ai` | Devvit -> StakeWars | Claim one admin-approved Reddit post from the StakeWars queue and report whether Reddit publishing succeeded or failed. |
+| `reddit-api.stakewars.phisystems.ai` | Devvit -> StakeWars | Claim one admin-approved Reddit post from the StakeWars queue and report whether Reddit publishing succeeded or failed. |
 
 The app calls only these StakeWars endpoints:
 
-- `POST https://stakewars.phisystems.ai/api/devvit/reddit/claim`
-- `POST https://stakewars.phisystems.ai/api/devvit/reddit/result`
+- `POST https://reddit-api.stakewars.phisystems.ai/api/devvit/reddit/claim`
+- `POST https://reddit-api.stakewars.phisystems.ai/api/devvit/reddit/result`
+
+Reviewer-facing pages for the requested fetch domain:
+
+- `https://reddit-api.stakewars.phisystems.ai/`
+- `https://reddit-api.stakewars.phisystems.ai/terms`
+- `https://reddit-api.stakewars.phisystems.ai/privacy`
 
 Both requests use `Authorization: Bearer <stakewars-shared-secret>`. The shared
 secret is configured by a moderator through the `Configure StakeWars` menu item
