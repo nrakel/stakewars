@@ -1543,6 +1543,36 @@ textarea {
   text-transform: uppercase;
 }
 
+.betslip-bankroll {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid #dbe0e6;
+  border-radius: 6px;
+  background: #fbfcfa;
+  padding: 8px 10px;
+}
+
+.combined-stake-box .betslip-bankroll {
+  margin-top: 0;
+}
+
+.betslip-bankroll span {
+  color: #697181;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.betslip-bankroll strong {
+  color: #111827;
+  font-size: 0.95rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
 .stake-all-field {
   margin-top: 14px;
 }

@@ -1078,6 +1078,13 @@ function App() {
     return { maxLegs, ways: roundRobinWays(includedSlip.length, maxLegs) };
   });
   const scoreboardGames = liveGames.filter((game) => game.sport === scoreboardSport);
+  const bankrollValue = bankroll ? money(bankroll.balance_cents) : "$0.00";
+  const bankrollInline = (
+    <div className="betslip-bankroll">
+      <span>Available bankroll</span>
+      <strong>{bankrollValue}</strong>
+    </div>
+  );
 
   useEffect(() => {
     if (roundRobinMaxLegs > includedSlip.length) {
@@ -1591,17 +1598,20 @@ function App() {
                   ))}
                 </div>
                 {kind === "straight" && slip.length > 0 && (
-                  <label className="stake-all-field">
-                    Place wager for all games
-                    <input
-                      type="number"
-                      value={singleStakeAll}
-                      min={1}
-                      step="1"
-                      placeholder="0"
-                      onChange={(event) => updateSingleStakeAll(event.target.value)}
-                    />
-                  </label>
+                  <>
+                    {bankrollInline}
+                    <label className="stake-all-field">
+                      Place wager for all games
+                      <input
+                        type="number"
+                        value={singleStakeAll}
+                        min={1}
+                        step="1"
+                        placeholder="0"
+                        onChange={(event) => updateSingleStakeAll(event.target.value)}
+                      />
+                    </label>
+                  </>
                 )}
                 <div className="slip-list">
                   {slip.length === 0 ? <p className="muted">No selections yet.</p> : slip.map((leg) => {
@@ -1673,6 +1683,7 @@ function App() {
                         </select>
                       </label>
                     )}
+                    {bankrollInline}
                     <label className="stake-field">
                       {kind === "round_robin" ? "Wager per bet ($)" : "Wager ($)"}
                       <input type="number" value={stake} min={1} step="1" onChange={(event) => setStake(event.target.value)} />
