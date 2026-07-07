@@ -79,7 +79,28 @@ type UserDisplayMapRow = {
   createdAt: string;
 };
 
+type LeaderboardWeek = {
+  weekStart: string;
+  isCurrent: boolean;
+};
+
+type LeaderboardResponse = {
+  leaderboard: LeaderboardRow[];
+  weeks: LeaderboardWeek[];
+  weekStart: string | null;
+  isCurrentWeek: boolean;
+};
+
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+
+const weekRangeLabel = (weekStart: string) => {
+  const start = new Date(`${weekStart}T00:00:00Z`);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  const startLabel = start.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+  const endLabel = end.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return `${startLabel} - ${endLabel}`;
+};
 
 const americanOdds = (odds: number) => `${odds > 0 ? "+" : ""}${odds}`;
 
@@ -665,6 +686,9 @@ function App() {
   const [markets, setMarkets] = useState<GameMarket[]>([]);
   const [games, setGames] = useState<GameCard[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardRow[]>([]);
+  const [leaderboardWeeks, setLeaderboardWeeks] = useState<LeaderboardWeek[]>([]);
+  const [leaderboardWeekStart, setLeaderboardWeekStart] = useState("");
+  const [leaderboardIsCurrentWeek, setLeaderboardIsCurrentWeek] = useState(true);
   const [liveGames, setLiveGames] = useState<LiveGameState[]>([]);
   const [openBets, setOpenBets] = useState<OpenBet[]>([]);
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
@@ -712,9 +736,10 @@ function App() {
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
 
   const refresh = async (authToken = token) => {
+    const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
     const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult, liveWorldCupResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
-      api<{ leaderboard: LeaderboardRow[] }>("/leaderboard"),
+      api<LeaderboardResponse>(leaderboardPath),
       api<{ picks: any[] }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
       api<{ games: LiveGameState[] }>("/live/epl"),
@@ -724,6 +749,11 @@ function App() {
     setMarkets(lineResult.markets ?? []);
     setGames(lineResult.games ?? []);
     setLeaderboard(boardResult.leaderboard);
+    setLeaderboardWeeks(boardResult.weeks ?? []);
+    setLeaderboardIsCurrentWeek(boardResult.isCurrentWeek);
+    if (boardResult.weekStart && (!leaderboardWeekStart || leaderboardWeekStart !== boardResult.weekStart)) {
+      setLeaderboardWeekStart(boardResult.weekStart);
+    }
     setAiPicks(aiResult.picks);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
@@ -752,6 +782,17 @@ function App() {
     }
     const result = await api<{ wagers: SettledBet[] }>(`/wagers/history?period=${period}&includeAi=${includeAi ? "true" : "false"}`, {}, authToken);
     setHistoryBets(result.wagers);
+  };
+
+  const loadLeaderboardWeek = async (weekStart: string) => {
+    setLeaderboardWeekStart(weekStart);
+    const result = await api<LeaderboardResponse>(`/leaderboard?weekStart=${encodeURIComponent(weekStart)}`);
+    setLeaderboard(result.leaderboard);
+    setLeaderboardWeeks(result.weeks ?? []);
+    setLeaderboardIsCurrentWeek(result.isCurrentWeek);
+    if (result.weekStart) {
+      setLeaderboardWeekStart(result.weekStart);
+    }
   };
 
   const isMobileLayout = () => window.matchMedia("(max-width: 860px)").matches;
@@ -861,7 +902,7 @@ function App() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("online", onFocus);
     };
-  }, [token, historyPeriod, historyIncludeAi]);
+  }, [token, historyPeriod, historyIncludeAi, leaderboardWeekStart]);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
@@ -909,6 +950,8 @@ function App() {
   );
   const lockedAiPicks = aiPicks.filter((pick) => Boolean(pick.lockedAt));
   const projectedAiPicks = aiPicks.filter((pick) => !pick.lockedAt);
+  const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.beatAi);
+  const leaderboardWinner = qualifiedLeaderboardRows[0];
 
   useEffect(() => {
     if (firstAvailableSport && !sportsWithLines.has(lineSport)) {
@@ -1765,12 +1808,45 @@ function App() {
           <div className="panel page-panel">
             <div className="panel-title">
               <Trophy size={20} />
-              <h2>Leaderboard</h2>
+              <div>
+                <h2>Leaderboard</h2>
+                <span>{leaderboardIsCurrentWeek ? "Current week" : "Previous week"} standings</span>
+              </div>
             </div>
+            {leaderboardWeeks.length > 0 && (
+              <label className="leaderboard-week-select">
+                Week
+                <select value={leaderboardWeekStart} onChange={(event) => void loadLeaderboardWeek(event.target.value)}>
+                  {leaderboardWeeks.map((week) => (
+                    <option key={week.weekStart} value={week.weekStart}>
+                      {weekRangeLabel(week.weekStart)}{week.isCurrent ? " (Current)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {!leaderboardIsCurrentWeek && (
+              <div className="leaderboard-summary">
+                <span>Winner</span>
+                <strong>{leaderboardWinner ? `${leaderboardWinner.displayName} ${money(leaderboardWinner.balanceCents)}` : "No eligible winner"}</strong>
+                <small>
+                  {qualifiedLeaderboardRows.length > 0
+                    ? `${qualifiedLeaderboardRows.length} top-three ${qualifiedLeaderboardRows.length === 1 ? "player beat" : "players beat"} the StakeWars AI Bot.`
+                    : "No top-three player beat the StakeWars AI Bot."}
+                </small>
+              </div>
+            )}
             <ol className="leaderboard leaderboard-page-list">
               {leaderboard.map((row) => (
                 <li key={`${row.rank}-${row.displayName}`}>
-                  <span>{row.rank}. {row.displayName}</span>
+                  <span>
+                    {row.rank}. {row.displayName}
+                    {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && (
+                      <small className={row.beatAi ? "qualified-badge" : "disqualified-badge"}>
+                        {row.beatAi ? "Qualified" : "Did not beat AI"}
+                      </small>
+                    )}
+                  </span>
                   <strong>{money(row.balanceCents)}</strong>
                 </li>
               ))}

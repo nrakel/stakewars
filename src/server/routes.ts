@@ -762,18 +762,37 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.get("/leaderboard", async (_req, res, next) => {
+  router.get("/leaderboard", async (req, res, next) => {
     try {
+      const requestedWeekStart = typeof req.query.weekStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.weekStart)
+        ? req.query.weekStart
+        : null;
+      const weeks = await query(
+        `
+          WITH current_week AS (
+            SELECT (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS week_start
+          )
+          SELECT
+            e.week_starts_on::text AS "weekStart",
+            e.week_starts_on = (SELECT week_start FROM current_week) AS "isCurrent"
+          FROM weekly_entry e
+          GROUP BY e.week_starts_on
+          ORDER BY e.week_starts_on DESC
+        `
+      );
       const result = await query(
         `
           WITH current_week AS (
             SELECT (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS week_start
           ),
+          selected_week AS (
+            SELECT COALESCE($2::date, (SELECT week_start FROM current_week)) AS week_start
+          ),
           ai AS (
             SELECT e.starting_bankroll_cents + e.settled_profit_cents AS leaderboard_cents
             FROM weekly_entry e
             JOIN app_user u ON u.id = e.user_id
-            JOIN current_week cw ON cw.week_start = e.week_starts_on
+            JOIN selected_week sw ON sw.week_start = e.week_starts_on
             WHERE u.username = $1
             LIMIT 1
           ),
@@ -785,7 +804,7 @@ export const registerRoutes = (router: Router) => {
               e.settled_profit_cents
             FROM weekly_entry e
             JOIN app_user u ON u.id = e.user_id
-            JOIN current_week cw ON cw.week_start = e.week_starts_on
+            JOIN selected_week sw ON sw.week_start = e.week_starts_on
             WHERE u.role IN ('player', 'system')
           )
           SELECT
@@ -806,9 +825,15 @@ export const registerRoutes = (router: Router) => {
           ORDER BY leaderboard_cents DESC, settled_profit_cents DESC
           LIMIT 100
         `,
-        [config.aiUsername]
+        [config.aiUsername, requestedWeekStart]
       );
-      res.json({ leaderboard: result.rows });
+      const currentWeek = weeks.rows.find((week) => week.isCurrent) as { weekStart: string; isCurrent: boolean } | undefined;
+      res.json({
+        leaderboard: result.rows,
+        weeks: weeks.rows,
+        weekStart: requestedWeekStart ?? currentWeek?.weekStart ?? null,
+        isCurrentWeek: requestedWeekStart ? requestedWeekStart === currentWeek?.weekStart : true
+      });
     } catch (error) {
       next(error);
     }

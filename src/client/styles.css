@@ -452,10 +452,71 @@ textarea {
   max-width: 720px;
 }
 
+.leaderboard-week-select {
+  max-width: 320px;
+  margin-bottom: 14px;
+}
+
+.leaderboard-summary {
+  display: grid;
+  gap: 3px;
+  max-width: 720px;
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #f8faf6;
+}
+
+.leaderboard-summary span,
+.leaderboard-summary small {
+  color: #65736d;
+}
+
+.leaderboard-summary strong {
+  color: #14201c;
+  font-size: 1.05rem;
+}
+
 .leaderboard-page-list li {
   min-height: 48px;
   align-items: center;
   border-bottom: 1px solid #edf0ed;
+}
+
+.leaderboard-page-list li span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.qualified-badge,
+.disqualified-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.qualified-badge {
+  background: #d7f36b;
+  color: #14201c;
+}
+
+.disqualified-badge {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.panel-title span {
+  display: block;
+  color: #65736d;
+  font-size: 0.86rem;
+  font-weight: 600;
 }
 
 .account-page {
