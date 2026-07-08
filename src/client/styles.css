@@ -457,25 +457,59 @@ textarea {
   margin-bottom: 14px;
 }
 
-.leaderboard-summary {
-  display: grid;
-  gap: 3px;
+.leaderboard-leaders-box {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   max-width: 720px;
   margin-bottom: 14px;
-  padding: 12px 14px;
+  padding: 14px;
   border: 1px solid #dfe5df;
   border-radius: 8px;
   background: #f8faf6;
 }
 
-.leaderboard-summary span,
-.leaderboard-summary small {
+.leaders-crown {
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  flex: 0 0 auto;
+}
+
+.leaders-content {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+
+.leaders-content > span,
+.leaders-list small {
   color: #65736d;
 }
 
-.leaderboard-summary strong {
+.leaders-content > span {
+  font-size: 0.86rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.leaders-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+}
+
+.leaders-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.leaders-list strong,
+.leaders-content > strong {
   color: #14201c;
-  font-size: 1.05rem;
+  font-size: 1.03rem;
 }
 
 .leaderboard-page-list li {
@@ -489,13 +523,6 @@ textarea {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.leaderboard-crown {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
-  flex: 0 0 auto;
 }
 
 .reward-share-badge,
@@ -520,9 +547,9 @@ textarea {
 }
 
 @media (min-width: 861px) {
-  .leaderboard-crown {
-    width: 30px;
-    height: 30px;
+  .leaders-crown {
+    width: 72px;
+    height: 72px;
   }
 }
 

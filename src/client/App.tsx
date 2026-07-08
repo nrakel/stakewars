@@ -953,10 +953,6 @@ function App() {
   const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.beatAi);
   const rewardShares = [50, 35, 15];
   const rewardShareByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [row.rank, rewardShares[index] ?? 0]));
-  const leaderboardWinner = qualifiedLeaderboardRows[0];
-  const winnerRank = leaderboardIsCurrentWeek
-    ? leaderboard.find((row) => row.rank === 1)?.rank
-    : leaderboardWinner?.rank;
 
   useEffect(() => {
     if (firstAvailableSport && !sportsWithLines.has(lineSport)) {
@@ -1830,24 +1826,32 @@ function App() {
                 </select>
               </label>
             )}
-            {!leaderboardIsCurrentWeek && (
-              <div className="leaderboard-summary">
-                <span>Winner</span>
-                <strong>{leaderboardWinner ? `${leaderboardWinner.displayName} ${money(leaderboardWinner.balanceCents)}` : "No eligible winner"}</strong>
-                <small>
-                  {qualifiedLeaderboardRows.length > 0
-                    ? `${qualifiedLeaderboardRows.length} top-three ${qualifiedLeaderboardRows.length === 1 ? "player beat" : "players beat"} the StakeWars AI Bot.`
-                    : "No top-three player beat the StakeWars AI Bot."}
-                </small>
+            <div className="leaderboard-leaders-box">
+              <img className="leaders-crown" src="/images/stakewars-crown.png" alt="" aria-hidden="true" />
+              <div className="leaders-content">
+                <span>{leaderboardIsCurrentWeek ? "Current eligible leaders" : "Eligible winners"}</span>
+                {qualifiedLeaderboardRows.length > 0 ? (
+                  <ol className="leaders-list">
+                    {qualifiedLeaderboardRows.map((row) => (
+                      <li key={`leader-${row.rank}-${row.displayName}`}>
+                        <strong>{row.rank}. {row.displayName}</strong>
+                        <small>
+                          {money(row.balanceCents)}
+                          {!leaderboardIsCurrentWeek && ` • ${rewardShareByRank.get(row.rank) ?? 0}% reward`}
+                        </small>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <strong>No eligible leaders yet</strong>
+                )}
               </div>
-            )}
+            </div>
             <ol className="leaderboard leaderboard-page-list">
               {leaderboard.map((row) => (
                 <li key={`${row.rank}-${row.displayName}`}>
                   <span>
-                    {row.rank}. {row.rank === winnerRank && (
-                      <img className="leaderboard-crown" src="/images/stakewars-crown.png" alt="" aria-hidden="true" />
-                    )}{row.displayName}
+                    {row.rank}. {row.displayName}
                     {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && (
                       <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
                         {row.beatAi ? `${rewardShareByRank.get(row.rank) ?? 0}% reward` : "Did not beat AI"}
