@@ -1,12 +1,12 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Lock, LogOut, Radio, Save, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
+import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Lock, LogOut, Radio, Save, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
 import type { GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "leaderboard" | "open-bets" | "history" | "rules" | "install" | "account";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "leaderboard" | "open-bets" | "history" | "rules" | "install" | "account";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 const MAX_CHECKED_LEGS = 8;
@@ -1047,6 +1047,27 @@ function App() {
     </div>
   );
 
+  const aiPicksContent = (
+    <>
+      {aiPicks.length === 0 ? <p className="muted">No public AI picks for today.</p> : (
+        <>
+          {lockedAiPicks.length > 0 && (
+            <>
+              <h3 className="pick-section-title">Locked Picks</h3>
+              {lockedAiPicks.map(renderAiPick)}
+            </>
+          )}
+          {projectedAiPicks.length > 0 && (
+            <>
+              <h3 className="pick-section-title">Projected Picks</h3>
+              {projectedAiPicks.map(renderAiPick)}
+            </>
+          )}
+        </>
+      )}
+    </>
+  );
+
   const renderSettledBet = (bet: SettledBet) => (
     <article className={`history-bet ${bet.owner === "ai" ? "ai" : "user"}`} key={bet.id}>
       <div className="history-bet-head">
@@ -1623,6 +1644,7 @@ function App() {
               })}
             </div>
           </div>
+          <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily AI Bot Picks</button>
           <button className={activePage === "leaderboard" ? "active" : ""} onClick={() => openPage("leaderboard")}><Trophy size={18} /> Leaderboard</button>
           <button className={activePage === "open-bets" ? "active" : ""} onClick={() => openPage("open-bets")}><ClipboardList size={18} /> Open Bets</button>
           <button className={activePage === "history" ? "active" : ""} onClick={() => openPage("history")}><History size={18} /> History</button>
@@ -1832,13 +1854,7 @@ function App() {
                   <Bot size={20} />
                   <h2>{lockedAiPicks.length ? "Locked Picks" : "Projected Picks"}</h2>
                 </div>
-                {aiPicks.length === 0 ? <p className="muted">No public AI picks for today.</p> : (
-                  <>
-                    {lockedAiPicks.map(renderAiPick)}
-                    {lockedAiPicks.length > 0 && projectedAiPicks.length > 0 && <h3 className="pick-section-title">Projected Picks</h3>}
-                    {projectedAiPicks.map(renderAiPick)}
-                  </>
-                )}
+                {aiPicksContent}
               </div>
             </aside>
             <button className="floating-bet-slip" type="button" onClick={jumpToBetSlip} aria-label={`Go to bet slip with ${slip.length} selections`}>
@@ -1846,6 +1862,21 @@ function App() {
               <span>Bet Slip</span>
               {slip.length > 0 && <strong>{slip.length}</strong>}
             </button>
+          </div>
+        )}
+
+        {activePage === "ai-picks" && (
+          <div className="panel page-panel">
+            <div className="panel-title">
+              <Sparkles size={20} />
+              <div>
+                <h2>Daily AI Bot Picks</h2>
+                <span>Projected and locked public picks for today</span>
+              </div>
+            </div>
+            <div className="daily-ai-picks">
+              {aiPicksContent}
+            </div>
           </div>
         )}
 

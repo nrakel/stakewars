@@ -530,6 +530,12 @@ textarea {
   font-size: 1.03rem;
 }
 
+.daily-ai-picks {
+  max-width: 780px;
+  display: grid;
+  gap: 12px;
+}
+
 .leaderboard-page-list li {
   min-height: 48px;
   align-items: center;
