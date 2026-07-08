@@ -713,6 +713,22 @@ const fetchEspnSoccerLive = async (sport: Extract<LiveSport, "EPL" | "WORLDCUP">
   return body.events ?? [];
 };
 
+const isNearLiveWindow = (match: NormalizedLiveMatch) => {
+  if (match.inPlay) {
+    return true;
+  }
+  if (!match.startsAt) {
+    return false;
+  }
+  const startsAt = match.startsAt.getTime();
+  const now = Date.now();
+  return startsAt <= now + 15 * 60 * 1000 && startsAt >= now - 6 * 60 * 60 * 1000;
+};
+
+const shouldFetchParlayLive = (normalized: NormalizedLiveMatch[]) =>
+  process.env.PARLAY_LIVE_REFRESH_ENABLED === "true"
+  && normalized.some(isNearLiveWindow);
+
 const playerStats = (body: MlbLiveFeed, playerId: number | undefined, group: "batting" | "pitching") => {
   if (!playerId) {
     return null;
@@ -916,12 +932,6 @@ const upsertLiveMatches = async (matches: NormalizedLiveMatch[]) => {
 };
 
 const refreshLiveSport = async (sport: LiveSport) => {
-  const matches = await fetchLivePoints(sport);
-  const liveEvents = await fetchParlayLiveEvents(sport);
-  const parlayNormalized = (await Promise.all(matches.map((match) => normalizeMatch(sport, match))))
-    .filter((match): match is NonNullable<typeof match> => Boolean(match));
-  const liveEventNormalized = (await Promise.all(liveEvents.map((event) => normalizeLiveEvent(sport, event))))
-    .filter((match): match is NonNullable<typeof match> => Boolean(match));
   const mlbGames = sport === "MLB" ? await fetchMlbStatsLive() : [];
   const mlbNormalized = sport === "MLB"
     ? (await Promise.all(mlbGames.map((game) => normalizeMlbGame(game))))
@@ -932,7 +942,20 @@ const refreshLiveSport = async (sport: LiveSport) => {
     ? (await Promise.all(soccerEvents.map((event) => normalizeEspnSoccerEvent(sport, event))))
       .filter((match): match is NonNullable<typeof match> => Boolean(match))
     : [];
-  const normalized = [...parlayNormalized, ...liveEventNormalized, ...mlbNormalized, ...soccerNormalized];
+  const primaryNormalized = [...mlbNormalized, ...soccerNormalized];
+
+  let matches: ParlayLiveMatch[] = [];
+  let liveEvents: ParlayLiveEvent[] = [];
+  if (shouldFetchParlayLive(primaryNormalized)) {
+    matches = await fetchLivePoints(sport);
+    liveEvents = await fetchParlayLiveEvents(sport);
+  }
+
+  const parlayNormalized = (await Promise.all(matches.map((match) => normalizeMatch(sport, match))))
+    .filter((match): match is NonNullable<typeof match> => Boolean(match));
+  const liveEventNormalized = (await Promise.all(liveEvents.map((event) => normalizeLiveEvent(sport, event))))
+    .filter((match): match is NonNullable<typeof match> => Boolean(match));
+  const normalized = [...parlayNormalized, ...liveEventNormalized, ...primaryNormalized];
 
   const changes = await upsertLiveMatches(normalized);
   const notifications = await sendLiveGameNotifications(changes);
@@ -947,6 +970,7 @@ const refreshLiveSport = async (sport: LiveSport) => {
     sport,
     parlayFetched: matches.length,
     parlayLiveFetched: liveEvents.length,
+    parlaySkipped: matches.length === 0 && liveEvents.length === 0,
     mlbFetched: mlbGames.length,
     soccerFetched: soccerEvents.length,
     imported: normalized.length,

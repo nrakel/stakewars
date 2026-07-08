@@ -132,30 +132,32 @@ app.get("/", (req, res, next) => {
   next();
 });
 
-cron.schedule("*/10 8-20 * * *", async () => {
-  try {
-    await refreshOdds();
-    const todayCentral = centralDate();
+if (process.env.STAKEWARS_ENABLE_INTERNAL_ODDS_CRON === "true") {
+  cron.schedule("*/10 8-20 * * *", async () => {
     try {
-      await refreshMlbGameContext({ startDate: todayCentral, endDate: addDays(todayCentral, 1) });
+      await refreshOdds();
+      const todayCentral = centralDate();
+      try {
+        await refreshMlbGameContext({ startDate: todayCentral, endDate: addDays(todayCentral, 1) });
+      } catch (error) {
+        console.error("Scheduled MLB context refresh failed", error);
+      }
+      await snapshotAiCandidates({ sport: "MLB", source: "scheduled-odds-refresh" });
+      await generateAiPicks({
+        sport: "MLB",
+        maxPicks: 5,
+        placeWagers: true,
+        marketKey: "h2h",
+        sortBy: "confidence",
+        uniqueGames: true
+      });
     } catch (error) {
-      console.error("Scheduled MLB context refresh failed", error);
+      console.error("Scheduled odds refresh failed", error);
     }
-    await snapshotAiCandidates({ sport: "MLB", source: "scheduled-odds-refresh" });
-    await generateAiPicks({
-      sport: "MLB",
-      maxPicks: 5,
-      placeWagers: true,
-      marketKey: "h2h",
-      sortBy: "confidence",
-      uniqueGames: true
-    });
-  } catch (error) {
-    console.error("Scheduled odds refresh failed", error);
-  }
-}, {
-  timezone: "America/Chicago"
-});
+  }, {
+    timezone: "America/Chicago"
+  });
+}
 
 if (config.nodeEnv === "production") {
   app.use(express.static(clientDir));
