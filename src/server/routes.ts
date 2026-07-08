@@ -352,7 +352,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "User not found" });
         return;
       }
-      const origin = config.publicOrigin.replace(/\/+$/, "");
+      const origin = config.referralPublicOrigin.replace(/\/+$/, "");
       res.json({
         referralCode: row.referralCode,
         referralUrl: `${origin}/?ref=${encodeURIComponent(row.referralCode)}`,

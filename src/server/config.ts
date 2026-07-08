@@ -12,6 +12,7 @@ export const config = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 3000),
   publicOrigin: process.env.PUBLIC_ORIGIN ?? "http://localhost:3000",
+  referralPublicOrigin: process.env.REFERRAL_PUBLIC_ORIGIN ?? process.env.PUBLIC_ORIGIN ?? "http://localhost:3000",
   databaseUrl: required("DATABASE_URL", "postgres://stakewars:stakewars@localhost:5432/stakewars"),
   jwtSecret: required("JWT_SECRET", "development-only-secret-change-me"),
   weeklyBankrollCents: Number(process.env.WEEKLY_BANKROLL_CENTS ?? 1000000),
