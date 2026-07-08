@@ -14,6 +14,10 @@ type PricedOutcome = ParlayOutcome & { price: number };
 type PricedSpreadOutcome = PricedOutcome & { point: number };
 type MarketKey = "spreads" | "h2h" | "totals";
 
+type RefreshOddsOptions = {
+  sports?: LocalSport[];
+};
+
 type ParlayMarket = {
   key: string;
   outcomes: ParlayOutcome[];
@@ -48,7 +52,7 @@ const sports: Array<{ local: LocalSport; parlay: string; league: string }> = [
 ];
 
 const soccerSports = new Set<LocalSport>(["EPL", "WORLDCUP"]);
-const oddsSourceSports = new Set<LocalSport>(["MLB", ...soccerSports]);
+const oddsSourceSports = new Set<LocalSport>(["MLB"]);
 
 const soccerBookmakerFallbacks = () => unique([
   ...config.parlayBookmakers,
@@ -495,7 +499,8 @@ const isDerivativeSoccerEvent = (event: ParlayEvent) => {
   );
 };
 
-export const refreshOdds = async () => {
+export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
+  const allowedSports = options.sports ? new Set(options.sports) : null;
   const summary = {
     imported: 0,
     skippedEvents: 0,
@@ -503,6 +508,10 @@ export const refreshOdds = async () => {
   };
 
   for (const sport of sports) {
+    if (allowedSports && !allowedSports.has(sport.local)) {
+      continue;
+    }
+
     if (!soccerSports.has(sport.local) && !isRegularSeasonWindow(sport.local)) {
       await query("UPDATE game_line SET is_active = false WHERE source = 'parlay-api' AND sport = $1", [sport.local]);
       summary.sports.push({ sport: sport.local, events: 0, imported: 0, skippedReason: "outside regular season window" });

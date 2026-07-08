@@ -81,6 +81,8 @@ type UserDisplayMapRow = {
   username: string;
   email: string | null;
   displayName: string | null;
+  leaderboardDisplayName: string | null;
+  leaderboardRank: number | null;
   fullName: string | null;
   role: SessionUser["role"];
   createdAt: string;
@@ -96,6 +98,8 @@ type LeaderboardResponse = {
   weeks: LeaderboardWeek[];
   weekStart: string | null;
   isCurrentWeek: boolean;
+  registeredPlayers: number;
+  weeklyPrizeCents: number;
 };
 
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
@@ -454,7 +458,7 @@ function RulesContent() {
       </section>
       <section>
         <h2>Prizes</h2>
-        <p>Reward details may change by week and will be announced separately. Site operators may void errors, duplicate accounts, abusive activity, or wagers affected by incorrect data.</p>
+        <p>The weekly prize pool is currently $10.00. Eligible winners split the pool 50%, 35%, and 15% for first, second, and third place. A player must finish in an eligible leaderboard position and beat the StakeWars AI Bot to receive a reward. Site operators may void errors, duplicate accounts, abusive activity, or wagers affected by incorrect data.</p>
       </section>
       <section>
         <h2>Withdrawals</h2>
@@ -520,7 +524,7 @@ function LegalContent({ kind }: { kind: "privacy" | "terms" }) {
       </section>
       <section>
         <h2>Rules and Rewards</h2>
-        <p>Weekly rewards, if offered, require players to satisfy the posted rules, including finishing in an eligible leaderboard position and beating the StakeWars AI Bot. Withdrawal eligibility requires a reward balance of at least $20.00 and complete payout details.</p>
+        <p>The weekly prize pool is currently $10.00 and is split 50%, 35%, and 15% among eligible first, second, and third place finishers. Weekly rewards require players to satisfy the posted rules, including finishing in an eligible leaderboard position and beating the StakeWars AI Bot. Withdrawal eligibility requires a reward balance of at least $20.00 and complete payout details.</p>
       </section>
       <section>
         <h2>Line and Scoring Data</h2>
@@ -712,6 +716,8 @@ function App() {
   const [leaderboardWeeks, setLeaderboardWeeks] = useState<LeaderboardWeek[]>([]);
   const [leaderboardWeekStart, setLeaderboardWeekStart] = useState("");
   const [leaderboardIsCurrentWeek, setLeaderboardIsCurrentWeek] = useState(true);
+  const [registeredPlayers, setRegisteredPlayers] = useState(0);
+  const [weeklyPrizeCents, setWeeklyPrizeCents] = useState(0);
   const [liveGames, setLiveGames] = useState<LiveGameState[]>([]);
   const [openBets, setOpenBets] = useState<OpenBet[]>([]);
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
@@ -777,6 +783,8 @@ function App() {
     setLeaderboard(boardResult.leaderboard);
     setLeaderboardWeeks(boardResult.weeks ?? []);
     setLeaderboardIsCurrentWeek(boardResult.isCurrentWeek);
+    setRegisteredPlayers(boardResult.registeredPlayers ?? 0);
+    setWeeklyPrizeCents(boardResult.weeklyPrizeCents ?? 0);
     if (boardResult.weekStart && (!leaderboardWeekStart || leaderboardWeekStart !== boardResult.weekStart)) {
       setLeaderboardWeekStart(boardResult.weekStart);
     }
@@ -846,6 +854,8 @@ function App() {
     setLeaderboard(result.leaderboard);
     setLeaderboardWeeks(result.weeks ?? []);
     setLeaderboardIsCurrentWeek(result.isCurrentWeek);
+    setRegisteredPlayers(result.registeredPlayers ?? 0);
+    setWeeklyPrizeCents(result.weeklyPrizeCents ?? 0);
     if (result.weekStart) {
       setLeaderboardWeekStart(result.weekStart);
     }
@@ -1009,6 +1019,10 @@ function App() {
   const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.beatAi);
   const rewardShares = [50, 35, 15];
   const rewardShareByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [row.rank, rewardShares[index] ?? 0]));
+  const rewardCentsByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [
+    row.rank,
+    Math.round(weeklyPrizeCents * ((rewardShares[index] ?? 0) / 100))
+  ]));
 
   useEffect(() => {
     if (firstAvailableSport && !sportsWithLines.has(lineSport)) {
@@ -1876,7 +1890,10 @@ function App() {
             <div className="panel-title">
               <Trophy size={20} />
               <div>
-                <h2>Leaderboard</h2>
+                <div className="leaderboard-title-row">
+                  <h2>Leaderboard</h2>
+                  <span className="registered-count">Registered Players: {registeredPlayers}</span>
+                </div>
                 <span>{leaderboardIsCurrentWeek ? "Current week" : "Previous week"} standings</span>
               </div>
             </div>
@@ -1896,6 +1913,9 @@ function App() {
               <img className="leaders-crown" src="/images/stakewars-crown.png" alt="" aria-hidden="true" />
               <div className="leaders-content">
                 <span>{leaderboardIsCurrentWeek ? "Current eligible leaders" : "Eligible winners"}</span>
+                {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
+                  <strong className="weekly-prize">Weekly prize pool: {money(weeklyPrizeCents)}</strong>
+                )}
                 {qualifiedLeaderboardRows.length > 0 ? (
                   <ol className="leaders-list">
                     {qualifiedLeaderboardRows.map((row) => (
@@ -1903,7 +1923,9 @@ function App() {
                         <strong>{row.rank}. {row.displayName}</strong>
                         <small>
                           {money(row.balanceCents)}
-                          {!leaderboardIsCurrentWeek && ` • ${rewardShareByRank.get(row.rank) ?? 0}% reward`}
+                          {weeklyPrizeCents > 0
+                            ? ` • ${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`
+                            : !leaderboardIsCurrentWeek && ` • ${rewardShareByRank.get(row.rank) ?? 0}% reward`}
                         </small>
                       </li>
                     ))}
@@ -1921,6 +1943,11 @@ function App() {
                     {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && (
                       <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
                         {row.beatAi ? `${rewardShareByRank.get(row.rank) ?? 0}% reward` : "Did not beat AI"}
+                      </small>
+                    )}
+                    {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && row.role !== "system" && row.rank <= 3 && (
+                      <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
+                        {row.beatAi ? `${money(rewardCentsByRank.get(row.rank) ?? 0)} reward` : "Must beat AI"}
                       </small>
                     )}
                   </span>
@@ -2154,6 +2181,7 @@ function App() {
                   <table>
                     <thead>
                       <tr>
+                        <th>Leaderboard Name</th>
                         <th>Display Name</th>
                         <th>Login</th>
                         <th>Email</th>
@@ -2164,6 +2192,7 @@ function App() {
                     <tbody>
                       {userDisplayMap.map((mappedUser) => (
                         <tr key={mappedUser.id}>
+                          <td>{mappedUser.leaderboardDisplayName || "-"}</td>
                           <td>{mappedUser.displayName || "-"}</td>
                           <td>{mappedUser.username}</td>
                           <td>{mappedUser.email || "-"}</td>
@@ -2173,7 +2202,7 @@ function App() {
                       ))}
                       {userDisplayMap.length === 0 && (
                         <tr>
-                          <td colSpan={5}>No users found.</td>
+                          <td colSpan={6}>No users found.</td>
                         </tr>
                       )}
                     </tbody>

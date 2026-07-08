@@ -13,6 +13,8 @@
     "seed:prod": "node dist/scripts/seed.js",
     "refresh:odds": "tsx scripts/refresh-odds.ts",
     "refresh:odds:prod": "node dist/scripts/refresh-odds.js",
+    "refresh:odds-mlb": "tsx scripts/refresh-mlb-odds.ts",
+    "refresh:odds-mlb:prod": "node dist/scripts/refresh-mlb-odds.js",
     "refresh:mlb-context": "tsx scripts/refresh-mlb-context.ts",
     "refresh:mlb-context:prod": "node dist/scripts/refresh-mlb-context.js",
     "refresh:live-mlb": "tsx scripts/refresh-live-mlb.ts",

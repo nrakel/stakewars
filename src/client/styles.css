@@ -452,6 +452,19 @@ textarea {
   max-width: 720px;
 }
 
+.leaderboard-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.registered-count {
+  color: #65736d;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .leaderboard-week-select {
   max-width: 320px;
   margin-bottom: 14px;
@@ -491,6 +504,11 @@ textarea {
   font-size: 0.86rem;
   font-weight: 800;
   text-transform: uppercase;
+}
+
+.weekly-prize {
+  color: #14201c;
+  font-size: 0.94rem;
 }
 
 .leaders-list {

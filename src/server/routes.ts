@@ -420,22 +420,44 @@ export const registerRoutes = (router: Router) => {
         username: string;
         email: string | null;
         displayName: string | null;
+        leaderboardDisplayName: string | null;
+        leaderboardRank: number | null;
         fullName: string | null;
         role: "player" | "admin" | "system";
         createdAt: string;
       }>(
         `
+          WITH current_week AS (
+            SELECT (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS week_start
+          ),
+          ranked AS (
+            SELECT
+              u.id,
+              (row_number() OVER (
+                ORDER BY e.starting_bankroll_cents + e.settled_profit_cents DESC, e.settled_profit_cents DESC
+              ))::int AS rank
+            FROM weekly_entry e
+            JOIN app_user u ON u.id = e.user_id
+            JOIN current_week cw ON cw.week_start = e.week_starts_on
+            WHERE u.role = 'player'
+          )
           SELECT
-            id,
-            username,
-            email,
-            display_name AS "displayName",
-            full_name AS "fullName",
-            role,
-            created_at AS "createdAt"
-          FROM app_user
-          WHERE role <> 'system'
-          ORDER BY lower(COALESCE(NULLIF(display_name, ''), username)), lower(username)
+            u.id,
+            u.username,
+            u.email,
+            u.display_name AS "displayName",
+            CASE
+              WHEN r.rank IS NULL THEN NULL
+              ELSE COALESCE(NULLIF(u.display_name, ''), 'Player ' || r.rank::text)
+            END AS "leaderboardDisplayName",
+            r.rank AS "leaderboardRank",
+            u.full_name AS "fullName",
+            u.role,
+            u.created_at AS "createdAt"
+          FROM app_user u
+          LEFT JOIN ranked r ON r.id = u.id
+          WHERE u.role <> 'system'
+          ORDER BY r.rank ASC NULLS LAST, lower(COALESCE(NULLIF(u.display_name, ''), u.username)), lower(u.username)
         `
       );
       res.json({ users: result.rows });
@@ -880,12 +902,19 @@ export const registerRoutes = (router: Router) => {
         `,
         [config.aiUsername, requestedWeekStart]
       );
+      const registeredPlayers = await query<{ count: string }>(
+        "SELECT count(*)::text AS count FROM app_user WHERE role = 'player'"
+      );
       const currentWeek = weeks.rows.find((week) => week.isCurrent) as { weekStart: string; isCurrent: boolean } | undefined;
+      const selectedWeekStart = requestedWeekStart ?? currentWeek?.weekStart ?? null;
+      const weeklyPrizeCents = selectedWeekStart && selectedWeekStart === currentWeek?.weekStart ? 1000 : 0;
       res.json({
         leaderboard: result.rows,
         weeks: weeks.rows,
-        weekStart: requestedWeekStart ?? currentWeek?.weekStart ?? null,
-        isCurrentWeek: requestedWeekStart ? requestedWeekStart === currentWeek?.weekStart : true
+        weekStart: selectedWeekStart,
+        isCurrentWeek: requestedWeekStart ? requestedWeekStart === currentWeek?.weekStart : true,
+        registeredPlayers: Number(registeredPlayers.rows[0]?.count ?? 0),
+        weeklyPrizeCents
       });
     } catch (error) {
       next(error);
