@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Lock, LogOut, Radio, Save, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
+import QRCode from "qrcode";
 import type { GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
 import "./styles.css";
 
@@ -67,6 +68,12 @@ type RedditPreview = {
   subreddit: string;
   title: string;
   body: string;
+};
+
+type ReferralInfo = {
+  referralCode: string;
+  referralUrl: string;
+  referredCount: number;
 };
 
 type UserDisplayMapRow = {
@@ -566,6 +573,14 @@ function AuthPanel({
   const [error, setError] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
+  const [referralCode] = useState(() => {
+    const urlCode = new URLSearchParams(window.location.search).get("ref")?.trim() ?? "";
+    if (urlCode) {
+      localStorage.setItem("stakewars_referral_code", urlCode);
+      return urlCode;
+    }
+    return localStorage.getItem("stakewars_referral_code") ?? "";
+  });
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -573,8 +588,13 @@ function AuthPanel({
     try {
       const result = await api<{ token: string; user: SessionUser }>(`/auth/${mode}`, {
         method: "POST",
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({
+          username,
+          password,
+          ...(mode === "register" && referralCode ? { referralCode } : {})
+        })
       });
+      localStorage.removeItem("stakewars_referral_code");
       localStorage.setItem("stakewars_token", result.token);
       onAuth(result.token, result.user);
     } catch (err) {
@@ -634,7 +654,10 @@ function AuthPanel({
           />
         </label>
         {mode === "register" && (
-          <p className="hint">Minimum 10 characters with uppercase, lowercase, number, and symbol.</p>
+          <p className="hint">
+            Minimum 10 characters with uppercase, lowercase, number, and symbol.
+            {referralCode && <span className="referral-applied"> Referral applied.</span>}
+          </p>
         )}
         {error && <p className="error">{error}</p>}
         <button className="primary" type="submit">{mode === "login" ? "Login" : "Create account"}</button>
@@ -734,6 +757,9 @@ function App() {
   const [redditNotice, setRedditNotice] = useState("");
   const [userDisplayMap, setUserDisplayMap] = useState<UserDisplayMapRow[]>([]);
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
+  const [referralInfo, setReferralInfo] = useState<ReferralInfo | null>(null);
+  const [referralQr, setReferralQr] = useState("");
+  const [referralNotice, setReferralNotice] = useState("");
 
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
@@ -757,10 +783,11 @@ function App() {
     setAiPicks(aiResult.picks);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
-        api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken)
+        api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
+        api<ReferralInfo>("/me/referral", {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -772,6 +799,16 @@ function App() {
       setBankroll(me.bankroll);
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
+      setReferralInfo(referralResult);
+      setReferralQr(await QRCode.toDataURL(referralResult.referralUrl, {
+        width: 220,
+        margin: 1,
+        errorCorrectionLevel: "M",
+        color: {
+          dark: "#14201c",
+          light: "#ffffff"
+        }
+      }));
     }
   };
 
@@ -782,6 +819,25 @@ function App() {
     }
     const result = await api<{ wagers: SettledBet[] }>(`/wagers/history?period=${period}&includeAi=${includeAi ? "true" : "false"}`, {}, authToken);
     setHistoryBets(result.wagers);
+  };
+
+  const refreshReferral = async (authToken = token) => {
+    if (!authToken) {
+      setReferralInfo(null);
+      setReferralQr("");
+      return;
+    }
+    const result = await api<ReferralInfo>("/me/referral", {}, authToken);
+    setReferralInfo(result);
+    setReferralQr(await QRCode.toDataURL(result.referralUrl, {
+      width: 220,
+      margin: 1,
+      errorCorrectionLevel: "M",
+      color: {
+        dark: "#14201c",
+        light: "#ffffff"
+      }
+    }));
   };
 
   const loadLeaderboardWeek = async (weekStart: string) => {
@@ -1317,6 +1373,16 @@ function App() {
       await refresh(result.token);
     } catch (err) {
       setNotice((err as Error).message);
+    }
+  };
+
+  const copyReferralLink = async () => {
+    if (!referralInfo) return;
+    try {
+      await navigator.clipboard.writeText(referralInfo.referralUrl);
+      setReferralNotice("Referral link copied.");
+    } catch {
+      setReferralNotice("Could not copy referral link.");
     }
   };
 
@@ -1990,6 +2056,29 @@ function App() {
               {!canWithdraw && (
                 <small>Available after rewards exceed $20.00 and payout details are complete.</small>
               )}
+            </div>
+            <div className="notification-card referral-card">
+              <div>
+                <strong>Referral</strong>
+                <span>Share this QR code or link. New accounts created from it will be marked as referred by you.</span>
+              </div>
+              <div className="referral-layout">
+                <div className="referral-qr-box">
+                  {referralQr ? <img src={referralQr} alt="Referral QR code" /> : <span>QR unavailable</span>}
+                </div>
+                <div className="referral-details">
+                  <label>
+                    Referral link
+                    <input value={referralInfo?.referralUrl ?? ""} readOnly />
+                  </label>
+                  <small>{referralInfo ? `${referralInfo.referredCount} referred ${referralInfo.referredCount === 1 ? "account" : "accounts"}` : "Referral details loading."}</small>
+                  <div className="notification-actions">
+                    <button className="secondary-action" type="button" onClick={copyReferralLink}><ClipboardList size={17} /> Copy link</button>
+                    <button className="secondary-action" type="button" onClick={() => void refreshReferral()}><Radio size={17} /> Refresh</button>
+                  </div>
+                </div>
+              </div>
+              {referralNotice && <p className={referralNotice.includes("copied") ? "success" : "error"}>{referralNotice}</p>}
             </div>
             <div className="notification-card">
               <div>

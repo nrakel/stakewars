@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { Router } from "express";
 import { z } from "zod";
 import { hashPassword, passwordSchema, requireAuth, signToken, usernameSchema, verifyPassword } from "./auth.js";
@@ -12,7 +12,8 @@ import type { MarketKey, SportKey } from "../shared/types.js";
 
 const registerSchema = z.object({
   username: usernameSchema,
-  password: passwordSchema
+  password: passwordSchema,
+  referralCode: z.string().trim().regex(/^[a-zA-Z0-9_-]{6,64}$/).optional()
 });
 
 const loginSchema = z.object({
@@ -63,6 +64,19 @@ type WagerLineRow = {
   odds_american: number;
   market_key: MarketKey;
   is_active: boolean;
+};
+
+const generateReferralCode = () => randomBytes(9).toString("base64url").toLowerCase();
+
+const createUniqueReferralCode = async () => {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const code = generateReferralCode();
+    const existing = await query("SELECT 1 FROM app_user WHERE referral_code = $1 LIMIT 1", [code]);
+    if (!existing.rowCount) {
+      return code;
+    }
+  }
+  return randomUUID().replace(/-/g, "").slice(0, 16);
 };
 
 type LineMove = {
@@ -202,6 +216,13 @@ export const registerRoutes = (router: Router) => {
     try {
       const input = registerSchema.parse(req.body);
       const passwordHash = await hashPassword(input.password);
+      const referralCode = await createUniqueReferralCode();
+      const referrer = input.referralCode
+        ? await query<{ id: string }>(
+          "SELECT id FROM app_user WHERE referral_code = lower($1) LIMIT 1",
+          [input.referralCode]
+        )
+        : null;
       const result = await query<{
         id: string;
         username: string;
@@ -215,8 +236,8 @@ export const registerRoutes = (router: Router) => {
         role: "player";
       }>(
         `
-          INSERT INTO app_user (id, username, password_hash)
-          VALUES ($1, $2, $3)
+          INSERT INTO app_user (id, username, password_hash, referral_code, referred_by_user_id)
+          VALUES ($1, $2, $3, $4, $5)
           RETURNING
             id,
             username,
@@ -229,7 +250,7 @@ export const registerRoutes = (router: Router) => {
             phone_last4 AS "phoneLast4",
             role
         `,
-        [randomUUID(), input.username, passwordHash]
+        [randomUUID(), input.username, passwordHash, referralCode, referrer?.rows[0]?.id ?? null]
       );
       const token = signToken(result.rows[0]);
       res.status(201).json({ token, user: result.rows[0] });
@@ -305,6 +326,38 @@ export const registerRoutes = (router: Router) => {
     try {
       const entry = await transaction((client) => ensureWeeklyEntry(client, req.user!.id));
       res.json({ user: req.user, bankroll: entry });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/me/referral", requireAuth, async (req, res, next) => {
+    try {
+      const result = await query<{ referralCode: string; referredCount: string }>(
+        `
+          SELECT
+            referral_code AS "referralCode",
+            (
+              SELECT count(*)::text
+              FROM app_user referred
+              WHERE referred.referred_by_user_id = app_user.id
+            ) AS "referredCount"
+          FROM app_user
+          WHERE id = $1
+        `,
+        [req.user!.id]
+      );
+      const row = result.rows[0];
+      if (!row) {
+        res.status(404).json({ error: "User not found" });
+        return;
+      }
+      const origin = config.publicOrigin.replace(/\/+$/, "");
+      res.json({
+        referralCode: row.referralCode,
+        referralUrl: `${origin}/?ref=${encodeURIComponent(row.referralCode)}`,
+        referredCount: Number(row.referredCount)
+      });
     } catch (error) {
       next(error);
     }
