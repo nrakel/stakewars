@@ -742,11 +742,23 @@ export const registerRoutes = (router: Router) => {
         `,
         [randomUUID(), input.username, input.email, passwordHash, input.displayName, referralCode, referrer?.rows[0]?.id ?? null]
       );
-      await sendVerificationLink(result.rows[0].id, input.email, true);
+      let emailVerificationSent = true;
+      try {
+        await sendVerificationLink(result.rows[0].id, input.email, true);
+      } catch (error) {
+        emailVerificationSent = false;
+        console.error("Registration verification email failed; allowing unverified account login", {
+          userId: result.rows[0].id,
+          email: input.email,
+          error
+        });
+      }
+      const sessionUser = result.rows[0];
       res.status(201).json({
-        verificationRequired: true,
-        userId: result.rows[0].id,
-        email: input.email
+        token: signToken(sessionUser),
+        user: sessionUser,
+        emailVerificationSent,
+        verificationRequired: !sessionUser.emailVerified
       });
     } catch (error) {
       if ((error as { code?: string }).code === "23505") {
@@ -807,34 +819,6 @@ export const registerRoutes = (router: Router) => {
         res.status(401).json({ error: "Invalid username or password" });
         return;
       }
-      if (!user.emailVerified) {
-        if (!user.email) {
-          const sessionUser = {
-            id: user.id,
-            username: user.username,
-            fullName: user.fullName,
-            email: user.email,
-            emailVerified: user.emailVerified,
-            displayName: user.displayName,
-            rewardBalanceCents: user.rewardBalanceCents,
-            payoutMethod: user.payoutMethod,
-            payoutHandle: user.payoutHandle,
-            phoneLast4: user.phoneLast4,
-            role: user.role
-          };
-          res.json({ token: signToken(sessionUser), user: sessionUser });
-          return;
-        }
-        await sendVerificationLink(user.id, user.email);
-        res.status(403).json({
-          error: "Email verification required. We sent a new verification link to your email.",
-          code: "EMAIL_VERIFICATION_REQUIRED",
-          verificationRequired: true,
-          userId: user.id,
-          email: user.email
-        });
-        return;
-      }
       const sessionUser = {
         id: user.id,
         username: user.username,
@@ -848,7 +832,25 @@ export const registerRoutes = (router: Router) => {
         phoneLast4: user.phoneLast4,
         role: user.role
       };
-      res.json({ token: signToken(sessionUser), user: sessionUser });
+      let emailVerificationSent = false;
+      if (!user.emailVerified && user.email) {
+        try {
+          await sendVerificationLink(user.id, user.email);
+          emailVerificationSent = true;
+        } catch (error) {
+          console.error("Login verification email failed; allowing unverified account login", {
+            userId: user.id,
+            email: user.email,
+            error
+          });
+        }
+      }
+      res.json({
+        token: signToken(sessionUser),
+        user: sessionUser,
+        emailVerificationSent,
+        verificationRequired: !sessionUser.emailVerified && Boolean(sessionUser.email)
+      });
     } catch (error) {
       next(error);
     }
