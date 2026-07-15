@@ -1,5 +1,6 @@
 import { pool } from "../src/server/db.js";
 import { backfillParlayMlbHistory, dateRange } from "../src/server/historicalBackfill.js";
+import { refreshMlbBoxscoreAnalytics, rollingMlbWindow } from "../src/server/mlbBoxscoreAnalytics.js";
 import { refreshMlbGameContext } from "../src/server/mlbContext.js";
 import { settleMlbStraightWagers } from "../src/server/settlement.js";
 import { evaluateMlbCandidateSnapshots } from "../src/server/snapshotEvaluation.js";
@@ -90,6 +91,10 @@ const run = async () => {
 
   const settlement = await settleMlbStraightWagers(yesterdayCentral, yesterdayCentral);
   console.log(JSON.stringify({ step: "settlement", ...settlement }));
+
+  const boxscoreWindow = rollingMlbWindow(todayCentral, 30);
+  const boxscoreAnalytics = await refreshMlbBoxscoreAnalytics(boxscoreWindow);
+  console.log(JSON.stringify({ step: "mlb-boxscore-analytics", ...boxscoreAnalytics }));
 
   const contextEnd = addDays(todayCentral, 2);
   const mlbContext = await refreshMlbGameContext({ startDate: todayCentral, endDate: contextEnd });

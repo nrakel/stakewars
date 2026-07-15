@@ -2,7 +2,7 @@
   "name": "StakeWars",
   "short_name": "StakeWars",
   "id": "/",
-  "description": "Weekly bankroll contests against public sports lines and the StakeWars AI Bot.",
+  "description": "Weekly bankroll contests against public sports lines and StakeWars Chine.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "launch_handler": {

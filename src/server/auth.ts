@@ -53,6 +53,7 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
           username,
           full_name AS "fullName",
           email,
+          email_verified AS "emailVerified",
           display_name AS "displayName",
           reward_balance_cents AS "rewardBalanceCents",
           payout_method AS "payoutMethod",
@@ -73,4 +74,40 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
   } catch {
     res.status(401).json({ error: "Invalid session" });
   }
+};
+
+export const optionalAuth = async (req: Request, _res: Response, next: NextFunction) => {
+  const header = req.header("authorization");
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : undefined;
+  if (!token) {
+    next();
+    return;
+  }
+
+  try {
+    const payload = jwt.verify(token, config.jwtSecret) as SessionUser;
+    const result = await query<SessionUser & { role: SessionUser["role"] }>(
+      `
+        SELECT
+          id,
+          username,
+          full_name AS "fullName",
+          email,
+          email_verified AS "emailVerified",
+          display_name AS "displayName",
+          reward_balance_cents AS "rewardBalanceCents",
+          payout_method AS "payoutMethod",
+          payout_handle AS "payoutHandle",
+          phone_last4 AS "phoneLast4",
+          role
+        FROM app_user
+        WHERE id = $1
+      `,
+      [payload.id]
+    );
+    req.user = result.rows[0];
+  } catch {
+    req.user = undefined;
+  }
+  next();
 };

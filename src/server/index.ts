@@ -72,14 +72,13 @@ const legalPage = ({
 const privacyHtml = legalPage({
   title: "Privacy Policy",
   sections: [
-    { heading: "Privacy Policy", body: "Effective June 29, 2026. StakeWars is a free sports prediction contest operated at stakewars.phisystems.ai." },
-    { heading: "Information We Collect", body: "We collect account information players provide, including username, password hash, full name, email, display name, payout preference, payout handle, and the last four digits of a phone number when entered for reward validation." },
+    { heading: "Privacy Policy", body: "Effective June 29, 2026. StakeWars is a free sports prediction contest operated at stakewars.ai." },
+    { heading: "Information We Collect", body: "We collect account information players provide, including username, password hash, full name, email, email verification status, display name, payout preference, payout handle, and the last four digits of a phone number when entered for reward validation." },
     { heading: "Contest Data", body: "We store virtual wagers, bankroll balances, leaderboard results, settled wager history, notification preferences, push subscription records, and account activity needed to run the contest." },
-    { heading: "Reddit Devvit Integration", body: "The StakeWars Reddit app fetches admin-approved post drafts from StakeWars and reports whether the Reddit post succeeded or failed. It does not send Reddit user data to StakeWars, scrape Reddit, vote, message users, or collect Reddit account data." },
-    { heading: "How We Use Information", body: "We use information to authenticate users, operate the contest, display leaderboards and wager history, send requested push notifications, validate rewards, prevent abuse, and publish admin-approved public updates." },
+    { heading: "How We Use Information", body: "We use information to authenticate users, verify email addresses, operate the contest, display leaderboards and wager history, send requested push notifications, validate rewards, prevent abuse, provide support, and publish admin-approved public updates." },
     { heading: "Sharing", body: "We do not sell personal information. We may share limited information with service providers necessary to host the site, send push notifications, maintain security, or process rewards." },
     { heading: "Security", body: "Passwords are stored as hashes. Administrative integrations use server-side secrets. No internet service can be guaranteed perfectly secure, but we use reasonable safeguards for the data we store." },
-    { heading: "Contact", body: "Questions about this policy can be sent to the StakeWars operator through the contact method listed in the Reddit app details or the site administrator account." }
+    { heading: "Contact", body: "Questions about this policy can be sent to support@stakewars.ai." }
   ]
 });
 
@@ -88,22 +87,10 @@ const termsHtml = legalPage({
   sections: [
     { heading: "Terms and Conditions", body: "Effective June 29, 2026. By using StakeWars, you agree to these terms and the contest rules shown on the site." },
     { heading: "Free Contest", body: "StakeWars is a free virtual-bankroll contest. No purchase, deposit, or real-money wager is required or accepted. Virtual wagers have no cash value." },
-    { heading: "Eligibility and Accounts", body: "Players must provide accurate account information and may not create duplicate accounts, manipulate results, abuse promotions, or interfere with site operations." },
-    { heading: "Rules and Rewards", body: "The weekly prize pool is currently $10.00 and is split 50%, 35%, and 15% among eligible first, second, and third place finishers. Weekly rewards require players to satisfy the posted rules, including finishing in an eligible leaderboard position and beating the StakeWars AI Bot. Withdrawal eligibility requires a reward balance of at least $20.00 and complete payout details." },
+    { heading: "Eligibility and Accounts", body: "Players must provide accurate account information, verify their email address for reward eligibility, and may not create duplicate accounts, manipulate results, abuse promotions, or interfere with site operations." },
+    { heading: "Rules and Rewards", body: "The active weekly prize pool is shown on the leaderboard and is split 50%, 35%, and 15% among eligible first, second, and third place finishers. A week may also include a separate first-place bonus prize. Weekly rewards require players to satisfy the posted rules, including verified email, placing at least 10 weekly wagers, wagering at least 1.5x the weekly starting bankroll, finishing in an eligible leaderboard position, and beating StakeWars Chine. Withdrawal eligibility requires a reward balance of at least $20.00, verified email, and complete payout details." },
     { heading: "Line and Scoring Data", body: "StakeWars relies on third-party sports, odds, and scoring data. Site operators may correct obvious data errors, void affected wagers, mark games No Action, or adjust settlement when required for fairness. Soccer 3-way moneylines settle on the score after regulation plus stoppage time; penalty kicks do not turn a team moneyline loss into a win." },
-    { heading: "Reddit Posts", body: "The StakeWars Reddit app may publish admin-approved contest updates, AI picks, and links to StakeWars. Reddit posting is moderator-controlled and does not authorize automated scraping, voting, direct messaging, or collection of Reddit user data." },
     { heading: "Changes", body: "StakeWars may update these terms, contest rules, features, or reward details. Continued use of the site after updates means you accept the revised terms." }
-  ]
-});
-
-const redditApiHtml = legalPage({
-  title: "StakeWars Reddit API",
-  sections: [
-    { heading: "Purpose", body: "This hostname is used only by the StakeWars Reddit Devvit app to publish admin-approved public contest posts from Reddit's server runtime." },
-    { heading: "Endpoints", body: "The Devvit app calls POST /api/devvit/reddit/claim to claim one approved draft and POST /api/devvit/reddit/result to report whether Reddit publishing succeeded or failed." },
-    { heading: "Authentication", body: "Both endpoints require Authorization: Bearer <shared secret>. The shared secret is configured by a subreddit moderator and is not exposed publicly." },
-    { heading: "Data", body: "The claim response contains only the queue id, subreddit, title, body, and created timestamp for an admin-approved draft. The result request sends only the queue id, status, Reddit post id or URL when available, and an error message when publishing fails." },
-    { heading: "Reddit User Data", body: "This API does not collect Reddit user data, scrape Reddit, vote, send direct messages, or read private subreddit data. Reddit is used only as the publishing destination for moderator-approved public posts." }
   ]
 });
 
@@ -111,26 +98,66 @@ const app = express();
 const api = express.Router();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const clientDir = path.join(root, "dist/client");
+const allowedOrigins = new Set(config.allowedOrigins);
+const privateApiPath = /^\/(me(?:\/|$)|wagers(?:\/|$)|push(?:\/|$)|admin(?:\/|$)|support(?:\/|$))/;
+
+const noStorePrivateApi = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (privateApiPath.test(req.path) || req.header("authorization")) {
+    res.setHeader("Cache-Control", "no-store, private");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+};
 
 app.set("trust proxy", 1);
+app.disable("x-powered-by");
 app.use(helmet({
-  contentSecurityPolicy: config.nodeEnv === "production" ? undefined : false
+  contentSecurityPolicy: config.nodeEnv === "production" ? {
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "base-uri": ["'self'"],
+      "connect-src": ["'self'"],
+      "form-action": ["'self'"],
+      "frame-ancestors": ["'self'"],
+      "img-src": ["'self'", "data:"],
+      "manifest-src": ["'self'"],
+      "object-src": ["'none'"],
+      "script-src": ["'self'"],
+      "script-src-attr": ["'none'"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "worker-src": ["'self'"]
+    }
+  } : false,
+  frameguard: { action: "deny" },
+  hsts: config.nodeEnv === "production" ? { maxAge: 31_536_000, includeSubDomains: true } : false,
+  noSniff: true,
+  referrerPolicy: { policy: "strict-origin-when-cross-origin" }
 }));
-app.use(cors({ origin: config.publicOrigin, credentials: false }));
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.has(origin.replace(/\/+$/, ""))) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
+  credentials: false
+}));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/auth", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }));
+api.use(noStorePrivateApi);
+api.use("/admin", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
+api.use("/me/profile", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }));
+api.use("/push", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
+api.use("/support", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
+api.use("/wagers", rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false }));
 
 registerRoutes(api);
 app.use("/api", api);
 app.get("/privacy", (_req, res) => res.type("html").send(privacyHtml));
 app.get("/terms", (_req, res) => res.type("html").send(termsHtml));
-app.get("/", (req, res, next) => {
-  if (req.hostname === "reddit-api.stakewars.phisystems.ai") {
-    res.type("html").send(redditApiHtml);
-    return;
-  }
-  next();
-});
 
 if (process.env.STAKEWARS_ENABLE_INTERNAL_ODDS_CRON === "true") {
   cron.schedule("*/10 8-20 * * *", async () => {

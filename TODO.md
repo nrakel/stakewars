@@ -3,6 +3,7 @@
 ## 2026-06-24
 
 - Test Parlay live MLB game data during active games:
+  - Parlay support said the `/live` endpoints are fixed as of 2026-06-30; re-test before changing app behavior.
   - Poll `/v1/sports/baseball_mlb/live/points` and inspect snapshot shape.
   - If Starter is active, test `/v1/sports/baseball_mlb/live/sse`.
   - Compare `initial_state` vs `pbp_event` payloads.
@@ -10,18 +11,6 @@
   - Decide whether gamecast should start with polling or SSE.
 
 ## 2026-06-25
-
-- Add daily Reddit post automation:
-  - Create a reusable post template with dynamic StakeWars content.
-  - Include AI Bot locked picks, leaderboard snapshot, and site link.
-  - Add Reddit API config to production env without committing secrets.
-  - Add a `reddit_post_log` table to prevent duplicate daily posts.
-  - Start with dry-run/manual approval before enabling scheduled publishing.
-
-- Configure push notifications and their verbiage:
-  - Define notification categories users can opt into or out of.
-  - Draft final copy for daily game reminders, locked AI picks, settled wagers, and reward eligibility.
-  - Keep notification frequency conservative so users leave notifications enabled.
 
 - Tighten security:
   - Review auth/session handling, password rules, rate limits, and JWT lifetime.

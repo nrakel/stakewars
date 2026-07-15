@@ -1,12 +1,13 @@
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Lock, LogOut, Radio, Save, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
+import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Lock, LogOut, Mail, Radio, Save, ShieldCheck, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
+import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "ai-picks" | "leaderboard" | "open-bets" | "history" | "rules" | "install" | "account";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
+type AdminSection = "traffic" | "support" | "prizes" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 const MAX_CHECKED_LEGS = 8;
@@ -27,6 +28,11 @@ type SlipLeg = {
   selectedTeam: string;
   expectedSpread: string;
   expectedOddsAmerican: number;
+  sport?: GameLine["sport"];
+  startsAt?: string;
+  awayTeam?: string;
+  homeTeam?: string;
+  marketKey?: GameLine["marketKey"];
 };
 
 type LineMoveNotice = {
@@ -56,7 +62,7 @@ type PushPreferences = {
 
 type RedditStatus = {
   configured: boolean;
-  mode: "devvit";
+  mode: "manual";
   connected: boolean;
   redditUsername: string | null;
   connectedAt: string | null;
@@ -88,6 +94,42 @@ type UserDisplayMapRow = {
   createdAt: string;
 };
 
+type VisitorMetricRow = {
+  label: string;
+  uniqueVisitors: number;
+  totalVisitors: number;
+  humanVisitors: number;
+  otherVisitors: number;
+};
+
+type VisitorMetrics = {
+  generatedAt: string;
+  lastUpdatedAt: string | null;
+  rows: VisitorMetricRow[];
+};
+
+type SupportCategory = "account_email" | "rewards_eligibility" | "picks_scoring" | "technical_problem" | "other";
+
+type SupportConversation = {
+  id: string;
+  category: SupportCategory;
+  status: "open" | "closed";
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string | null;
+  username?: string;
+  displayName?: string | null;
+  email?: string | null;
+  lastMessage?: string | null;
+};
+
+type SupportMessage = {
+  id: string;
+  senderRole: "user" | "admin";
+  body: string;
+  createdAt: string;
+};
+
 type LeaderboardWeek = {
   weekStart: string;
   isCurrent: boolean;
@@ -100,9 +142,110 @@ type LeaderboardResponse = {
   isCurrentWeek: boolean;
   registeredPlayers: number;
   weeklyPrizeCents: number;
+  weeklyPrize?: WeeklyPrize;
 };
 
+type WeeklyPrize = {
+  weekStart: string;
+  cashPrizeCents: number;
+  firstPlaceBonus: string | null;
+  updatedAt?: string;
+};
+
+type AdminPrizesResponse = {
+  currentWeekStart: string;
+  nextWeekStart: string;
+  prizes: WeeklyPrize[];
+};
+
+type ChineModelAuditGroup = {
+  label: string;
+  picks: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  winPct: number | null;
+  netUnits: number;
+  avgConfidence: number | null;
+  avgEdge: number | null;
+};
+
+type ChineModelAudit = {
+  generatedAt: string;
+  since: string | null;
+  through: string | null;
+  summary: ChineModelAuditGroup[];
+  confidenceBuckets: ChineModelAuditGroup[];
+  markets: ChineModelAuditGroup[];
+  reasons: ChineModelAuditGroup[];
+  reasonCounts: ChineModelAuditGroup[];
+  edgeRanges: ChineModelAuditGroup[];
+  favoriteUnderdog: ChineModelAuditGroup[];
+  homeRoad: ChineModelAuditGroup[];
+  starterEdge: ChineModelAuditGroup[];
+  bullpenEdge: ChineModelAuditGroup[];
+  marketMovement: ChineModelAuditGroup[];
+};
+
+type VerificationRequiredResponse = {
+  verificationRequired: true;
+  userId: string;
+  email: string;
+};
+
+const isVerificationRequiredResponse = (value: unknown): value is VerificationRequiredResponse =>
+  Boolean(
+    value
+    && typeof value === "object"
+    && (value as VerificationRequiredResponse).verificationRequired === true
+    && typeof (value as VerificationRequiredResponse).userId === "string"
+    && typeof (value as VerificationRequiredResponse).email === "string"
+  );
+
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+const pct = (value: number | null | undefined) => value == null ? "-" : `${(value * 100).toFixed(1)}%`;
+const units = (value: number | null | undefined) => value == null ? "-" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}u`;
+
+function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this group yet." }: { title: string; rows: ChineModelAuditGroup[]; emptyLabel?: string }) {
+  return (
+    <div className="model-audit-table">
+      <h3>{title}</h3>
+      <div className="user-map-table">
+        <table>
+          <thead>
+            <tr>
+              <th>Group</th>
+              <th>Picks</th>
+              <th>W-L-P</th>
+              <th>Win %</th>
+              <th>Net Units</th>
+              <th>Avg Conf</th>
+              <th>Avg Edge</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label}>
+                <td>{row.label}</td>
+                <td>{row.picks}</td>
+                <td>{row.wins}-{row.losses}-{row.pushes}</td>
+                <td>{pct(row.winPct)}</td>
+                <td>{units(row.netUnits)}</td>
+                <td>{pct(row.avgConfidence)}</td>
+                <td>{pct(row.avgEdge)}</td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={7}>{emptyLabel}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 const weekRangeLabel = (weekStart: string) => {
   const start = new Date(`${weekStart}T00:00:00Z`);
@@ -142,7 +285,69 @@ const lineMovePrompt = (moves: LineMoveNotice[]) => {
   return `The lines for these selections have changed:\n\n${details}\n\nDo you accept the new prices?`;
 };
 
+const replacementForSlipLeg = (leg: SlipLeg, freshLines: GameLine[]) => {
+  const direct = freshLines.find((line) => line.id === leg.gameLineId);
+  if (direct) return direct;
+  if (!leg.sport || !leg.startsAt || !leg.awayTeam || !leg.homeTeam || !leg.marketKey) {
+    return null;
+  }
+
+  const originalStart = new Date(leg.startsAt).getTime();
+  return freshLines
+    .filter((line) =>
+      line.sport === leg.sport
+      && line.awayTeam === leg.awayTeam
+      && line.homeTeam === leg.homeTeam
+      && line.marketKey === leg.marketKey
+      && line.favoriteTeam === leg.selectedTeam
+      && Math.abs(new Date(line.startsAt).getTime() - originalStart) <= 3 * 60 * 60 * 1000
+    )
+    .sort((left, right) =>
+      Math.abs(new Date(left.startsAt).getTime() - originalStart)
+      - Math.abs(new Date(right.startsAt).getTime() - originalStart)
+    )[0] ?? null;
+};
+
+const rebindSlipToFreshLines = (slip: SlipLeg[], freshLines: GameLine[]) => {
+  const idMap = new Map<string, string>();
+  const nextSlip = slip.map((leg) => {
+    const replacement = replacementForSlipLeg(leg, freshLines);
+    if (!replacement || replacement.id === leg.gameLineId) {
+      return leg;
+    }
+    idMap.set(leg.gameLineId, replacement.id);
+    return {
+      ...leg,
+      gameLineId: replacement.id,
+      expectedSpread: replacement.spread,
+      expectedOddsAmerican: replacement.oddsAmerican,
+      sport: replacement.sport,
+      startsAt: replacement.startsAt,
+      awayTeam: replacement.awayTeam,
+      homeTeam: replacement.homeTeam,
+      marketKey: replacement.marketKey
+    };
+  });
+  return { nextSlip, idMap };
+};
+
 const statusLabel = (status: string) => status === "void" ? "No Action" : status;
+
+const aiPickResultLabel = (status: DailyAiPick["resultStatus"]) => {
+  if (!status || status === "pending") return null;
+  if (status === "won") return "Won";
+  if (status === "lost") return "Lost";
+  if (status === "push") return "Push";
+  return "No Action";
+};
+
+const trackedResultLabel = (status: DailyChineParlay["status"]) => {
+  if (!status || status === "pending") return null;
+  if (status === "won") return "Won";
+  if (status === "lost") return "Lost";
+  if (status === "push") return "Push";
+  return "No Action";
+};
 
 const teamAbbreviations: Record<string, string> = {
   "Arizona Diamondbacks": "ARI",
@@ -298,7 +503,10 @@ const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: S
   if (page === "scoreboard") return `${scoreboardSport} ScoreBoard`;
   if (page === "lines") return `${lineSport} Lines`;
   if (page === "open-bets") return "Open Bets";
+  if (page === "contact") return "Contact Us";
   if (page === "install") return "Install App";
+  if (page === "ai-picks") return "Daily Chine Picks";
+  if (page === "admin") return "Admin";
   return page.charAt(0).toUpperCase() + page.slice(1);
 };
 
@@ -441,6 +649,10 @@ function RulesContent() {
         <p>Players can make straight wagers, parlays, and round robins. Parlays and round robins are limited to 8 checked games.</p>
       </section>
       <section>
+        <h2>Reward Eligibility</h2>
+        <p>To be eligible for a weekly reward, a player must have a verified email address, place at least 10 wagers during the week, and wager at least 1.5x their starting weekly bankroll. With the current $10,000 starting bankroll, that means at least $15,000 in total weekly virtual wagers.</p>
+      </section>
+      <section>
         <h2>Baseball Settlement</h2>
         <p>Postponed, suspended, cancelled, or shortened MLB games are No Action. MLB games must complete at least 9 innings to settle. A No Action single returns the wager to the player's bankroll. In parlays, the affected leg is dropped; if only one active leg remains, the wager settles as a straight bet.</p>
       </section>
@@ -449,8 +661,8 @@ function RulesContent() {
         <p>Soccer moneylines are settled as 3-way markets: Team A, Draw, or Team B. The result is based on the official score at the end of regulation plus stoppage time, not extra time or penalty kicks. If the match is tied at that point, Draw wins and both team moneyline selections lose, even if one team later advances or wins on penalties.</p>
       </section>
       <section>
-        <h2>AI Bot</h2>
-        <p>The StakeWars AI Bot posts public picks. To be eligible for a weekly reward, a player must finish in the top three and beat the StakeWars AI Bot on the final leaderboard. Failure to beat the bot at the end of the week disqualifies the player from receiving a reward.</p>
+        <h2>Chine</h2>
+        <p>StakeWars Chine posts public picks. To receive a weekly reward, an eligible player must finish in the top three and beat StakeWars Chine on the final leaderboard. Failure to beat Chine at the end of the week disqualifies the player from receiving a reward.</p>
       </section>
       <section>
         <h2>No Real-Money Gambling</h2>
@@ -458,7 +670,7 @@ function RulesContent() {
       </section>
       <section>
         <h2>Prizes</h2>
-        <p>The weekly prize pool is currently $10.00. Eligible winners split the pool 50%, 35%, and 15% for first, second, and third place. A player must finish in an eligible leaderboard position and beat the StakeWars AI Bot to receive a reward. Site operators may void errors, duplicate accounts, abusive activity, or wagers affected by incorrect data.</p>
+        <p>The weekly prize pool is shown on the leaderboard and may include a first-place bonus prize. Eligible winners split the cash pool 50%, 35%, and 15% for first, second, and third place. Players remain ranked by bankroll even while ineligible, but they must have a verified email address, satisfy the weekly wager requirements, finish in an eligible leaderboard position, and beat StakeWars Chine to receive a reward. Site operators may void errors, duplicate accounts, abusive activity, or wagers affected by incorrect data.</p>
       </section>
       <section>
         <h2>Withdrawals</h2>
@@ -474,23 +686,19 @@ function LegalContent({ kind }: { kind: "privacy" | "terms" }) {
       <div className="rules-content legal-content">
         <section>
           <h2>Privacy Policy</h2>
-          <p>Effective June 29, 2026. StakeWars is a free sports prediction contest operated at stakewars.phisystems.ai.</p>
+          <p>Effective June 29, 2026. StakeWars is a free sports prediction contest operated at stakewars.ai.</p>
         </section>
         <section>
           <h2>Information We Collect</h2>
-          <p>We collect account information players provide, including username, password hash, full name, email, display name, payout preference, payout handle, and the last four digits of a phone number when entered for reward validation.</p>
+          <p>We collect account information players provide, including username, password hash, full name, email, email verification status, display name, payout preference, payout handle, and the last four digits of a phone number when entered for reward validation.</p>
         </section>
         <section>
           <h2>Contest Data</h2>
           <p>We store virtual wagers, bankroll balances, leaderboard results, settled wager history, notification preferences, push subscription records, and account activity needed to run the contest.</p>
         </section>
         <section>
-          <h2>Reddit Devvit Integration</h2>
-          <p>The StakeWars Reddit app fetches admin-approved post drafts from StakeWars and reports whether the Reddit post succeeded or failed. It does not send Reddit user data to StakeWars, scrape Reddit, vote, message users, or collect Reddit account data.</p>
-        </section>
-        <section>
           <h2>How We Use Information</h2>
-          <p>We use information to authenticate users, operate the contest, display leaderboards and wager history, send requested push notifications, validate rewards, prevent abuse, and publish admin-approved public updates.</p>
+          <p>We use information to authenticate users, verify email addresses, operate the contest, display leaderboards and wager history, send requested push notifications, validate rewards, prevent abuse, provide support, and publish admin-approved public updates.</p>
         </section>
         <section>
           <h2>Sharing</h2>
@@ -502,7 +710,7 @@ function LegalContent({ kind }: { kind: "privacy" | "terms" }) {
         </section>
         <section>
           <h2>Contact</h2>
-          <p>Questions about this policy can be sent to the StakeWars operator through the contact method listed in the Reddit app details or the site administrator account.</p>
+          <p>Questions about this policy can be sent to support@stakewars.ai.</p>
         </section>
       </div>
     );
@@ -520,19 +728,15 @@ function LegalContent({ kind }: { kind: "privacy" | "terms" }) {
       </section>
       <section>
         <h2>Eligibility and Accounts</h2>
-        <p>Players must provide accurate account information and may not create duplicate accounts, manipulate results, abuse promotions, or interfere with site operations.</p>
+        <p>Players must provide accurate account information, verify their email address for reward eligibility, and may not create duplicate accounts, manipulate results, abuse promotions, or interfere with site operations.</p>
       </section>
       <section>
         <h2>Rules and Rewards</h2>
-        <p>The weekly prize pool is currently $10.00 and is split 50%, 35%, and 15% among eligible first, second, and third place finishers. Weekly rewards require players to satisfy the posted rules, including finishing in an eligible leaderboard position and beating the StakeWars AI Bot. Withdrawal eligibility requires a reward balance of at least $20.00 and complete payout details.</p>
+        <p>The active weekly prize pool is shown on the leaderboard and is split 50%, 35%, and 15% among eligible first, second, and third place finishers. A week may also include a separate first-place bonus prize. Weekly rewards require players to satisfy the posted rules, including verified email, placing at least 10 weekly wagers, wagering at least 1.5x the weekly starting bankroll, finishing in an eligible leaderboard position, and beating StakeWars Chine. Withdrawal eligibility requires a reward balance of at least $20.00, verified email, and complete payout details.</p>
       </section>
       <section>
         <h2>Line and Scoring Data</h2>
         <p>StakeWars relies on third-party sports, odds, and scoring data. Site operators may correct obvious data errors, void affected wagers, mark games No Action, or adjust settlement when required for fairness.</p>
-      </section>
-      <section>
-        <h2>Reddit Posts</h2>
-        <p>The StakeWars Reddit app may publish admin-approved contest updates, AI picks, and links to StakeWars. Reddit posting is moderator-controlled and does not authorize automated scraping, voting, direct messaging, or collection of Reddit user data.</p>
       </section>
       <section>
         <h2>Changes</h2>
@@ -573,8 +777,15 @@ function AuthPanel({
 }) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [username, setUsername] = useState("");
+  const [registrationEmail, setRegistrationEmail] = useState("");
+  const [registrationDisplayName, setRegistrationDisplayName] = useState("");
   const [password, setPassword] = useState("");
+  const [recoveryToken, setRecoveryToken] = useState("");
+  const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [verificationUserId, setVerificationUserId] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState("");
   const [error, setError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
   const [referralCode] = useState(() => {
@@ -586,16 +797,141 @@ function AuthPanel({
     return localStorage.getItem("stakewars_referral_code") ?? "";
   });
 
+  const switchMode = (nextMode: AuthMode) => {
+    setMode(nextMode);
+    setError("");
+    setAuthNotice("");
+    setVerificationUserId("");
+    setVerificationEmail("");
+    setRecoveryToken("");
+    setRecoveryPassword("");
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const verificationResult = params.get("emailVerified");
+    const authToken = params.get("authToken");
+    const emailVerificationToken = params.get("verifyEmail");
+    const emailRecoveryToken = params.get("emailRecovery");
+    if (emailRecoveryToken) {
+      setMode("login");
+      setRecoveryToken(emailRecoveryToken);
+      setAuthNotice("Set a new password to recover your account and keep your original email verified.");
+      params.delete("emailRecovery");
+      const nextSearch = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+      return;
+    }
+    if (emailVerificationToken) {
+      setMode("login");
+      params.delete("verifyEmail");
+      const nextSearch = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+      const finish = async () => {
+        try {
+          const result = await api<{ token: string; user: SessionUser }>("/auth/verify-email-link", {
+            method: "POST",
+            body: JSON.stringify({ token: emailVerificationToken })
+          });
+          localStorage.removeItem("stakewars_referral_code");
+          localStorage.setItem("stakewars_token", result.token);
+          onAuth(result.token, result.user);
+        } catch {
+          setAuthNotice("That verification link is invalid or expired. Log in to request a new one.");
+        }
+      };
+      void finish();
+      return;
+    }
+    if (!verificationResult) return;
+    const finish = async () => {
+      setMode("login");
+      if (verificationResult === "success" && authToken) {
+        try {
+          const result = await api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken);
+          localStorage.removeItem("stakewars_referral_code");
+          localStorage.setItem("stakewars_token", authToken);
+          onAuth(authToken, result.user);
+          return;
+        } catch {
+          setAuthNotice("Email verified. You can log in now.");
+        }
+      } else {
+        setAuthNotice(
+          verificationResult === "success"
+            ? "Email verified. You can log in now."
+            : "That verification link is invalid or expired. Log in to request a new one."
+        );
+      }
+    };
+    params.delete("emailVerified");
+    params.delete("authToken");
+    const nextSearch = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+    void finish();
+  }, [onAuth]);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
     try {
-      const result = await api<{ token: string; user: SessionUser }>(`/auth/${mode}`, {
+      const result = await api<{ token: string; user: SessionUser } | VerificationRequiredResponse>(`/auth/${mode}`, {
         method: "POST",
         body: JSON.stringify({
           username,
           password,
+          ...(mode === "register" ? { email: registrationEmail, displayName: registrationDisplayName } : {}),
           ...(mode === "register" && referralCode ? { referralCode } : {})
+        })
+      });
+      if (isVerificationRequiredResponse(result)) {
+        setVerificationUserId(result.userId);
+        setVerificationEmail(result.email);
+        setAuthNotice("Check your email for a verification link. Once verified, you can log in.");
+        return;
+      }
+      localStorage.removeItem("stakewars_referral_code");
+      localStorage.setItem("stakewars_token", result.token);
+      onAuth(result.token, result.user);
+    } catch (err) {
+      if (
+        err instanceof ApiError
+        && err.status === 403
+        && isVerificationRequiredResponse(err.body)
+      ) {
+        setMode("register");
+        setVerificationUserId(err.body.userId);
+        setVerificationEmail(err.body.email);
+        setAuthNotice("Check your email for a verification link. Once verified, you can log in.");
+      }
+      setError((err as Error).message);
+    }
+  };
+
+  const resendVerificationLink = async () => {
+    if (!verificationUserId) return;
+    setError("");
+    try {
+      const result = await api<{ sent?: boolean; email?: string; alreadyVerified?: boolean }>("/auth/resend-verification", {
+        method: "POST",
+        body: JSON.stringify({ userId: verificationUserId })
+      });
+      setError(result.alreadyVerified ? "Email is already verified. Try logging in." : "A new verification link was sent.");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const submitEmailRecovery = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setAuthNotice("");
+    try {
+      const result = await api<{ token: string; user: SessionUser }>("/auth/recover-email-change", {
+        method: "POST",
+        body: JSON.stringify({
+          token: recoveryToken,
+          password: recoveryPassword
         })
       });
       localStorage.removeItem("stakewars_referral_code");
@@ -611,7 +947,7 @@ function AuthPanel({
       <div className="brand-panel">
         <img className="hero-logo" src="/images/sw-hero.png" alt="StakeWars" />
       </div>
-      <form className="auth-card" onSubmit={submit} autoComplete="on">
+      <form className="auth-card" onSubmit={recoveryToken ? submitEmailRecovery : submit} autoComplete="on">
         <div className="auth-heading">
           <img className="auth-logo" src="/icons/icon-192.png" alt="" />
           <div>
@@ -623,48 +959,123 @@ function AuthPanel({
           </div>
         </div>
         <div className="segmented">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
+          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>
             <Lock size={16} /> Login
           </button>
-          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>
+          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>
             <UserPlus size={16} /> Register
           </button>
         </div>
-        <label>
-          Username
-          <input
-            name="username"
-            autoComplete="username"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            value={username}
-            onChange={(event) => setUsername(event.target.value)}
-            minLength={3}
-            maxLength={32}
-            required
-          />
-        </label>
-        <label>
-          Password
-          <input
-            name={mode === "login" ? "current-password" : "new-password"}
-            type="password"
-            autoComplete={mode === "login" ? "current-password" : "new-password"}
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            minLength={10}
-            required
-          />
-        </label>
-        {mode === "register" && (
+        {recoveryToken ? (
+          <>
+            <div className="notification-card">
+              <div>
+                <strong>Recover account</strong>
+                <span>This will keep the original email verified, discard the pending email change, and require a new password.</span>
+              </div>
+            </div>
+            <label>
+              New password
+              <input
+                name="new-password"
+                type="password"
+                autoComplete="new-password"
+                value={recoveryPassword}
+                onChange={(event) => setRecoveryPassword(event.target.value)}
+                minLength={10}
+                required
+              />
+            </label>
+            <p className="hint">Minimum 10 characters with uppercase, lowercase, number, and symbol.</p>
+          </>
+        ) : verificationUserId ? (
+          <div className="notification-card">
+            <div>
+              <strong>Verify your email</strong>
+              <span>We sent a verification link to {verificationEmail}. Open it to activate prize eligibility, then log in.</span>
+            </div>
+          </div>
+        ) : (
+          <>
+            <label>
+              Username
+              <input
+                name="username"
+                autoComplete="username"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                minLength={3}
+                maxLength={32}
+                required
+              />
+            </label>
+            {mode === "register" && (
+              <>
+                <label>
+                  Email
+                  <input
+                    name="email"
+                    type="email"
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    value={registrationEmail}
+                    onChange={(event) => setRegistrationEmail(event.target.value)}
+                    maxLength={254}
+                    required
+                  />
+                </label>
+                <label>
+                  Display Name
+                  <input
+                    name="displayName"
+                    autoComplete="nickname"
+                    value={registrationDisplayName}
+                    onChange={(event) => setRegistrationDisplayName(event.target.value)}
+                    minLength={2}
+                    maxLength={40}
+                    required
+                  />
+                </label>
+              </>
+            )}
+            <label>
+              Password
+              <input
+                name={mode === "login" ? "current-password" : "new-password"}
+                type="password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={10}
+                required
+              />
+            </label>
+          </>
+        )}
+        {mode === "register" && !verificationUserId && !recoveryToken && (
           <p className="hint">
             Minimum 10 characters with uppercase, lowercase, number, and symbol.
             {referralCode && <span className="referral-applied"> Referral applied.</span>}
           </p>
         )}
+        {authNotice && <p className="success">{authNotice}</p>}
         {error && <p className="error">{error}</p>}
-        <button className="primary" type="submit">{mode === "login" ? "Login" : "Create account"}</button>
+        {recoveryToken ? (
+          <button className="primary" type="submit">Recover account</button>
+        ) : verificationUserId ? (
+          <button className="primary" type="button" onClick={() => switchMode("login")}>Back to login</button>
+        ) : (
+          <button className="primary" type="submit">{mode === "login" ? "Login" : "Create account"}</button>
+        )}
+        {verificationUserId && (
+          <button className="secondary-action" type="button" onClick={resendVerificationLink}>
+            Send new link
+          </button>
+        )}
         <button className="secondary-action" type="button" onClick={() => canInstall ? onInstall() : setInstallOpen(true)}>
           <Download size={17} /> Install App
         </button>
@@ -718,10 +1129,12 @@ function App() {
   const [leaderboardIsCurrentWeek, setLeaderboardIsCurrentWeek] = useState(true);
   const [registeredPlayers, setRegisteredPlayers] = useState(0);
   const [weeklyPrizeCents, setWeeklyPrizeCents] = useState(0);
+  const [weeklyFirstPlaceBonus, setWeeklyFirstPlaceBonus] = useState<string | null>(null);
   const [liveGames, setLiveGames] = useState<LiveGameState[]>([]);
   const [openBets, setOpenBets] = useState<OpenBet[]>([]);
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
-  const [aiPicks, setAiPicks] = useState<any[]>([]);
+  const [aiPicks, setAiPicks] = useState<DailyAiPick[]>([]);
+  const [dailyChineParlay, setDailyChineParlay] = useState<DailyChineParlay | null>(null);
   const [kind, setKind] = useState<WagerKind>("straight");
   const [stake, setStake] = useState("100");
   const [roundRobinMaxLegs, setRoundRobinMaxLegs] = useState(2);
@@ -740,6 +1153,9 @@ function App() {
   const [historyIncludeAi, setHistoryIncludeAi] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
+  const [accountEmailNotice, setAccountEmailNotice] = useState("");
+  const [emailEditing, setEmailEditing] = useState(false);
+  const [accountSaving, setAccountSaving] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [payoutMethod, setPayoutMethod] = useState<SessionUser["payoutMethod"]>("none");
   const [payoutHandle, setPayoutHandle] = useState("");
@@ -756,13 +1172,40 @@ function App() {
     scoreChangeEnabled: false,
     gameFinalEnabled: false
   });
+  const [adminSection, setAdminSection] = useState<AdminSection>("traffic");
   const [redditStatus, setRedditStatus] = useState<RedditStatus | null>(null);
   const [redditSubreddit, setRedditSubreddit] = useState("");
   const [redditTitle, setRedditTitle] = useState("");
   const [redditBody, setRedditBody] = useState("");
+  const [redditParlayTitle, setRedditParlayTitle] = useState("");
+  const [redditParlayBody, setRedditParlayBody] = useState("");
   const [redditNotice, setRedditNotice] = useState("");
   const [userDisplayMap, setUserDisplayMap] = useState<UserDisplayMapRow[]>([]);
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
+  const [visitorMetrics, setVisitorMetrics] = useState<VisitorMetrics | null>(null);
+  const [visitorMetricsNotice, setVisitorMetricsNotice] = useState("");
+  const [adminPrizes, setAdminPrizes] = useState<WeeklyPrize[]>([]);
+  const [adminPrizeWeekStart, setAdminPrizeWeekStart] = useState("");
+  const [adminPrizeCash, setAdminPrizeCash] = useState("10.00");
+  const [adminPrizeBonus, setAdminPrizeBonus] = useState("");
+  const [adminPrizeNotice, setAdminPrizeNotice] = useState("");
+  const [chineModelAudit, setChineModelAudit] = useState<ChineModelAudit | null>(null);
+  const [chineModelAuditNotice, setChineModelAuditNotice] = useState("");
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportCategory, setSupportCategory] = useState<SupportCategory | "">("");
+  const [supportMessage, setSupportMessage] = useState("");
+  const [supportNotice, setSupportNotice] = useState("");
+  const [supportConversations, setSupportConversations] = useState<SupportConversation[]>([]);
+  const [activeSupportConversation, setActiveSupportConversation] = useState<SupportConversation | null>(null);
+  const [activeSupportMessages, setActiveSupportMessages] = useState<SupportMessage[]>([]);
+  const [supportReplyMessage, setSupportReplyMessage] = useState("");
+  const [adminSupportConversations, setAdminSupportConversations] = useState<SupportConversation[]>([]);
+  const [selectedSupportConversation, setSelectedSupportConversation] = useState<SupportConversation | null>(null);
+  const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
+  const [supportReply, setSupportReply] = useState("");
+  const [supportTranscriptOnClose, setSupportTranscriptOnClose] = useState(true);
+  const userSupportMessagesRef = useRef<HTMLDivElement | null>(null);
+  const adminSupportMessagesRef = useRef<HTMLDivElement | null>(null);
   const [referralInfo, setReferralInfo] = useState<ReferralInfo | null>(null);
   const [referralQr, setReferralQr] = useState("");
   const [referralNotice, setReferralNotice] = useState("");
@@ -771,13 +1214,39 @@ function App() {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
     const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult, liveWorldCupResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
-      api<LeaderboardResponse>(leaderboardPath),
-      api<{ picks: any[] }>("/ai-picks"),
+      api<LeaderboardResponse>(leaderboardPath, {}, authToken),
+      api<{ picks: DailyAiPick[]; parlay: DailyChineParlay | null }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
       api<{ games: LiveGameState[] }>("/live/epl"),
       api<{ games: LiveGameState[] }>("/live/worldcup")
     ]);
     setLines(lineResult.lines);
+    setSlip((current) => {
+      const { nextSlip, idMap } = rebindSlipToFreshLines(current, lineResult.lines);
+      if (idMap.size > 0) {
+        setSingleStakes((stakes) => {
+          const next = { ...stakes };
+          for (const [oldId, newId] of idMap.entries()) {
+            if (next[oldId] !== undefined && next[newId] === undefined) {
+              next[newId] = next[oldId];
+            }
+            delete next[oldId];
+          }
+          return next;
+        });
+        setIncludedLegIds((included) => {
+          const next = new Set(included);
+          for (const [oldId, newId] of idMap.entries()) {
+            if (next.has(oldId)) {
+              next.delete(oldId);
+              next.add(newId);
+            }
+          }
+          return next;
+        });
+      }
+      return nextSlip;
+    });
     setMarkets(lineResult.markets ?? []);
     setGames(lineResult.games ?? []);
     setLeaderboard(boardResult.leaderboard);
@@ -785,10 +1254,12 @@ function App() {
     setLeaderboardIsCurrentWeek(boardResult.isCurrentWeek);
     setRegisteredPlayers(boardResult.registeredPlayers ?? 0);
     setWeeklyPrizeCents(boardResult.weeklyPrizeCents ?? 0);
+    setWeeklyFirstPlaceBonus(boardResult.weeklyPrize?.firstPlaceBonus ?? null);
     if (boardResult.weekStart && (!leaderboardWeekStart || leaderboardWeekStart !== boardResult.weekStart)) {
       setLeaderboardWeekStart(boardResult.weekStart);
     }
     setAiPicks(aiResult.picks);
+    setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
       const [me, openBetResult, pushPreferenceResult, referralResult] = await Promise.all([
@@ -800,6 +1271,7 @@ function App() {
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
       setEmail(me.user.email ?? "");
+      setEmailEditing(false);
       setDisplayName(me.user.displayName ?? "");
       setPayoutMethod(me.user.payoutMethod);
       setPayoutHandle(me.user.payoutHandle ?? "");
@@ -850,18 +1322,26 @@ function App() {
 
   const loadLeaderboardWeek = async (weekStart: string) => {
     setLeaderboardWeekStart(weekStart);
-    const result = await api<LeaderboardResponse>(`/leaderboard?weekStart=${encodeURIComponent(weekStart)}`);
+    const result = await api<LeaderboardResponse>(`/leaderboard?weekStart=${encodeURIComponent(weekStart)}`, {}, token);
     setLeaderboard(result.leaderboard);
     setLeaderboardWeeks(result.weeks ?? []);
     setLeaderboardIsCurrentWeek(result.isCurrentWeek);
     setRegisteredPlayers(result.registeredPlayers ?? 0);
     setWeeklyPrizeCents(result.weeklyPrizeCents ?? 0);
+    setWeeklyFirstPlaceBonus(result.weeklyPrize?.firstPlaceBonus ?? null);
     if (result.weekStart) {
       setLeaderboardWeekStart(result.weekStart);
     }
   };
 
   const isMobileLayout = () => window.matchMedia("(max-width: 860px)").matches;
+
+  const scrollSupportMessagesToBottom = (element: HTMLDivElement | null) => {
+    if (!element) return;
+    requestAnimationFrame(() => {
+      element.scrollTop = element.scrollHeight;
+    });
+  };
 
   const openPage = (page: AppPage) => {
     setActivePage(page);
@@ -916,20 +1396,114 @@ function App() {
     if (!token || !isNateRakelAccount) {
       setUserDisplayMap([]);
       setUserDisplayMapNotice("");
+      setVisitorMetrics(null);
+      setVisitorMetricsNotice("");
+      setAdminSupportConversations([]);
+      setAdminPrizes([]);
+      setChineModelAudit(null);
+      setChineModelAuditNotice("");
       return;
     }
-    api<{ users: UserDisplayMapRow[] }>("/admin/user-display-map", {}, token)
-      .then((result) => {
-        setUserDisplayMap(result.users);
+    Promise.all([
+      api<{ users: UserDisplayMapRow[] }>("/admin/user-display-map", {}, token),
+      api<VisitorMetrics>("/admin/visitors", {}, token),
+      api<{ conversations: SupportConversation[] }>("/admin/support/conversations?status=open", {}, token),
+      api<AdminPrizesResponse>("/admin/prizes", {}, token),
+      api<ChineModelAudit>("/admin/chine-model-audit", {}, token)
+    ])
+      .then(([usersResult, visitorsResult, supportResult, prizesResult, auditResult]) => {
+        setUserDisplayMap(usersResult.users);
+        setVisitorMetrics(visitorsResult);
+        setAdminSupportConversations(supportResult.conversations);
+        setAdminPrizes(prizesResult.prizes);
+        setChineModelAudit(auditResult);
+        const selectedPrize = prizesResult.prizes.find((prize) => prize.weekStart === prizesResult.nextWeekStart)
+          ?? prizesResult.prizes.find((prize) => prize.weekStart === prizesResult.currentWeekStart);
+        setAdminPrizeWeekStart(selectedPrize?.weekStart ?? prizesResult.nextWeekStart);
+        if (selectedPrize) {
+          setAdminPrizeCash((selectedPrize.cashPrizeCents / 100).toFixed(2));
+          setAdminPrizeBonus(selectedPrize.firstPlaceBonus ?? "");
+        }
         setUserDisplayMapNotice("");
+        setVisitorMetricsNotice("");
+        setChineModelAuditNotice("");
       })
       .catch((err) => setUserDisplayMapNotice((err as Error).message));
+  }, [token, isNateRakelAccount]);
+
+  useEffect(() => {
+    if (!token || !isNateRakelAccount) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("page") !== "admin") return;
+    openPage("admin");
+    if (params.get("adminTab") === "support") {
+      setAdminSection("support");
+    }
+    const conversationId = params.get("conversation");
+    if (conversationId) {
+      void openAdminSupportConversation(conversationId);
+    }
+    params.delete("page");
+    params.delete("adminTab");
+    params.delete("conversation");
+    const nextSearch = params.toString();
+    window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
   }, [token, isNateRakelAccount]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 15_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (!token || !user?.emailVerified) return;
+    void refreshUserSupportConversations();
+  }, [token, user?.emailVerified]);
+
+  useEffect(() => {
+    scrollSupportMessagesToBottom(userSupportMessagesRef.current);
+  }, [activeSupportConversation?.id, activeSupportMessages.length, supportOpen]);
+
+  useEffect(() => {
+    scrollSupportMessagesToBottom(adminSupportMessagesRef.current);
+  }, [selectedSupportConversation?.id, supportMessages.length, adminSection, activePage]);
+
+  useEffect(() => {
+    if (!supportOpen || !token || !activeSupportConversation) return;
+    const refreshThread = async () => {
+      try {
+        const result = await api<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/support/conversations/${activeSupportConversation.id}`, {}, token);
+        setActiveSupportConversation(result.conversation);
+        setActiveSupportMessages(result.messages);
+      } catch {
+        // Ignore transient support refresh failures.
+      }
+    };
+    void refreshThread();
+    const timer = window.setInterval(refreshThread, 10_000);
+    return () => window.clearInterval(timer);
+  }, [supportOpen, token, activeSupportConversation?.id]);
+
+  useEffect(() => {
+    if (activePage !== "admin" || adminSection !== "support" || !token || !selectedSupportConversation || !isNateRakelAccount) return;
+    let refreshing = false;
+    const refreshSelectedThread = async () => {
+      if (refreshing) return;
+      refreshing = true;
+      try {
+        const result = await api<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/admin/support/conversations/${selectedSupportConversation.id}`, {}, token);
+        setSelectedSupportConversation(result.conversation);
+        setSupportMessages(result.messages);
+        await refreshAdminSupport().catch(() => undefined);
+      } catch {
+        // Ignore transient admin support refresh failures.
+      } finally {
+        refreshing = false;
+      }
+    };
+    const timer = window.setInterval(refreshSelectedThread, 5_000);
+    return () => window.clearInterval(timer);
+  }, [activePage, adminSection, token, selectedSupportConversation?.id, isNateRakelAccount]);
 
   useEffect(() => {
     let refreshing = false;
@@ -1007,16 +1581,20 @@ function App() {
   const sportsWithLines = useMemo(() => new Set(games.map((game) => game.sport as ScoreboardSport)), [games]);
   const firstAvailableSport = sportsMenu.find((sport) => sportsWithLines.has(sport));
   const selectedSportGames = useMemo(() => games.filter((game) => game.sport === lineSport), [games, lineSport]);
+  const savedEmail = user?.email ?? "";
+  const typedEmail = email.trim();
+  const emailNeedsSave = typedEmail !== savedEmail;
   const canWithdraw = Boolean(
     user
     && user.rewardBalanceCents > 2000
+    && user.emailVerified
     && payoutMethod !== "none"
     && payoutHandle.trim().length >= 2
     && /^[0-9]{4}$/.test(phoneLast4)
   );
   const lockedAiPicks = aiPicks.filter((pick) => Boolean(pick.lockedAt));
   const projectedAiPicks = aiPicks.filter((pick) => !pick.lockedAt);
-  const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.beatAi);
+  const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.eligible);
   const rewardShares = [50, 35, 15];
   const rewardShareByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [row.rank, rewardShares[index] ?? 0]));
   const rewardCentsByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [
@@ -1033,11 +1611,20 @@ function App() {
     }
   }, [firstAvailableSport, lineSport, scoreboardSport, sportsWithLines]);
 
-  const renderAiPick = (pick: any) => (
+  const renderAiPick = (pick: DailyAiPick) => {
+    const resultLabel = aiPickResultLabel(pick.resultStatus);
+    return (
     <div className="ai-pick" key={pick.id}>
-      <small className={pick.lockedAt ? "pick-status locked" : "pick-status projected"}>
-        {pick.lockedAt ? "Locked" : "Projected"}
-      </small>
+      <div className="pick-badges">
+        <small className={pick.lockedAt ? "pick-status locked" : "pick-status projected"}>
+          {pick.lockedAt ? "Locked" : "Projected"}
+        </small>
+        {resultLabel && (
+          <small className={`pick-result ${pick.resultStatus}`}>
+            {resultLabel}
+          </small>
+        )}
+      </div>
       <strong>{pick.selectedTeam} {pick.marketKey === "h2h" ? americanOdds(pick.oddsAmerican) : `${pick.spread} ${americanOdds(pick.oddsAmerican)}`}</strong>
       <span>{pick.awayTeam} at {pick.homeTeam}</span>
       {pick.confidence && <span>Confidence {Math.round(Number(pick.confidence) * 100)}%</span>}
@@ -1045,11 +1632,54 @@ function App() {
         ? <small className="ai-explanation">{pick.explanation}</small>
         : pick.reasons?.length > 0 && <small>{pick.reasons.join(" · ")}</small>}
     </div>
-  );
+    );
+  };
+
+  const parlayReturnUnits = (parlay: DailyChineParlay) =>
+    Number(parlay.units) * parlay.legs.reduce((product, leg) => product * Number(leg.decimalOdds), 1);
+
+  const formatUnitAmount = (value: number) => `${value.toFixed(Number.isInteger(value) ? 0 : 2)}u`;
+
+  const renderParlayLeg = (leg: DailyChineParlayLeg) => {
+    const resultLabel = trackedResultLabel(leg.status);
+    return (
+      <li key={leg.id}>
+        <span>
+          <strong>{leg.selectedTeam}</strong>
+          <small>{linePriceText(leg.marketKey, leg.spread, leg.oddsAmerican)}</small>
+        </span>
+        <small>{leg.awayTeam} at {leg.homeTeam}</small>
+        {resultLabel && <small className={`pick-result ${leg.status}`}>{resultLabel}</small>}
+      </li>
+    );
+  };
+
+  const renderDailyChineParlay = (parlay: DailyChineParlay) => {
+    const resultLabel = trackedResultLabel(parlay.status);
+    const returnUnits = parlay.potentialReturnUnits ? Number(parlay.potentialReturnUnits) : parlayReturnUnits(parlay);
+    return (
+      <div className="ai-pick daily-parlay" key={parlay.id}>
+        <div className="pick-badges">
+          <small className="pick-status locked">3-Team Parlay</small>
+          {resultLabel && <small className={`pick-result ${parlay.status}`}>{resultLabel}</small>}
+        </div>
+        <strong>{formatUnitAmount(Number(parlay.units))} to return {formatUnitAmount(returnUnits)}</strong>
+        <ul className="daily-parlay-legs">
+          {parlay.legs.map(renderParlayLeg)}
+        </ul>
+      </div>
+    );
+  };
 
   const aiPicksContent = (
     <>
-      {aiPicks.length === 0 ? <p className="muted">No public AI picks for today.</p> : (
+      {dailyChineParlay && dailyChineParlay.legs.length === 3 && (
+        <>
+          <h3 className="pick-section-title">3-Team Parlay</h3>
+          {renderDailyChineParlay(dailyChineParlay)}
+        </>
+      )}
+      {aiPicks.length === 0 ? !dailyChineParlay && <p className="muted">No public AI picks for today.</p> : (
         <>
           {lockedAiPicks.length > 0 && (
             <>
@@ -1162,7 +1792,12 @@ function App() {
         gameLineId: line.id,
         selectedTeam: line.team,
         expectedSpread: line.spread,
-        expectedOddsAmerican: line.oddsAmerican
+        expectedOddsAmerican: line.oddsAmerican,
+        sport: selectedLine?.sport,
+        startsAt: selectedLine?.startsAt,
+        awayTeam: selectedLine?.awayTeam,
+        homeTeam: selectedLine?.homeTeam,
+        marketKey: selectedLine?.marketKey
       }];
     });
   };
@@ -1177,7 +1812,10 @@ function App() {
 
   const lineForLeg = (leg: SlipLeg) => lineForId(leg.gameLineId);
   const gameHasStarted = (startsAt: string) => new Date(startsAt).getTime() <= currentTime;
-  const lineHasStarted = (line: GameLine | undefined) => Boolean(line && gameHasStarted(line.startsAt));
+  const legHasStarted = (leg: SlipLeg) => {
+    const line = lineForLeg(leg);
+    return line ? gameHasStarted(line.startsAt) : Boolean(leg.startsAt && gameHasStarted(leg.startsAt));
+  };
 
   const marketText = (line: GameLine | undefined) => {
     if (!line) return "";
@@ -1280,7 +1918,11 @@ function App() {
           setNotice("Enter a stake for at least one single wager.");
           return;
         }
-        if (wagers.some((wager) => lineHasStarted(lineForLeg(wager.leg)))) {
+        if (wagers.some((wager) => !lineForLeg(wager.leg))) {
+          setNotice("One or more selected lines are no longer available. Remove them from the bet slip before placing wagers.");
+          return;
+        }
+        if (wagers.some((wager) => legHasStarted(wager.leg))) {
           setNotice("One or more selected games have already started. Remove them from the bet slip before placing wagers.");
           return;
         }
@@ -1300,7 +1942,11 @@ function App() {
           setNotice(`${kind === "parlay" ? "Parlay" : "Round robin"} wagers need at least two selections.`);
           return;
         }
-        if (includedSlip.some((leg) => lineHasStarted(lineForLeg(leg)))) {
+        if (includedSlip.some((leg) => !lineForLeg(leg))) {
+          setNotice("One or more selected lines are no longer available. Remove them from the bet slip before placing this wager.");
+          return;
+        }
+        if (includedSlip.some((leg) => legHasStarted(leg))) {
           setNotice("One or more selected games have already started. Remove them from the bet slip before placing this wager.");
           return;
         }
@@ -1380,15 +2026,34 @@ function App() {
     });
   };
 
-  const saveProfile = async () => {
+  const removeSlipLeg = (legId: string) => {
     setNotice("");
+    setSlip((current) => current.filter((leg) => leg.gameLineId !== legId));
+    setSingleStakes((current) => {
+      const next = { ...current };
+      delete next[legId];
+      return next;
+    });
+    setIncludedLegIds((current) => {
+      const next = new Set(current);
+      next.delete(legId);
+      return next;
+    });
+  };
+
+  const saveProfile = async () => {
+    if (accountSaving) return;
+    setNotice("");
+    setAccountSaving(true);
     try {
       const cleaned = displayName.trim();
+      const wasChangingEmail = emailNeedsSave || emailEditing;
       const result = await api<{ token: string; user: SessionUser }>("/me/profile", {
         method: "PATCH",
         body: JSON.stringify({
           fullName: fullName.trim() || null,
           email: email.trim() || null,
+          allowEmailChange: emailEditing,
           displayName: cleaned || null,
           payoutMethod,
           payoutHandle: payoutMethod === "none" ? null : payoutHandle.trim() || null,
@@ -1400,16 +2065,40 @@ function App() {
       setUser(result.user);
       setFullName(result.user.fullName ?? "");
       setEmail(result.user.email ?? "");
+      setEmailEditing(false);
+      setAccountEmailNotice(result.user.emailVerified ? "Profile saved." : "Profile saved. Verify your email to remain reward eligible.");
       setDisplayName(result.user.displayName ?? "");
       setPayoutMethod(result.user.payoutMethod);
       setPayoutHandle(result.user.payoutHandle ?? "");
       setPhoneLast4(result.user.phoneLast4 ?? "");
-      setNotice("Profile saved.");
+      const savedNotice = result.user.emailVerified
+        ? "Profile saved."
+        : wasChangingEmail && result.user.email
+          ? "Profile saved. Verification link sent."
+          : "Profile saved. Verify your email to remain reward eligible.";
+      setAccountEmailNotice(savedNotice);
+      setNotice(savedNotice);
       await refresh(result.token);
     } catch (err) {
       setNotice((err as Error).message);
+    } finally {
+      setAccountSaving(false);
     }
   };
+
+  const sendAccountEmailVerification = async () => {
+    setAccountEmailNotice("");
+    try {
+      const result = await api<{ sent?: boolean; email?: string; alreadyVerified?: boolean }>("/me/email-verification/send", {
+        method: "POST"
+      }, token);
+      setAccountEmailNotice(result.alreadyVerified ? "Email is already verified." : "Verification link sent.");
+    } catch (err) {
+      setAccountEmailNotice((err as Error).message);
+    }
+  };
+
+  const accountVerificationLinkAlreadySent = accountEmailNotice === "Profile saved. Verification link sent.";
 
   const copyReferralLink = async () => {
     if (!referralInfo) return;
@@ -1514,38 +2203,264 @@ function App() {
     }
   };
 
+  const refreshVisitorMetrics = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setVisitorMetricsNotice("");
+    try {
+      const result = await api<VisitorMetrics>("/admin/visitors", {}, token);
+      setVisitorMetrics(result);
+      setVisitorMetricsNotice("Visitor metrics refreshed.");
+    } catch (err) {
+      setVisitorMetricsNotice((err as Error).message);
+    }
+  };
+
+  const refreshChineModelAudit = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setChineModelAuditNotice("");
+    try {
+      const result = await api<ChineModelAudit>("/admin/chine-model-audit", {}, token);
+      setChineModelAudit(result);
+      setChineModelAuditNotice("Chine model audit refreshed.");
+    } catch (err) {
+      setChineModelAuditNotice((err as Error).message);
+    }
+  };
+
+  const refreshAdminPrizes = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminPrizeNotice("");
+    try {
+      const result = await api<AdminPrizesResponse>("/admin/prizes", {}, token);
+      setAdminPrizes(result.prizes);
+      const selected = result.prizes.find((prize) => prize.weekStart === adminPrizeWeekStart)
+        ?? result.prizes.find((prize) => prize.weekStart === result.nextWeekStart)
+        ?? result.prizes.find((prize) => prize.weekStart === result.currentWeekStart);
+      const weekStart = adminPrizeWeekStart || selected?.weekStart || result.nextWeekStart;
+      setAdminPrizeWeekStart(weekStart);
+      if (selected && selected.weekStart === weekStart) {
+        setAdminPrizeCash((selected.cashPrizeCents / 100).toFixed(2));
+        setAdminPrizeBonus(selected.firstPlaceBonus ?? "");
+      }
+      setAdminPrizeNotice("Prize settings refreshed.");
+    } catch (err) {
+      setAdminPrizeNotice((err as Error).message);
+    }
+  };
+
+  const saveAdminPrize = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminPrizeNotice("");
+    const cashPrizeCents = Math.round(Number(adminPrizeCash || "0") * 100);
+    if (!Number.isFinite(cashPrizeCents) || cashPrizeCents < 0) {
+      setAdminPrizeNotice("Enter a valid cash prize amount.");
+      return;
+    }
+    try {
+      const result = await api<{ prize: WeeklyPrize }>("/admin/prizes", {
+        method: "PUT",
+        body: JSON.stringify({
+          weekStart: adminPrizeWeekStart,
+          cashPrizeCents,
+          firstPlaceBonus: adminPrizeBonus.trim() || null
+        })
+      }, token);
+      setAdminPrizes((current) => [
+        result.prize,
+        ...current.filter((prize) => prize.weekStart !== result.prize.weekStart)
+      ].sort((left, right) => right.weekStart.localeCompare(left.weekStart)));
+      setAdminPrizeNotice("Prize settings saved.");
+      if (leaderboardWeekStart === result.prize.weekStart) {
+        setWeeklyPrizeCents(result.prize.cashPrizeCents);
+        setWeeklyFirstPlaceBonus(result.prize.firstPlaceBonus);
+      }
+    } catch (err) {
+      setAdminPrizeNotice((err as Error).message);
+    }
+  };
+
+  const supportCategoryLabel = (category: SupportCategory) => {
+    switch (category) {
+      case "account_email": return "Account or email issue";
+      case "rewards_eligibility": return "Rewards or eligibility";
+      case "picks_scoring": return "Picks or scoring";
+      case "technical_problem": return "Report a technical problem";
+      case "other": return "Something else";
+    }
+  };
+
+  const startSupportChat = async (category: SupportCategory) => {
+    setSupportNotice("");
+    setSupportCategory(category);
+    try {
+      const result = await api<{ conversation: SupportConversation }>("/support/conversations", {
+        method: "POST",
+        body: JSON.stringify({ category, message: supportMessage.trim() || undefined })
+      }, token);
+      setSupportConversations((current) => [result.conversation, ...current.filter((conversation) => conversation.id !== result.conversation.id)]);
+      setActiveSupportConversation(result.conversation);
+      const loaded = await api<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/support/conversations/${result.conversation.id}`, {}, token);
+      setActiveSupportConversation(loaded.conversation);
+      setActiveSupportMessages(loaded.messages);
+      setSupportNotice("Support chat opened. We will respond as soon as possible.");
+      setSupportMessage("");
+    } catch (err) {
+      setSupportNotice((err as Error).message);
+    }
+  };
+
+  const openUserSupportConversation = async (conversationId: string) => {
+    if (!token) return;
+    try {
+      const result = await api<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/support/conversations/${conversationId}`, {}, token);
+      setActiveSupportConversation(result.conversation);
+      setActiveSupportMessages(result.messages);
+      setSupportNotice("");
+    } catch (err) {
+      setSupportNotice((err as Error).message);
+    }
+  };
+
+  const refreshUserSupportConversations = async () => {
+    if (!token || !user?.emailVerified) return;
+    try {
+      const result = await api<{ conversations: SupportConversation[] }>("/support/conversations", {}, token);
+      setSupportConversations(result.conversations);
+      if (!activeSupportConversation && result.conversations[0]?.status === "open") {
+        await openUserSupportConversation(result.conversations[0].id);
+      }
+    } catch {
+      // Support should not block the rest of the app.
+    }
+  };
+
+  const sendUserSupportMessage = async () => {
+    if (!token || !activeSupportConversation || !supportReplyMessage.trim()) return;
+    try {
+      const result = await api<{ message: SupportMessage }>(`/support/conversations/${activeSupportConversation.id}/messages`, {
+        method: "POST",
+        body: JSON.stringify({ body: supportReplyMessage.trim() })
+      }, token);
+      setActiveSupportMessages((current) => [...current, result.message]);
+      setSupportReplyMessage("");
+      const loaded = await api<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/support/conversations/${activeSupportConversation.id}`, {}, token);
+      setActiveSupportConversation(loaded.conversation);
+      setActiveSupportMessages(loaded.messages);
+      await refreshUserSupportConversations();
+    } catch (err) {
+      setSupportNotice((err as Error).message);
+    }
+  };
+
+  const refreshAdminSupport = async () => {
+    if (!token || !isNateRakelAccount) return;
+    const result = await api<{ conversations: SupportConversation[] }>("/admin/support/conversations?status=open", {}, token);
+    setAdminSupportConversations(result.conversations);
+  };
+
+  const openAdminSupportConversation = async (conversationId: string) => {
+    if (!token || !isNateRakelAccount) return;
+    const result = await api<{ conversation: SupportConversation; messages: SupportMessage[] }>(`/admin/support/conversations/${conversationId}`, {}, token);
+    setSelectedSupportConversation(result.conversation);
+    setSupportMessages(result.messages);
+    setSupportReply("");
+  };
+
+  const sendSupportReply = async () => {
+    if (!token || !selectedSupportConversation || !supportReply.trim()) return;
+    const result = await api<{ message: SupportMessage }>(`/admin/support/conversations/${selectedSupportConversation.id}/messages`, {
+      method: "POST",
+      body: JSON.stringify({ body: supportReply.trim() })
+    }, token);
+    setSupportMessages((current) => [...current, result.message]);
+    setSupportReply("");
+    await refreshAdminSupport().catch(() => undefined);
+  };
+
+  const closeSupportConversation = async () => {
+    if (!token || !selectedSupportConversation) return;
+    const result = await api<{ conversation: SupportConversation; transcriptSent: boolean }>(`/admin/support/conversations/${selectedSupportConversation.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "closed", sendTranscript: supportTranscriptOnClose })
+    }, token);
+    setSelectedSupportConversation(result.conversation);
+    setSupportNotice(result.transcriptSent ? "Conversation closed and transcript sent." : "Conversation closed.");
+    await refreshAdminSupport().catch(() => undefined);
+  };
+
   const generateRedditPreview = async () => {
     setRedditNotice("");
     try {
-      const result = await api<{ preview: RedditPreview }>("/admin/reddit/preview", {
-        method: "POST",
-        body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined })
-      }, token);
-      setRedditSubreddit(result.preview.subreddit);
-      setRedditTitle(result.preview.title);
-      setRedditBody(result.preview.body);
-      setRedditNotice("Preview generated and logged as a dry run.");
+      const [singleResult, parlayResult] = await Promise.all([
+        api<{ preview: RedditPreview }>("/admin/reddit/preview", {
+          method: "POST",
+          body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "single" })
+        }, token),
+        api<{ preview: RedditPreview }>("/admin/reddit/preview", {
+          method: "POST",
+          body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "parlay" })
+        }, token)
+      ]);
+      setRedditSubreddit(singleResult.preview.subreddit);
+      setRedditTitle(singleResult.preview.title);
+      setRedditBody(singleResult.preview.body);
+      setRedditParlayTitle(parlayResult.preview.title);
+      setRedditParlayBody(parlayResult.preview.body);
+      setRedditNotice("Manual Reddit posts generated.");
       await refreshRedditStatus();
     } catch (err) {
       setRedditNotice((err as Error).message);
     }
   };
 
-  const submitRedditPostFromPreview = async (dryRun: boolean) => {
+  const generateRedditParlayPreview = async () => {
     setRedditNotice("");
     try {
-      const result = await api<{ dryRun: boolean; logId: string; redditUrl: string | null }>("/admin/reddit/post", {
+      const result = await api<{ preview: RedditPreview }>("/admin/reddit/preview", {
         method: "POST",
-        body: JSON.stringify({
-          subreddit: redditSubreddit.trim(),
-          title: redditTitle.trim(),
-          body: redditBody.trim(),
-          dryRun
-        })
+        body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "parlay" })
       }, token);
-      setRedditNotice(dryRun
-        ? "Dry run logged."
-        : "Queued for Devvit to post to Reddit.");
+      setRedditSubreddit(result.preview.subreddit);
+      setRedditParlayTitle(result.preview.title);
+      setRedditParlayBody(result.preview.body);
+      setRedditNotice("3-team parlay Reddit post generated.");
+      await refreshRedditStatus();
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const copyRedditPost = async () => {
+    setRedditNotice("");
+    try {
+      await navigator.clipboard.writeText([redditTitle.trim(), "", redditBody.trim()].filter(Boolean).join("\n"));
+      setRedditNotice("Reddit post copied.");
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const copyRedditParlayPost = async () => {
+    setRedditNotice("");
+    try {
+      await navigator.clipboard.writeText([redditParlayTitle.trim(), "", redditParlayBody.trim()].filter(Boolean).join("\n"));
+      setRedditNotice("3-team parlay Reddit post copied.");
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const lockRedditPostTracking = async (postType: "single" | "parlay") => {
+    setRedditNotice("");
+    const isParlay = postType === "parlay";
+    const title = isParlay ? redditParlayTitle.trim() : redditTitle.trim();
+    const body = isParlay ? redditParlayBody.trim() : redditBody.trim();
+    try {
+      await api<{ id: string; lockedAt: string; postType: "single" | "parlay"; legs: number }>("/admin/reddit/lock", {
+        method: "POST",
+        body: JSON.stringify({ postType, title, body })
+      }, token);
+      setRedditNotice(isParlay ? "3-team parlay tracking locked." : "Single pick tracking locked.");
     } catch (err) {
       setRedditNotice((err as Error).message);
     }
@@ -1644,12 +2559,16 @@ function App() {
               })}
             </div>
           </div>
-          <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily AI Bot Picks</button>
+          <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
           <button className={activePage === "leaderboard" ? "active" : ""} onClick={() => openPage("leaderboard")}><Trophy size={18} /> Leaderboard</button>
           <button className={activePage === "open-bets" ? "active" : ""} onClick={() => openPage("open-bets")}><ClipboardList size={18} /> Open Bets</button>
           <button className={activePage === "history" ? "active" : ""} onClick={() => openPage("history")}><History size={18} /> History</button>
           <button className={activePage === "rules" ? "active" : ""} onClick={() => openPage("rules")}><FileText size={18} /> Rules</button>
+          <button className={activePage === "contact" ? "active" : ""} onClick={() => openPage("contact")}><Mail size={18} /> Contact Us</button>
           <button className={activePage === "install" ? "active" : ""} onClick={() => openPage("install")}><Download size={18} /> Install App</button>
+          {isNateRakelAccount && (
+            <button className={activePage === "admin" ? "active" : ""} onClick={() => openPage("admin")}><ShieldCheck size={18} /> Admin</button>
+          )}
         </nav>
         <div className="nav-bottom">
           {!isOnline && <span className="connection-pill"><WifiOff size={14} /> Offline</span>}
@@ -1769,15 +2688,20 @@ function App() {
                       <div className="slip-leg" key={leg.gameLineId}>
                         <div className="slip-leg-main">
                           <div className="slip-leg-title">
-                            {kind !== "straight" && (
+                            <div className="slip-leg-select">
+                              {kind !== "straight" && (
                               <input
                                 type="checkbox"
                                 checked={included}
                                 onChange={(event) => toggleIncludedLeg(leg.gameLineId, event.target.checked)}
                                 aria-label={`Include ${leg.selectedTeam}`}
                               />
-                            )}
+                              )}
+                            </div>
                             <strong>{leg.selectedTeam} {marketText(line)}</strong>
+                            <button className="slip-remove" type="button" title="Remove selection" aria-label={`Remove ${leg.selectedTeam}`} onClick={() => removeSlipLeg(leg.gameLineId)}>
+                              <X size={16} />
+                            </button>
                           </div>
                           {line && <small>{line.awayTeam} @ {line.homeTeam}</small>}
                         </div>
@@ -1870,7 +2794,7 @@ function App() {
             <div className="panel-title">
               <Sparkles size={20} />
               <div>
-                <h2>Daily AI Bot Picks</h2>
+                <h2>Daily Chine Picks</h2>
                 <span>Projected and locked public picks for today</span>
               </div>
             </div>
@@ -1947,6 +2871,12 @@ function App() {
                 {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
                   <strong className="weekly-prize">Weekly prize pool: {money(weeklyPrizeCents)}</strong>
                 )}
+                {!leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
+                  <strong className="weekly-prize">Prize pool: {money(weeklyPrizeCents)}</strong>
+                )}
+                {weeklyFirstPlaceBonus && (
+                  <strong className="weekly-prize">1st place bonus: {weeklyFirstPlaceBonus}</strong>
+                )}
                 {qualifiedLeaderboardRows.length > 0 ? (
                   <ol className="leaders-list">
                     {qualifiedLeaderboardRows.map((row) => (
@@ -1971,15 +2901,26 @@ function App() {
                 <li key={`${row.rank}-${row.displayName}`}>
                   <span>
                     {row.rank}. {row.displayName}
-                    {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && (
-                      <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
-                        {row.beatAi ? `${rewardShareByRank.get(row.rank) ?? 0}% reward` : "Did not beat AI"}
+                    {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && row.eligible && (
+                      <small className="reward-share-badge">
+                        {`${rewardShareByRank.get(row.rank) ?? 0}% reward`}
                       </small>
                     )}
-                    {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && row.role !== "system" && row.rank <= 3 && (
-                      <small className={row.beatAi ? "reward-share-badge" : "disqualified-badge"}>
-                        {row.beatAi ? `${money(rewardCentsByRank.get(row.rank) ?? 0)} reward` : "Must beat AI"}
+                    {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && row.role !== "system" && row.rank <= 3 && row.eligible && (
+                      <small className="reward-share-badge">
+                        {`${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`}
                       </small>
+                    )}
+                    {row.role !== "system" && !row.eligible && (
+                      <>
+                        <small className="disqualified-badge">Ineligible</small>
+                        {row.isCurrentUser && (
+                          <small className="eligibility-progress">
+                            {row.emailVerified === false ? "verify email • " : ""}{row.weeklyWagers ?? 0}/10 wagers • {money(row.weeklyStakeCents ?? 0)}/{money(row.requiredStakeCents ?? 0)}
+                            {row.beatAi ? "" : " • must beat Chine"}
+                          </small>
+                        )}
+                      </>
                     )}
                   </span>
                   <strong>{money(row.balanceCents)}</strong>
@@ -2036,7 +2977,7 @@ function App() {
                 </div>
                 <label className="toggle-row">
                   <input type="checkbox" checked={historyIncludeAi} onChange={(event) => setHistoryIncludeAi(event.target.checked)} />
-                  Show AI Bot
+                  Show Chine
                 </label>
               </div>
             </div>
@@ -2053,10 +2994,10 @@ function App() {
                   </section>
                   {historyIncludeAi && (
                     <section>
-                      <h3>StakeWars AI Bot</h3>
+                      <h3>StakeWars Chine</h3>
                       <div className="history-list">
                         {historyBets.filter((bet) => bet.owner === "ai").length === 0
-                          ? <p className="muted">No settled AI Bot wagers for this period.</p>
+                          ? <p className="muted">No settled Chine wagers for this period.</p>
                           : historyBets.filter((bet) => bet.owner === "ai").map(renderSettledBet)}
                       </div>
                     </section>
@@ -2077,6 +3018,24 @@ function App() {
           </div>
         )}
 
+        {activePage === "contact" && (
+          <div className="panel page-panel">
+            <div className="panel-title">
+              <Mail size={20} />
+              <h2>Contact Us</h2>
+            </div>
+            <div className="notification-card">
+              <div>
+                <strong>Email Support</strong>
+                <span>Support is currently email only. Responses will occur within 1 business day.</span>
+              </div>
+              <div className="notification-actions">
+                <a className="primary" href="mailto:support@stakewars.ai">support@stakewars.ai</a>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activePage === "install" && (
           <div className="panel page-panel">
             <div className="panel-title">
@@ -2084,6 +3043,330 @@ function App() {
               <h2>Install App</h2>
             </div>
             <InstallContent canPrompt={Boolean(installPrompt && !isStandalone)} isStandalone={isStandalone} onInstall={installApp} />
+          </div>
+        )}
+
+        {activePage === "admin" && isNateRakelAccount && (
+          <div className="panel page-panel admin-page">
+            <div className="panel-title">
+              <ShieldCheck size={20} />
+              <h2>Admin</h2>
+            </div>
+            <div className="segmented admin-tabs">
+              {([
+                ["traffic", "Traffic"],
+                ["support", "Support Chat"],
+                ["prizes", "Prizes"],
+                ["model", "Chine Model"],
+                ["reddit", "Reddit"],
+                ["users", "Users"]
+              ] as Array<[AdminSection, string]>).map(([section, label]) => (
+                <button key={section} className={adminSection === section ? "active" : ""} onClick={() => setAdminSection(section)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            {adminSection === "traffic" && (
+            <div className="notification-card visitor-card">
+              <div>
+                <strong>Visitors</strong>
+                <span>Counts are based on StakeWars page visits in Central time. API polling and static assets are excluded.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshVisitorMetrics}>Refresh visitors</button>
+              </div>
+              <div className="user-map-table visitor-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Period</th>
+                      <th>Unique Visitors</th>
+                      <th>Total Visitors</th>
+                      <th>Human Visitors</th>
+                      <th>Other Visitors</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(visitorMetrics?.rows ?? []).map((row) => (
+                      <tr key={row.label}>
+                        <td>{row.label}</td>
+                        <td>{row.uniqueVisitors.toLocaleString()}</td>
+                        <td>{row.totalVisitors.toLocaleString()}</td>
+                        <td>{row.humanVisitors.toLocaleString()}</td>
+                        <td>{row.otherVisitors.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                    {(!visitorMetrics || visitorMetrics.rows.length === 0) && (
+                      <tr>
+                        <td colSpan={5}>No visitor metrics available yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {visitorMetrics?.lastUpdatedAt && (
+                <small className="muted">Last updated {new Date(visitorMetrics.lastUpdatedAt).toLocaleString()}</small>
+              )}
+              {visitorMetricsNotice && <p className={visitorMetricsNotice.includes("refreshed") ? "success" : "error"}>{visitorMetricsNotice}</p>}
+            </div>
+            )}
+            {adminSection === "prizes" && (
+            <div className="notification-card prize-admin-card">
+              <div>
+                <strong>Weekly Prizes</strong>
+                <span>Set the cash prize pool and optional first-place bonus for a specific contest week.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshAdminPrizes}>Refresh prizes</button>
+              </div>
+              <div className="reddit-editor">
+                <label>
+                  Week start
+                  <input type="date" value={adminPrizeWeekStart} onChange={(event) => setAdminPrizeWeekStart(event.target.value)} />
+                </label>
+                <label>
+                  Cash prize pool
+                  <input
+                    inputMode="decimal"
+                    value={adminPrizeCash}
+                    placeholder="10.00"
+                    onChange={(event) => setAdminPrizeCash(event.target.value)}
+                  />
+                </label>
+                <label>
+                  First-place bonus
+                  <input
+                    value={adminPrizeBonus}
+                    maxLength={240}
+                    placeholder="2 St. Louis Cardinals tickets"
+                    onChange={(event) => setAdminPrizeBonus(event.target.value)}
+                  />
+                </label>
+                <div className="notification-actions">
+                  <button className="primary" disabled={!adminPrizeWeekStart} onClick={saveAdminPrize}>Save prize</button>
+                </div>
+              </div>
+              <div className="user-map-table visitor-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Week</th>
+                      <th>Cash</th>
+                      <th>First-place bonus</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminPrizes.map((prize) => (
+                      <tr key={prize.weekStart}>
+                        <td>
+                          <button
+                            className="link-button"
+                            onClick={() => {
+                              setAdminPrizeWeekStart(prize.weekStart);
+                              setAdminPrizeCash((prize.cashPrizeCents / 100).toFixed(2));
+                              setAdminPrizeBonus(prize.firstPlaceBonus ?? "");
+                            }}
+                          >
+                            {weekRangeLabel(prize.weekStart)}
+                          </button>
+                        </td>
+                        <td>{money(prize.cashPrizeCents)}</td>
+                        <td>{prize.firstPlaceBonus || "-"}</td>
+                      </tr>
+                    ))}
+                    {adminPrizes.length === 0 && (
+                      <tr>
+                        <td colSpan={3}>No weekly prizes configured yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {adminPrizeNotice && <p className={adminPrizeNotice.includes("saved") || adminPrizeNotice.includes("refreshed") ? "success" : "error"}>{adminPrizeNotice}</p>}
+            </div>
+            )}
+            {adminSection === "support" && (
+            <div className="notification-card support-admin-card">
+              <div>
+                <strong>Support Conversations</strong>
+                <span>Open chats initiated by verified StakeWars users.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshAdminSupport}>Refresh support</button>
+              </div>
+              <div className="support-admin-layout">
+                <div className="support-conversation-list">
+                  {adminSupportConversations.length === 0 ? (
+                    <p className="muted">No active support conversations.</p>
+                  ) : adminSupportConversations.map((conversation) => (
+                    <button
+                      key={conversation.id}
+                      className={selectedSupportConversation?.id === conversation.id ? "active" : ""}
+                      onClick={() => openAdminSupportConversation(conversation.id)}
+                    >
+                      <strong>{conversation.displayName || conversation.username || "Player"}</strong>
+                      <span>{supportCategoryLabel(conversation.category)}</span>
+                      <small>{conversation.lastMessage || "No message yet"}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="support-thread">
+                  {!selectedSupportConversation ? (
+                    <p className="muted">Select a conversation to view messages.</p>
+                  ) : (
+                    <>
+                      <div className="support-thread-head">
+                        <div>
+                          <strong>{selectedSupportConversation.displayName || selectedSupportConversation.username}</strong>
+                          <span>{supportCategoryLabel(selectedSupportConversation.category)}</span>
+                        </div>
+                        <label className="checkbox-row compact">
+                          <input type="checkbox" checked={supportTranscriptOnClose} onChange={(event) => setSupportTranscriptOnClose(event.target.checked)} />
+                          Send transcript on close
+                        </label>
+                      </div>
+                      <div className="support-messages" ref={adminSupportMessagesRef}>
+                        {supportMessages.map((message) => (
+                          <div key={message.id} className={`support-message ${message.senderRole}`}>
+                            <strong>{message.senderRole === "admin" ? "StakeWars Support" : selectedSupportConversation.displayName || selectedSupportConversation.username}</strong>
+                            <p>{message.body}</p>
+                            <small>{new Date(message.createdAt).toLocaleString()}</small>
+                          </div>
+                        ))}
+                      </div>
+                      {selectedSupportConversation.status === "open" && (
+                        <div className="support-reply">
+                          <textarea value={supportReply} rows={4} maxLength={2000} onChange={(event) => setSupportReply(event.target.value)} placeholder="Type a reply..." />
+                          <div className="notification-actions">
+                            <button className="primary" disabled={!supportReply.trim()} onClick={sendSupportReply}>Send reply</button>
+                            <button className="secondary-action" onClick={closeSupportConversation}>End chat</button>
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+              {supportNotice && <p className={supportNotice.includes("closed") || supportNotice.includes("opened") ? "success" : "error"}>{supportNotice}</p>}
+            </div>
+            )}
+            {adminSection === "model" && (
+            <div className="notification-card model-audit-card">
+              <div>
+                <strong>Chine Model Audit</strong>
+                <span>Settled locked Chine picks, scored as one simulated unit per pick. This measures heuristic quality without parlay staking noise.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshChineModelAudit}>Refresh audit</button>
+              </div>
+              {chineModelAudit?.generatedAt && (
+                <small className="muted">Generated {new Date(chineModelAudit.generatedAt).toLocaleString()}</small>
+              )}
+              <div className="model-audit-grid">
+                <ModelAuditTable title="Summary" rows={chineModelAudit?.summary ?? []} />
+                <ModelAuditTable title="Confidence Buckets" rows={chineModelAudit?.confidenceBuckets ?? []} />
+                <ModelAuditTable title="Market" rows={chineModelAudit?.markets ?? []} />
+                <ModelAuditTable title="Edge Range" rows={chineModelAudit?.edgeRanges ?? []} />
+                <ModelAuditTable title="Favorite / Underdog" rows={chineModelAudit?.favoriteUnderdog ?? []} />
+                <ModelAuditTable title="Home / Road" rows={chineModelAudit?.homeRoad ?? []} />
+                <ModelAuditTable title="Reason Count" rows={chineModelAudit?.reasonCounts ?? []} />
+                <ModelAuditTable title="Starter Edge" rows={chineModelAudit?.starterEdge ?? []} />
+                <ModelAuditTable title="Bullpen Edge" rows={chineModelAudit?.bullpenEdge ?? []} />
+                <ModelAuditTable title="Market Movement" rows={chineModelAudit?.marketMovement ?? []} />
+                <ModelAuditTable title="Top Heuristic Reasons" rows={(chineModelAudit?.reasons ?? []).slice(0, 30)} />
+              </div>
+              {chineModelAuditNotice && <p className={chineModelAuditNotice.includes("refreshed") ? "success" : "error"}>{chineModelAuditNotice}</p>}
+            </div>
+            )}
+            {adminSection === "reddit" && canManageReddit && (
+              <div className="notification-card reddit-card">
+                <div>
+                  <strong>Reddit Posting</strong>
+                  <span>
+                    Generate a copy-ready manual Reddit post from today's AI picks.
+                  </span>
+                </div>
+                <div className="notification-actions">
+                  <button className="secondary-action" onClick={refreshRedditStatus}>Refresh status</button>
+                </div>
+                <div className="reddit-editor">
+                  <label>
+                    Subreddit
+                    <input value={redditSubreddit} placeholder="sportsbook" onChange={(event) => setRedditSubreddit(event.target.value)} />
+                  </label>
+                  <button className="secondary-action" onClick={generateRedditPreview}>Generate preview</button>
+                  <label>
+                    Title
+                    <input value={redditTitle} maxLength={300} onChange={(event) => setRedditTitle(event.target.value)} />
+                  </label>
+                  <label>
+                    Body
+                    <textarea value={redditBody} rows={12} onChange={(event) => setRedditBody(event.target.value)} />
+                  </label>
+                  <div className="notification-actions">
+                    <button className="primary" disabled={!redditTitle || !redditBody} onClick={copyRedditPost}>Copy post</button>
+                    <button className="secondary-action" disabled={!redditTitle || !redditBody} onClick={() => lockRedditPostTracking("single")}>Lock single</button>
+                  </div>
+                  <button className="secondary-action" onClick={generateRedditParlayPreview}>Generate 3-team parlay</button>
+                  <label>
+                    3-Team Parlay Title
+                    <input value={redditParlayTitle} maxLength={300} onChange={(event) => setRedditParlayTitle(event.target.value)} />
+                  </label>
+                  <label>
+                    3-Team Parlay Body
+                    <textarea value={redditParlayBody} rows={10} onChange={(event) => setRedditParlayBody(event.target.value)} />
+                  </label>
+                  <div className="notification-actions">
+                    <button className="primary" disabled={!redditParlayTitle || !redditParlayBody} onClick={copyRedditParlayPost}>Copy parlay post</button>
+                    <button className="secondary-action" disabled={!redditParlayTitle || !redditParlayBody} onClick={() => lockRedditPostTracking("parlay")}>Lock parlay</button>
+                  </div>
+                </div>
+                {redditNotice && <p className={redditNotice.includes("generated") || redditNotice.includes("copied") || redditNotice.includes("locked") ? "success" : "error"}>{redditNotice}</p>}
+              </div>
+            )}
+            {adminSection === "users" && (
+            <div className="notification-card user-map-card">
+              <div>
+                <strong>User Display Map</strong>
+                <span>Visible only to Nate Rakel. Use this to match public display names to login usernames.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshUserDisplayMap}>Refresh users</button>
+              </div>
+              <div className="user-map-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Leaderboard Name</th>
+                      <th>Display Name</th>
+                      <th>Login</th>
+                      <th>Email</th>
+                      <th>Full Name</th>
+                      <th>Role</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userDisplayMap.map((mappedUser) => (
+                      <tr key={mappedUser.id}>
+                        <td>{mappedUser.leaderboardDisplayName || "-"}</td>
+                        <td>{mappedUser.displayName || "-"}</td>
+                        <td>{mappedUser.username}</td>
+                        <td>{mappedUser.email || "-"}</td>
+                        <td>{mappedUser.fullName || "-"}</td>
+                        <td>{mappedUser.role}</td>
+                      </tr>
+                    ))}
+                    {userDisplayMap.length === 0 && (
+                      <tr>
+                        <td colSpan={6}>No users found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {userDisplayMapNotice && <p className={userDisplayMapNotice.includes("refreshed") ? "success" : "error"}>{userDisplayMapNotice}</p>}
+            </div>
+            )}
           </div>
         )}
 
@@ -2100,9 +3383,55 @@ function App() {
               </label>
               <label>
                 Email
-                <input type="email" value={email} maxLength={254} onChange={(event) => setEmail(event.target.value)} />
+                <input
+                  type="email"
+                  value={email}
+                  maxLength={254}
+                  disabled={Boolean(user?.emailVerified && !emailEditing)}
+                  onChange={(event) => setEmail(event.target.value)}
+                />
+                <span className={user?.emailVerified ? "success inline-status" : "error inline-status"}>
+                  {user?.emailVerified && !emailEditing ? "Verified and locked" : "Verification required for rewards"}
+                </span>
               </label>
+              {user?.emailVerified && !emailEditing && (
+                <button
+                  className="secondary-action account-inline-action"
+                  type="button"
+                  onClick={() => {
+                    setEmailEditing(true);
+                    setAccountEmailNotice("Enter the new email, save profile, then verify the link sent to that address.");
+                  }}
+                >
+                  Change Email
+                </button>
+              )}
+              {(!user?.emailVerified || emailEditing || emailNeedsSave) && (
+                <div className="account-save-callout">
+                  <span>{emailNeedsSave ? "Save this email before requesting a verification link." : "Save profile changes before verification."}</span>
+                  <button className="primary icon-action" type="button" disabled={accountSaving} onClick={saveProfile}><Save size={18} /> {accountSaving ? "Saving..." : "Save Profile"}</button>
+                </div>
+              )}
             </div>
+            {user && (!user.emailVerified || emailEditing) && (
+              <div className="notification-card">
+                <div>
+                  <strong>Verify Email</strong>
+                  <span>{emailNeedsSave ? "Save the email above first. A verification link will be sent after saving." : "Reward eligibility requires a verified email address."}</span>
+                </div>
+                <div className="notification-actions">
+                  <button
+                    className="secondary-action"
+                    type="button"
+                    disabled={emailNeedsSave || !user.email || accountVerificationLinkAlreadySent}
+                    onClick={sendAccountEmailVerification}
+                  >
+                    {accountVerificationLinkAlreadySent ? "Verification link sent" : "Send verification link"}
+                  </button>
+                </div>
+                {accountEmailNotice && <p className={accountEmailNotice.includes("sent") || accountEmailNotice.includes("verified") ? "success" : "error"}>{accountEmailNotice}</p>}
+              </div>
+            )}
             <label>
               Display name
               <input value={displayName} minLength={2} maxLength={40} onChange={(event) => setDisplayName(event.target.value)} />
@@ -2112,7 +3441,7 @@ function App() {
               <strong>{user ? money(user.rewardBalanceCents) : "$0.00"}</strong>
               <button className="withdraw-button" disabled={!canWithdraw}>Withdraw</button>
               {!canWithdraw && (
-                <small>Available after rewards exceed $20.00 and payout details are complete.</small>
+                <small>Available after rewards exceed $20.00, email is verified, and payout details are complete.</small>
               )}
             </div>
             <div className="notification-card referral-card">
@@ -2164,84 +3493,6 @@ function App() {
               </div>
               {pushNotice && <p className={pushNotice.includes("enabled") || pushNotice.includes("sent") || pushNotice.includes("saved") ? "success" : "error"}>{pushNotice}</p>}
             </div>
-            {canManageReddit && (
-              <div className="notification-card reddit-card">
-                <div>
-                  <strong>Reddit Posting</strong>
-                  <span>
-                    {redditStatus?.configured
-                      ? "Devvit handoff is configured. Approved posts will be queued for the Reddit app."
-                      : "Add REDDIT_DEVVIT_SHARED_SECRET to the server env before queueing live posts."}
-                  </span>
-                </div>
-                <div className="notification-actions">
-                  <button className="secondary-action" onClick={refreshRedditStatus}>Refresh status</button>
-                </div>
-                <div className="reddit-editor">
-                  <label>
-                    Subreddit
-                    <input value={redditSubreddit} placeholder="sportsbook" onChange={(event) => setRedditSubreddit(event.target.value)} />
-                  </label>
-                  <button className="secondary-action" onClick={generateRedditPreview}>Generate preview</button>
-                  <label>
-                    Title
-                    <input value={redditTitle} maxLength={300} onChange={(event) => setRedditTitle(event.target.value)} />
-                  </label>
-                  <label>
-                    Body
-                    <textarea value={redditBody} rows={12} onChange={(event) => setRedditBody(event.target.value)} />
-                  </label>
-                  <div className="notification-actions">
-                    <button className="secondary-action" disabled={!redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(true)}>Dry run</button>
-                    <button className="primary" disabled={!redditStatus?.connected || !redditTitle || !redditBody || !redditSubreddit} onClick={() => submitRedditPostFromPreview(false)}>Queue for Reddit</button>
-                  </div>
-                </div>
-                {redditNotice && <p className={redditNotice.includes("Queued") || redditNotice.includes("generated") || redditNotice.includes("Dry run") ? "success" : "error"}>{redditNotice}</p>}
-              </div>
-            )}
-            {isNateRakelAccount && (
-              <div className="notification-card user-map-card">
-                <div>
-                  <strong>User Display Map</strong>
-                  <span>Visible only to Nate Rakel. Use this to match public display names to login usernames.</span>
-                </div>
-                <div className="notification-actions">
-                  <button className="secondary-action" onClick={refreshUserDisplayMap}>Refresh users</button>
-                </div>
-                <div className="user-map-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Leaderboard Name</th>
-                        <th>Display Name</th>
-                        <th>Login</th>
-                        <th>Email</th>
-                        <th>Full Name</th>
-                        <th>Role</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {userDisplayMap.map((mappedUser) => (
-                        <tr key={mappedUser.id}>
-                          <td>{mappedUser.leaderboardDisplayName || "-"}</td>
-                          <td>{mappedUser.displayName || "-"}</td>
-                          <td>{mappedUser.username}</td>
-                          <td>{mappedUser.email || "-"}</td>
-                          <td>{mappedUser.fullName || "-"}</td>
-                          <td>{mappedUser.role}</td>
-                        </tr>
-                      ))}
-                      {userDisplayMap.length === 0 && (
-                        <tr>
-                          <td colSpan={6}>No users found.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {userDisplayMapNotice && <p className={userDisplayMapNotice.includes("refreshed") ? "success" : "error"}>{userDisplayMapNotice}</p>}
-              </div>
-            )}
             <div className="account-grid">
               <label>
                 Preferred payout method
@@ -2267,7 +3518,7 @@ function App() {
               <input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={phoneLast4} onChange={(event) => setPhoneLast4(event.target.value.replace(/\D/g, "").slice(0, 4))} />
             </label>
             <button className="primary icon-action" onClick={saveProfile}><Save size={18} /> Save profile</button>
-            {notice && <p className={notice === "Profile saved." ? "success" : "error"}>{notice}</p>}
+            {notice && <p className={notice.includes("saved") ? "success" : "error"}>{notice}</p>}
           </div>
         )}
       </section>
@@ -2308,6 +3559,112 @@ function App() {
           </div>
         </div>
       )}
+      <div className="support-widget">
+        {supportOpen && (
+          <div className="support-window" role="dialog" aria-label="StakeWars support chat">
+            <div className="support-window-head">
+              <strong>Hi! How can we help?</strong>
+              <button type="button" title="Close support" onClick={() => setSupportOpen(false)}><X size={16} /></button>
+            </div>
+            {!user.emailVerified ? (
+              <div className="support-window-body">
+                <p className="muted">Support chat is available after your email address is verified.</p>
+                <button className="secondary-action" type="button" onClick={() => {
+                  setSupportOpen(false);
+                  openPage("account");
+                }}>Go to Account</button>
+              </div>
+            ) : (
+              <div className="support-window-body">
+                {activeSupportConversation ? (
+                  <>
+                    <div className="support-thread-head">
+                      <div>
+                        <strong>{supportCategoryLabel(activeSupportConversation.category)}</strong>
+                        <span>{activeSupportConversation.status === "open" ? "Open" : "Closed"}</span>
+                      </div>
+                      <button className="secondary-action" type="button" onClick={() => setActiveSupportConversation(null)}>New chat</button>
+                    </div>
+                    <div className="support-messages user-thread" ref={userSupportMessagesRef}>
+                      {activeSupportMessages.map((message) => (
+                        <div key={message.id} className={`support-message ${message.senderRole}`}>
+                          <strong>{message.senderRole === "admin" ? "StakeWars Support" : "You"}</strong>
+                          <p>{message.body}</p>
+                          <small>{new Date(message.createdAt).toLocaleString()}</small>
+                        </div>
+                      ))}
+                    </div>
+                    {activeSupportConversation.status === "open" ? (
+                      <div className="support-reply">
+                        <textarea
+                          value={supportReplyMessage}
+                          rows={3}
+                          maxLength={2000}
+                          onChange={(event) => setSupportReplyMessage(event.target.value)}
+                          placeholder="Reply to support..."
+                        />
+                        <button className="primary" type="button" disabled={!supportReplyMessage.trim()} onClick={sendUserSupportMessage}>Send</button>
+                      </div>
+                    ) : (
+                      <p className="muted">This chat has been closed.</p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="support-category-grid">
+                      {([
+                        "account_email",
+                        "rewards_eligibility",
+                        "picks_scoring",
+                        "technical_problem",
+                        "other"
+                      ] as SupportCategory[]).map((category) => (
+                        <button
+                          key={category}
+                          type="button"
+                          className={supportCategory === category ? "active" : ""}
+                          onClick={() => setSupportCategory(category)}
+                        >
+                          {supportCategoryLabel(category)}
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      value={supportMessage}
+                      rows={3}
+                      maxLength={2000}
+                      onChange={(event) => setSupportMessage(event.target.value)}
+                      placeholder="Add a short message..."
+                    />
+                    <button
+                      className="primary"
+                      type="button"
+                      disabled={!supportCategory}
+                      onClick={() => supportCategory && startSupportChat(supportCategory)}
+                    >
+                      Start chat
+                    </button>
+                    {supportConversations.length > 0 && (
+                      <div className="support-conversation-list compact-list">
+                        {supportConversations.slice(0, 3).map((conversation) => (
+                          <button key={conversation.id} type="button" onClick={() => openUserSupportConversation(conversation.id)}>
+                            <strong>{supportCategoryLabel(conversation.category)}</strong>
+                            <span>{conversation.status}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+                {supportNotice && <p className={supportNotice.includes("opened") ? "success" : "error"}>{supportNotice}</p>}
+              </div>
+            )}
+          </div>
+        )}
+        <button className="support-fab" type="button" onClick={() => setSupportOpen((current) => !current)}>
+          <Mail size={18} /> Support
+        </button>
+      </div>
     </main>
   );
 }

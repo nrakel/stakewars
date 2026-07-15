@@ -447,8 +447,8 @@ const candidateSummary = (
   }
 
   const timeDiffMinutes = Math.round(Math.abs(gameStart - lineStart) / 60_000);
-  const twelveHoursMinutes = 12 * 60;
-  if (timeDiffMinutes > twelveHoursMinutes) {
+  const maxStartDiffMinutes = 3 * 60;
+  if (timeDiffMinutes > maxStartDiffMinutes) {
     return null;
   }
 
@@ -458,7 +458,7 @@ const candidateSummary = (
   const homeTeamMatch = orientation === "same"
     ? teamSimilarity(game.homeTeam, leg.home_team, leg.sport, "espn-scoreboard", aliases)
     : teamSimilarity(game.awayTeam, leg.home_team, leg.sport, "espn-scoreboard", aliases);
-  const timeScore = 1 - (timeDiffMinutes / twelveHoursMinutes);
+  const timeScore = 1 - (timeDiffMinutes / maxStartDiffMinutes);
   const score = (awayTeamMatch * 0.42) + (homeTeamMatch * 0.42) + (timeScore * 0.16);
 
   return {
@@ -477,15 +477,9 @@ const candidateSummary = (
 
 const matchFinalGame = (
   leg: PendingLeg,
-  finalMap: Map<string, FinalGame>,
   finals: FinalGame[],
   aliases: TeamAliasMap
 ) => {
-  const exact = finalMap.get(finalGameKey({ startsOn: leg.starts_on, awayTeam: leg.away_team, homeTeam: leg.home_team }));
-  if (exact && (!exact.startsAt || candidateSummary(leg, exact, aliases, "same"))) {
-    return { game: exact, candidates: [] as MatchCandidateSummary[] };
-  }
-
   const candidates = finals
     .filter((game) => game.startsOn === leg.starts_on)
     .flatMap((game) => {
@@ -801,8 +795,6 @@ const settleWagersForFinals = async ({
   sports: Array<PendingLeg["sport"]>;
   finals: FinalGame[];
 }) => {
-  const finalMap = unambiguousFinalGameMap(finals);
-
   return transaction(async (client) => {
     const aliases = await loadTeamAliases(client, sports);
     const pending = await client.query<PendingLeg>(
@@ -883,7 +875,7 @@ const settleWagersForFinals = async ({
           continue;
         }
 
-        const match = matchFinalGame(leg, finalMap, finals, aliases);
+        const match = matchFinalGame(leg, finals, aliases);
         const game = match.game;
         if (!game) {
           unmatched.push({

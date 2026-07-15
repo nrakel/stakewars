@@ -4,7 +4,11 @@ import { americanToDecimal, ensureWeeklyEntry, estimatePayoutCents, roundRobinPa
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 
-export const modelVersion = "phase3-context-heuristic-v6";
+export const legacyModelVersion = "phase3-context-heuristic-v6";
+export const modelVersion = "phase3-context-heuristic-v7";
+const modelActivationDate = process.env.STAKEWARS_AI_V7_START_DATE ?? "2026-07-09";
+
+const modelVersionForDate = (runFor: string) => runFor >= modelActivationDate ? modelVersion : legacyModelVersion;
 
 export type CandidateLine = {
   id: string;
@@ -134,6 +138,18 @@ export type MlbHeuristicContext = {
   selectedStarterRecentPitches: number | null;
   opponentStarterRecentPitches: number | null;
   starterRecentPitchesDiff: number | null;
+  selectedStarterFip30: number | null;
+  opponentStarterFip30: number | null;
+  starterFip30Diff: number | null;
+  selectedStarterXfipLike30: number | null;
+  opponentStarterXfipLike30: number | null;
+  starterXfipLike30Diff: number | null;
+  selectedStarterKMinusBbPct30: number | null;
+  opponentStarterKMinusBbPct30: number | null;
+  starterKMinusBbPct30Diff: number | null;
+  selectedStarterSwSiera30: number | null;
+  opponentStarterSwSiera30: number | null;
+  starterSwSiera30Diff: number | null;
   selectedBullpenPitchesLast3: number | null;
   opponentBullpenPitchesLast3: number | null;
   bullpenPitchesLast3Diff: number | null;
@@ -149,6 +165,18 @@ export type MlbHeuristicContext = {
   selectedBullpenKbbLast3: number | null;
   opponentBullpenKbbLast3: number | null;
   bullpenKbbLast3Diff: number | null;
+  selectedBullpenFip30: number | null;
+  opponentBullpenFip30: number | null;
+  bullpenFip30Diff: number | null;
+  selectedBullpenXfipLike30: number | null;
+  opponentBullpenXfipLike30: number | null;
+  bullpenXfipLike30Diff: number | null;
+  selectedBullpenKMinusBbPct30: number | null;
+  opponentBullpenKMinusBbPct30: number | null;
+  bullpenKMinusBbPct30Diff: number | null;
+  selectedBullpenSwSiera30: number | null;
+  opponentBullpenSwSiera30: number | null;
+  bullpenSwSiera30Diff: number | null;
   selectedActiveIlPlayers: number | null;
   opponentActiveIlPlayers: number | null;
   activeIlPlayersDiff: number | null;
@@ -175,6 +203,11 @@ type TeamGame = {
 
 type MlbStoredContext = {
   starts_at: Date;
+  starts_on?: string;
+  away_team_id?: number | null;
+  home_team_id?: number | null;
+  away_probable_pitcher_id?: number | null;
+  home_probable_pitcher_id?: number | null;
   away_pitcher_stats: Record<string, unknown>;
   home_pitcher_stats: Record<string, unknown>;
   away_bullpen: Record<string, unknown>;
@@ -182,6 +215,10 @@ type MlbStoredContext = {
   away_injuries: Record<string, unknown>;
   home_injuries: Record<string, unknown>;
   context: Record<string, unknown>;
+  awayStarterRolling?: RollingMetric | null;
+  homeStarterRolling?: RollingMetric | null;
+  awayBullpenRolling?: RollingMetric | null;
+  homeBullpenRolling?: RollingMetric | null;
 };
 
 type MarketMovementContext = {
@@ -191,6 +228,40 @@ type MarketMovementContext = {
   lineMovementImplied: number | null;
   lineSnapshotCount: number | null;
 };
+
+type RollingMetric = {
+  fip: number | null;
+  xfip_like: number | null;
+  sw_fip: number | null;
+  sw_xfip: number | null;
+  sw_siera: number | null;
+  k_minus_bb_pct: number | null;
+};
+
+type ConfidenceBucket = "80%+" | "75-79.9%" | "70-74.9%" | "67-69.9%" | "60-66.9%" | "<60%";
+
+type ScoreOptions = {
+  modelVersion: string;
+  confidenceCalibration?: Map<ConfidenceBucket, number>;
+};
+
+const confidenceBucket = (confidence: number): ConfidenceBucket => {
+  if (confidence >= 0.8) return "80%+";
+  if (confidence >= 0.75) return "75-79.9%";
+  if (confidence >= 0.7) return "70-74.9%";
+  if (confidence >= 0.67) return "67-69.9%";
+  if (confidence >= 0.6) return "60-66.9%";
+  return "<60%";
+};
+
+const defaultConfidenceCalibration = new Map<ConfidenceBucket, number>([
+  ["80%+", -0.018],
+  ["75-79.9%", 0.006],
+  ["70-74.9%", -0.028],
+  ["67-69.9%", -0.004],
+  ["60-66.9%", -0.004],
+  ["<60%", 0]
+]);
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
@@ -350,9 +421,15 @@ const fallbackAiExplanation = (pick: Omit<PublishedAiPick, "id" | "explanation" 
     comparisonFact(pick.selectedTeam, opponent, pick.features.selectedRunsForPerGame7, pick.features.opponentRunsForPerGame7, "Recent scoring"),
     comparisonFact(pick.selectedTeam, opponent, pick.features.selectedRunsAgainstPerGame7, pick.features.opponentRunsAgainstPerGame7, "Recent run prevention", true),
     comparisonFact(pick.selectedTeam, opponent, pick.features.selectedStarterEra, pick.features.opponentStarterEra, "Starter ERA", true),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedStarterSwFip30, pick.features.opponentStarterSwFip30, "Starter 30-day swFIP", true),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedStarterSwxFip30, pick.features.opponentStarterSwxFip30, "Starter 30-day swxFIP", true),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedStarterSwSiera30, pick.features.opponentStarterSwSiera30, "Starter 30-day swSIERA", true),
     comparisonFact(pick.selectedTeam, opponent, pick.features.selectedStarterHomeRunsPer9, pick.features.opponentStarterHomeRunsPer9, "Starter HR/9", true),
     comparisonFact(pick.selectedTeam, opponent, pick.features.selectedBullpenPitchesLast3, pick.features.opponentBullpenPitchesLast3, "Bullpen pitches last three games", true),
-    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedBullpenEraLast3, pick.features.opponentBullpenEraLast3, "Bullpen ERA last three games", true)
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedBullpenEraLast3, pick.features.opponentBullpenEraLast3, "Bullpen ERA last three games", true),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedBullpenSwFip30, pick.features.opponentBullpenSwFip30, "Bullpen 30-day swFIP", true),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedBullpenSwxFip30, pick.features.opponentBullpenSwxFip30, "Bullpen 30-day swxFIP", true),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedBullpenSwSiera30, pick.features.opponentBullpenSwSiera30, "Bullpen 30-day swSIERA", true)
   ].filter(hasExplanationFact);
   const confidence = formatPct(pick.confidence);
   const lead = `The model prefers ${pick.selectedTeam} on the ${market}${confidence ? ` at ${confidence} confidence` : ""}.`;
@@ -560,6 +637,18 @@ const contextFromStored = (
     | "selectedStarterRecentPitches"
     | "opponentStarterRecentPitches"
     | "starterRecentPitchesDiff"
+    | "selectedStarterFip30"
+    | "opponentStarterFip30"
+    | "starterFip30Diff"
+    | "selectedStarterXfipLike30"
+    | "opponentStarterXfipLike30"
+    | "starterXfipLike30Diff"
+    | "selectedStarterKMinusBbPct30"
+    | "opponentStarterKMinusBbPct30"
+    | "starterKMinusBbPct30Diff"
+    | "selectedStarterSwSiera30"
+    | "opponentStarterSwSiera30"
+    | "starterSwSiera30Diff"
     | "selectedHitterOpsVsPitchHand"
     | "opponentHitterOpsVsPitchHand"
     | "hitterOpsVsPitchHandDiff"
@@ -598,6 +687,18 @@ const contextFromStored = (
     | "selectedBullpenKbbLast3"
     | "opponentBullpenKbbLast3"
     | "bullpenKbbLast3Diff"
+    | "selectedBullpenFip30"
+    | "opponentBullpenFip30"
+    | "bullpenFip30Diff"
+    | "selectedBullpenXfipLike30"
+    | "opponentBullpenXfipLike30"
+    | "bullpenXfipLike30Diff"
+    | "selectedBullpenKMinusBbPct30"
+    | "opponentBullpenKMinusBbPct30"
+    | "bullpenKMinusBbPct30Diff"
+    | "selectedBullpenSwSiera30"
+    | "opponentBullpenSwSiera30"
+    | "bullpenSwSiera30Diff"
     | "selectedActiveIlPlayers"
     | "opponentActiveIlPlayers"
     | "activeIlPlayersDiff"
@@ -649,6 +750,26 @@ const contextFromStored = (
   const opponentStarterRecentKbb = nestedNumber(opponent.pitcher, ["recent", "strikeoutWalkRatio"]);
   const selectedStarterRecentPitches = nestedNumber(selected.pitcher, ["recent", "pitches"]);
   const opponentStarterRecentPitches = nestedNumber(opponent.pitcher, ["recent", "pitches"]);
+  const selectedStarterRolling = selectedSide === "away" ? stored?.awayStarterRolling : stored?.homeStarterRolling;
+  const opponentStarterRolling = selectedSide === "away" ? stored?.homeStarterRolling : stored?.awayStarterRolling;
+  const selectedBullpenRolling = selectedSide === "away" ? stored?.awayBullpenRolling : stored?.homeBullpenRolling;
+  const opponentBullpenRolling = selectedSide === "away" ? stored?.homeBullpenRolling : stored?.awayBullpenRolling;
+  const selectedStarterFip30 = numericFeature(selectedStarterRolling?.sw_fip) ?? numericFeature(selectedStarterRolling?.fip);
+  const opponentStarterFip30 = numericFeature(opponentStarterRolling?.sw_fip) ?? numericFeature(opponentStarterRolling?.fip);
+  const selectedStarterXfipLike30 = numericFeature(selectedStarterRolling?.sw_xfip) ?? numericFeature(selectedStarterRolling?.xfip_like);
+  const opponentStarterXfipLike30 = numericFeature(opponentStarterRolling?.sw_xfip) ?? numericFeature(opponentStarterRolling?.xfip_like);
+  const selectedStarterKMinusBbPct30 = numericFeature(selectedStarterRolling?.k_minus_bb_pct);
+  const opponentStarterKMinusBbPct30 = numericFeature(opponentStarterRolling?.k_minus_bb_pct);
+  const selectedStarterSwSiera30 = numericFeature(selectedStarterRolling?.sw_siera);
+  const opponentStarterSwSiera30 = numericFeature(opponentStarterRolling?.sw_siera);
+  const selectedBullpenFip30 = numericFeature(selectedBullpenRolling?.sw_fip) ?? numericFeature(selectedBullpenRolling?.fip);
+  const opponentBullpenFip30 = numericFeature(opponentBullpenRolling?.sw_fip) ?? numericFeature(opponentBullpenRolling?.fip);
+  const selectedBullpenXfipLike30 = numericFeature(selectedBullpenRolling?.sw_xfip) ?? numericFeature(selectedBullpenRolling?.xfip_like);
+  const opponentBullpenXfipLike30 = numericFeature(opponentBullpenRolling?.sw_xfip) ?? numericFeature(opponentBullpenRolling?.xfip_like);
+  const selectedBullpenKMinusBbPct30 = numericFeature(selectedBullpenRolling?.k_minus_bb_pct);
+  const opponentBullpenKMinusBbPct30 = numericFeature(opponentBullpenRolling?.k_minus_bb_pct);
+  const selectedBullpenSwSiera30 = numericFeature(selectedBullpenRolling?.sw_siera);
+  const opponentBullpenSwSiera30 = numericFeature(opponentBullpenRolling?.sw_siera);
   const selectedBullpenPitchesLast3 = numericFeature(selected.bullpen.pitchesLast3);
   const opponentBullpenPitchesLast3 = numericFeature(opponent.bullpen.pitchesLast3);
   const selectedBullpenPitchesLast1 = numericFeature(selected.bullpen.pitchesLast1);
@@ -728,6 +849,18 @@ const contextFromStored = (
     selectedStarterRecentPitches,
     opponentStarterRecentPitches,
     starterRecentPitchesDiff: diffOrNull(selectedStarterRecentPitches, opponentStarterRecentPitches),
+    selectedStarterFip30,
+    opponentStarterFip30,
+    starterFip30Diff: diffOrNull(selectedStarterFip30, opponentStarterFip30),
+    selectedStarterXfipLike30,
+    opponentStarterXfipLike30,
+    starterXfipLike30Diff: diffOrNull(selectedStarterXfipLike30, opponentStarterXfipLike30),
+    selectedStarterKMinusBbPct30,
+    opponentStarterKMinusBbPct30,
+    starterKMinusBbPct30Diff: diffOrNull(selectedStarterKMinusBbPct30, opponentStarterKMinusBbPct30),
+    selectedStarterSwSiera30,
+    opponentStarterSwSiera30,
+    starterSwSiera30Diff: diffOrNull(selectedStarterSwSiera30, opponentStarterSwSiera30),
     selectedBullpenPitchesLast3,
     opponentBullpenPitchesLast3,
     bullpenPitchesLast3Diff: diffOrNull(selectedBullpenPitchesLast3, opponentBullpenPitchesLast3),
@@ -743,6 +876,18 @@ const contextFromStored = (
     selectedBullpenKbbLast3,
     opponentBullpenKbbLast3,
     bullpenKbbLast3Diff: diffOrNull(selectedBullpenKbbLast3, opponentBullpenKbbLast3),
+    selectedBullpenFip30,
+    opponentBullpenFip30,
+    bullpenFip30Diff: diffOrNull(selectedBullpenFip30, opponentBullpenFip30),
+    selectedBullpenXfipLike30,
+    opponentBullpenXfipLike30,
+    bullpenXfipLike30Diff: diffOrNull(selectedBullpenXfipLike30, opponentBullpenXfipLike30),
+    selectedBullpenKMinusBbPct30,
+    opponentBullpenKMinusBbPct30,
+    bullpenKMinusBbPct30Diff: diffOrNull(selectedBullpenKMinusBbPct30, opponentBullpenKMinusBbPct30),
+    selectedBullpenSwSiera30,
+    opponentBullpenSwSiera30,
+    bullpenSwSiera30Diff: diffOrNull(selectedBullpenSwSiera30, opponentBullpenSwSiera30),
     selectedActiveIlPlayers,
     opponentActiveIlPlayers,
     activeIlPlayersDiff: diffOrNull(selectedActiveIlPlayers, opponentActiveIlPlayers),
@@ -825,19 +970,86 @@ const buildMarketMovements = async (client: pg.PoolClient, lines: CandidateLine[
   return movements;
 };
 
+const buildConfidenceCalibration = async (client: pg.PoolClient, targetDate: string) => {
+  const calibration = new Map(defaultConfidenceCalibration);
+  const rows = await client.query<{
+    bucket: ConfidenceBucket;
+    decisions: string;
+    wins: string;
+    average_confidence: string;
+  }>(
+    `
+      WITH settled AS (
+        SELECT
+          p.confidence::numeric AS confidence,
+          w.status
+        FROM ai_pick p
+        JOIN ai_model_run r ON r.id = p.run_id
+        JOIN wager w ON w.id = p.wager_id
+        WHERE w.kind = 'straight'
+          AND w.status IN ('won', 'lost')
+          AND p.published_for < $1::date
+          AND r.model_version IN ($2, $3)
+      ),
+      bucketed AS (
+        SELECT
+          CASE
+            WHEN confidence >= 0.80 THEN '80%+'
+            WHEN confidence >= 0.75 THEN '75-79.9%'
+            WHEN confidence >= 0.70 THEN '70-74.9%'
+            WHEN confidence >= 0.67 THEN '67-69.9%'
+            WHEN confidence >= 0.60 THEN '60-66.9%'
+            ELSE '<60%'
+          END AS bucket,
+          confidence,
+          status
+        FROM settled
+      )
+      SELECT
+        bucket,
+        count(*)::text AS decisions,
+        count(*) FILTER (WHERE status = 'won')::text AS wins,
+        avg(confidence)::text AS average_confidence
+      FROM bucketed
+      GROUP BY bucket
+    `,
+    [targetDate, legacyModelVersion, modelVersion]
+  );
+
+  for (const row of rows.rows) {
+    const decisions = Number(row.decisions);
+    if (decisions < 8) {
+      continue;
+    }
+    const winPct = Number(row.wins) / decisions;
+    const averageConfidence = Number(row.average_confidence);
+    if (!Number.isFinite(winPct) || !Number.isFinite(averageConfidence)) {
+      continue;
+    }
+    calibration.set(row.bucket, clamp((winPct - averageConfidence) * 0.35, -0.04, 0.025));
+  }
+
+  return calibration;
+};
+
 export const scoreLine = (
   line: CandidateLine,
   eventMarketCounts: Map<string, number>,
-  context: MlbHeuristicContext | null = null
+  context: MlbHeuristicContext | null = null,
+  options: ScoreOptions = { modelVersion }
 ): ScoredCandidate => {
   const implied = impliedProbability(line.odds_american);
   const isHome = line.selected_team === line.home_team;
   const isFavorite = line.odds_american < 0;
   const isMoneyline = line.market_key === "h2h";
+  const useV7 = options.modelVersion === modelVersion;
+  const marketModelProfile = isMoneyline ? "moneyline-v7" : "runline-v7";
   const spreadValue = Number(line.spread);
   const marketCompleteness = eventMarketCounts.get(eventKey(line)) ?? 1;
 
   let fair = implied;
+  let confidenceCap = useV7 && isMoneyline ? 0.88 : 0.9;
+  const appliedCaps: string[] = [];
   const reasons: string[] = [];
 
   if (isHome) {
@@ -863,6 +1075,18 @@ export const scoreLine = (
     reasons.push("Standard baseball runline");
   }
 
+  if (useV7) {
+    if (isMoneyline) {
+      fair += 0.003;
+      reasons.push("Moneyline-specific model profile");
+    } else {
+      fair -= 0.006;
+      confidenceCap = Math.min(confidenceCap, 0.74);
+      appliedCaps.push("runline variance");
+      reasons.push("Runline-specific variance adjustment");
+    }
+  }
+
   if (marketCompleteness > 1) {
     fair += 0.004;
     reasons.push("Multiple complete markets available for game");
@@ -886,10 +1110,10 @@ export const scoreLine = (
     }
 
     if ((context.runsForPerGameDiff7 ?? 0) >= 1) {
-      fair += 0.004;
+      fair += 0.006;
       reasons.push("Recent offense edge");
     } else if ((context.runsForPerGameDiff7 ?? 0) <= -1) {
-      fair -= 0.004;
+      fair -= 0.006;
       reasons.push("Recent offense concern");
     }
 
@@ -925,6 +1149,24 @@ export const scoreLine = (
       reasons.push("Hitter split OPS concern vs pitcher hand");
     }
 
+    if (useV7) {
+      if ((context.hitterOpsVsPitchHandDiff ?? 0) >= 0.08) {
+        fair += 0.006;
+        reasons.push("Strong lineup OPS matchup edge vs pitcher hand");
+      } else if ((context.hitterOpsVsPitchHandDiff ?? 0) <= -0.08) {
+        fair -= 0.006;
+        reasons.push("Strong lineup OPS matchup concern vs pitcher hand");
+      }
+
+      if ((context.hitterSlgVsPitchHandDiff ?? 0) >= 0.06) {
+        fair += 0.004;
+        reasons.push("Power split edge vs pitcher hand");
+      } else if ((context.hitterSlgVsPitchHandDiff ?? 0) <= -0.06) {
+        fair -= 0.004;
+        reasons.push("Power split concern vs pitcher hand");
+      }
+    }
+
     if ((context.hitterObpVsPitchHandDiff ?? 0) >= 0.025) {
       fair += 0.002;
       reasons.push("Hitter split OBP edge vs pitcher hand");
@@ -956,6 +1198,24 @@ export const scoreLine = (
       } else if ((context.lineupHomeRunsDiff ?? 0) <= -20) {
         fair -= 0.002;
         reasons.push("Confirmed lineup power concern");
+      }
+
+      if (useV7) {
+        if ((context.lineupHomeRunsDiff ?? 0) >= 30) {
+          fair += 0.003;
+          reasons.push("Strong confirmed lineup power edge");
+        } else if ((context.lineupHomeRunsDiff ?? 0) <= -30) {
+          fair -= 0.003;
+          reasons.push("Strong confirmed lineup power concern");
+        }
+
+        if ((context.lineupRbiDiff ?? 0) >= 45) {
+          fair += 0.002;
+          reasons.push("Confirmed run-production lineup edge");
+        } else if ((context.lineupRbiDiff ?? 0) <= -45) {
+          fair -= 0.002;
+          reasons.push("Confirmed run-production lineup concern");
+        }
       }
     }
 
@@ -989,26 +1249,26 @@ export const scoreLine = (
     }
 
     if ((context.starterEraDiff ?? 0) <= -0.75) {
-      fair += 0.005;
+      fair += 0.006;
       reasons.push("Starting pitcher ERA edge");
     } else if ((context.starterEraDiff ?? 0) >= 0.75) {
-      fair -= 0.005;
+      fair -= 0.006;
       reasons.push("Starting pitcher ERA concern");
     }
 
     if ((context.starterAdjustedEraDiff ?? 0) <= -0.75) {
-      fair += 0.003;
+      fair += 0.004;
       reasons.push("Adjusted starting pitcher ERA edge");
     } else if ((context.starterAdjustedEraDiff ?? 0) >= 0.75) {
-      fair -= 0.003;
+      fair -= 0.004;
       reasons.push("Adjusted starting pitcher ERA concern");
     }
 
     if ((context.starterWhipDiff ?? 0) <= -0.15) {
-      fair += 0.003;
+      fair += 0.004;
       reasons.push("Starting pitcher traffic edge");
     } else if ((context.starterWhipDiff ?? 0) >= 0.15) {
-      fair -= 0.003;
+      fair -= 0.004;
       reasons.push("Starting pitcher traffic concern");
     }
 
@@ -1021,10 +1281,10 @@ export const scoreLine = (
     }
 
     if ((context.starterStrikeoutsPer9Diff ?? 0) >= 1) {
-      fair += 0.003;
+      fair += 0.004;
       reasons.push("Starting pitcher strikeout edge");
     } else if ((context.starterStrikeoutsPer9Diff ?? 0) <= -1) {
-      fair -= 0.003;
+      fair -= 0.004;
       reasons.push("Starting pitcher strikeout concern");
     }
 
@@ -1037,10 +1297,10 @@ export const scoreLine = (
     }
 
     if ((context.starterKbbDiff ?? 0) >= 1) {
-      fair += 0.004;
+      fair += 0.005;
       reasons.push("Starting pitcher command edge");
     } else if ((context.starterKbbDiff ?? 0) <= -1) {
-      fair -= 0.004;
+      fair -= 0.005;
       reasons.push("Starting pitcher command concern");
     }
 
@@ -1068,19 +1328,26 @@ export const scoreLine = (
       reasons.push("Dominant starting pitcher mismatch concern");
     }
 
+    if (useV7 && !context.probablePitcherKnown) {
+      fair -= 0.015;
+      confidenceCap = Math.min(confidenceCap, 0.66);
+      appliedCaps.push("unconfirmed probable pitchers");
+      reasons.push("Probable pitcher uncertainty cap");
+    }
+
     if ((context.starterRecentEraDiff ?? 0) <= -0.75) {
-      fair += 0.003;
+      fair += 0.004;
       reasons.push("Recent starting pitcher ERA edge");
     } else if ((context.starterRecentEraDiff ?? 0) >= 0.75) {
-      fair -= 0.003;
+      fair -= 0.004;
       reasons.push("Recent starting pitcher ERA concern");
     }
 
     if ((context.starterRecentKbbDiff ?? 0) >= 1) {
-      fair += 0.003;
+      fair += 0.004;
       reasons.push("Recent starting pitcher command edge");
     } else if ((context.starterRecentKbbDiff ?? 0) <= -1) {
-      fair -= 0.003;
+      fair -= 0.004;
       reasons.push("Recent starting pitcher command concern");
     }
 
@@ -1092,19 +1359,53 @@ export const scoreLine = (
       reasons.push("Recent starter workload concern");
     }
 
+    if (useV7) {
+      if ((context.starterFip30Diff ?? 0) <= -0.45) {
+        fair += 0.006;
+        reasons.push("30-day starter swFIP edge");
+      } else if ((context.starterFip30Diff ?? 0) >= 0.45) {
+        fair -= 0.006;
+        reasons.push("30-day starter swFIP concern");
+      }
+
+      if ((context.starterXfipLike30Diff ?? 0) <= -0.35) {
+        fair += 0.004;
+        reasons.push("30-day starter swxFIP edge");
+      } else if ((context.starterXfipLike30Diff ?? 0) >= 0.35) {
+        fair -= 0.004;
+        reasons.push("30-day starter swxFIP concern");
+      }
+
+      if ((context.starterSwSiera30Diff ?? 0) <= -0.35) {
+        fair += 0.004;
+        reasons.push("30-day starter swSIERA edge");
+      } else if ((context.starterSwSiera30Diff ?? 0) >= 0.35) {
+        fair -= 0.004;
+        reasons.push("30-day starter swSIERA concern");
+      }
+
+      if ((context.starterKMinusBbPct30Diff ?? 0) >= 0.04) {
+        fair += 0.004;
+        reasons.push("30-day starter K-BB edge");
+      } else if ((context.starterKMinusBbPct30Diff ?? 0) <= -0.04) {
+        fair -= 0.004;
+        reasons.push("30-day starter K-BB concern");
+      }
+    }
+
     if ((context.bullpenPitchesLast3Diff ?? 0) <= -45) {
-      fair += 0.003;
+      fair += 0.001;
       reasons.push("Bullpen freshness edge");
     } else if ((context.bullpenPitchesLast3Diff ?? 0) >= 45) {
-      fair -= 0.003;
+      fair -= 0.001;
       reasons.push("Bullpen workload concern");
     }
 
     if ((context.bullpenEraLast3Diff ?? 0) <= -1) {
-      fair += 0.003;
+      fair += 0.001;
       reasons.push("Recent bullpen ERA edge");
     } else if ((context.bullpenEraLast3Diff ?? 0) >= 1) {
-      fair -= 0.003;
+      fair -= 0.001;
       reasons.push("Recent bullpen ERA concern");
     }
 
@@ -1124,12 +1425,31 @@ export const scoreLine = (
       reasons.push("Recent bullpen traffic concern");
     }
 
-    if ((context.bullpenKbbLast3Diff ?? 0) >= 1) {
-      fair += 0.002;
-      reasons.push("Recent bullpen command edge");
-    } else if ((context.bullpenKbbLast3Diff ?? 0) <= -1) {
-      fair -= 0.002;
-      reasons.push("Recent bullpen command concern");
+    if (useV7) {
+      if ((context.bullpenFip30Diff ?? 0) <= -0.45) {
+        fair += 0.004;
+        reasons.push("30-day bullpen swFIP edge");
+      } else if ((context.bullpenFip30Diff ?? 0) >= 0.45) {
+        fair -= 0.004;
+        reasons.push("30-day bullpen swFIP concern");
+      }
+
+      if ((context.bullpenXfipLike30Diff ?? 0) <= -0.35) {
+        fair += 0.003;
+        reasons.push("30-day bullpen swxFIP edge");
+      } else if ((context.bullpenXfipLike30Diff ?? 0) >= 0.35) {
+        fair -= 0.003;
+        reasons.push("30-day bullpen swxFIP concern");
+      }
+
+      if ((context.bullpenSwSiera30Diff ?? 0) <= -0.35) {
+        fair += 0.003;
+        reasons.push("30-day bullpen swSIERA edge");
+      } else if ((context.bullpenSwSiera30Diff ?? 0) >= 0.35) {
+        fair -= 0.003;
+        reasons.push("30-day bullpen swSIERA concern");
+      }
+
     }
 
     if ((context.activeIlPitchersDiff ?? 0) <= -2) {
@@ -1142,18 +1462,41 @@ export const scoreLine = (
 
     if ((context.lineSnapshotCount ?? 0) >= 2) {
       if ((context.lineMovementImplied ?? 0) >= 0.02) {
-        fair += 0.003;
+        fair += 0.001;
         reasons.push("Market movement toward pick");
       } else if ((context.lineMovementImplied ?? 0) <= -0.02) {
         fair -= 0.003;
         reasons.push("Market movement against pick");
       }
     }
+
+    if (useV7 && (context.lineSnapshotCount ?? 0) >= 2) {
+      const strongContextEdge = dominantStarterEdgeSignals >= 3
+        || (context.hitterOpsVsPitchHandDiff ?? 0) >= 0.08
+        || (context.runDiffPerGameDiff14 ?? 0) >= 1.25;
+      if ((context.lineMovementImplied ?? 0) <= -0.025 && !strongContextEdge) {
+        fair -= 0.01;
+        confidenceCap = Math.min(confidenceCap, 0.66);
+        appliedCaps.push("market moving against pick");
+        reasons.push("Market sanity cap for adverse line movement");
+      } else if ((context.lineMovementImplied ?? 0) <= -0.025) {
+        fair -= 0.004;
+        reasons.push("Adverse market movement partly offset by model context");
+      } else if ((context.lineMovementImplied ?? 0) >= 0.025) {
+        fair += 0.001;
+        reasons.push("Market confirmation edge");
+      }
+    }
   }
 
   fair = clamp(fair, 0.02, 0.92);
   const edge = fair - implied;
-  const confidence = clamp(fair + Math.max(edge, 0) * 2, 0.1, 0.9);
+  const uncalibratedConfidence = clamp(fair + Math.max(edge, 0) * 2, 0.1, 0.9);
+  const calibrationBucket = confidenceBucket(uncalibratedConfidence);
+  const calibrationAdjustment = useV7
+    ? options.confidenceCalibration?.get(calibrationBucket) ?? defaultConfidenceCalibration.get(calibrationBucket) ?? 0
+    : 0;
+  const confidence = clamp(uncalibratedConfidence + calibrationAdjustment, 0.1, confidenceCap);
   const score = edge * 100 + confidence * 10;
 
   return {
@@ -1172,6 +1515,13 @@ export const scoreLine = (
       isMoneyline,
       spread: spreadValue,
       marketCompleteness,
+      modelVersion: options.modelVersion,
+      modelProfile: useV7 ? marketModelProfile : "legacy-v6",
+      confidenceBucket: calibrationBucket,
+      confidenceCalibrationAdjustment: calibrationAdjustment,
+      uncalibratedConfidence,
+      confidenceCap,
+      appliedConfidenceCaps: appliedCaps.join(", ") || null,
       decimalOdds: americanToDecimal(line.odds_american),
       winPctDiff7: context?.winPctDiff7 ?? null,
       runDiffPerGameDiff7: context?.runDiffPerGameDiff7 ?? null,
@@ -1256,6 +1606,24 @@ export const scoreLine = (
       selectedStarterRecentPitches: context?.selectedStarterRecentPitches ?? null,
       opponentStarterRecentPitches: context?.opponentStarterRecentPitches ?? null,
       starterRecentPitchesDiff: context?.starterRecentPitchesDiff ?? null,
+      selectedStarterFip30: context?.selectedStarterFip30 ?? null,
+      opponentStarterFip30: context?.opponentStarterFip30 ?? null,
+      starterFip30Diff: context?.starterFip30Diff ?? null,
+      selectedStarterSwFip30: context?.selectedStarterFip30 ?? null,
+      opponentStarterSwFip30: context?.opponentStarterFip30 ?? null,
+      starterSwFip30Diff: context?.starterFip30Diff ?? null,
+      selectedStarterXfipLike30: context?.selectedStarterXfipLike30 ?? null,
+      opponentStarterXfipLike30: context?.opponentStarterXfipLike30 ?? null,
+      starterXfipLike30Diff: context?.starterXfipLike30Diff ?? null,
+      selectedStarterSwxFip30: context?.selectedStarterXfipLike30 ?? null,
+      opponentStarterSwxFip30: context?.opponentStarterXfipLike30 ?? null,
+      starterSwxFip30Diff: context?.starterXfipLike30Diff ?? null,
+      selectedStarterKMinusBbPct30: context?.selectedStarterKMinusBbPct30 ?? null,
+      opponentStarterKMinusBbPct30: context?.opponentStarterKMinusBbPct30 ?? null,
+      starterKMinusBbPct30Diff: context?.starterKMinusBbPct30Diff ?? null,
+      selectedStarterSwSiera30: context?.selectedStarterSwSiera30 ?? null,
+      opponentStarterSwSiera30: context?.opponentStarterSwSiera30 ?? null,
+      starterSwSiera30Diff: context?.starterSwSiera30Diff ?? null,
       selectedBullpenPitchesLast3: context?.selectedBullpenPitchesLast3 ?? null,
       opponentBullpenPitchesLast3: context?.opponentBullpenPitchesLast3 ?? null,
       bullpenPitchesLast3Diff: context?.bullpenPitchesLast3Diff ?? null,
@@ -1271,6 +1639,24 @@ export const scoreLine = (
       selectedBullpenKbbLast3: context?.selectedBullpenKbbLast3 ?? null,
       opponentBullpenKbbLast3: context?.opponentBullpenKbbLast3 ?? null,
       bullpenKbbLast3Diff: context?.bullpenKbbLast3Diff ?? null,
+      selectedBullpenFip30: context?.selectedBullpenFip30 ?? null,
+      opponentBullpenFip30: context?.opponentBullpenFip30 ?? null,
+      bullpenFip30Diff: context?.bullpenFip30Diff ?? null,
+      selectedBullpenSwFip30: context?.selectedBullpenFip30 ?? null,
+      opponentBullpenSwFip30: context?.opponentBullpenFip30 ?? null,
+      bullpenSwFip30Diff: context?.bullpenFip30Diff ?? null,
+      selectedBullpenXfipLike30: context?.selectedBullpenXfipLike30 ?? null,
+      opponentBullpenXfipLike30: context?.opponentBullpenXfipLike30 ?? null,
+      bullpenXfipLike30Diff: context?.bullpenXfipLike30Diff ?? null,
+      selectedBullpenSwxFip30: context?.selectedBullpenXfipLike30 ?? null,
+      opponentBullpenSwxFip30: context?.opponentBullpenXfipLike30 ?? null,
+      bullpenSwxFip30Diff: context?.bullpenXfipLike30Diff ?? null,
+      selectedBullpenKMinusBbPct30: context?.selectedBullpenKMinusBbPct30 ?? null,
+      opponentBullpenKMinusBbPct30: context?.opponentBullpenKMinusBbPct30 ?? null,
+      bullpenKMinusBbPct30Diff: context?.bullpenKMinusBbPct30Diff ?? null,
+      selectedBullpenSwSiera30: context?.selectedBullpenSwSiera30 ?? null,
+      opponentBullpenSwSiera30: context?.opponentBullpenSwSiera30 ?? null,
+      bullpenSwSiera30Diff: context?.bullpenSwSiera30Diff ?? null,
       selectedActiveIlPlayers: context?.selectedActiveIlPlayers ?? null,
       opponentActiveIlPlayers: context?.opponentActiveIlPlayers ?? null,
       activeIlPlayersDiff: context?.activeIlPlayersDiff ?? null,
@@ -1327,6 +1713,10 @@ const buildMlbContexts = async (client: pg.PoolClient, lines: CandidateLine[]) =
       SELECT
         starts_on::text,
         starts_at,
+        away_team_id,
+        home_team_id,
+        away_probable_pitcher_id,
+        home_probable_pitcher_id,
         away_team,
         home_team,
         away_pitcher_stats,
@@ -1342,9 +1732,57 @@ const buildMlbContexts = async (client: pg.PoolClient, lines: CandidateLine[]) =
     `,
     [dates[0], end, teams]
   );
+  const rollingMetricDates = [...new Set(storedContexts.rows.map((context) => context.starts_on))];
+  const rollingPitcherIds = [...new Set(storedContexts.rows.flatMap((context) => [
+    context.away_probable_pitcher_id,
+    context.home_probable_pitcher_id
+  ]).filter((id): id is number => typeof id === "number"))];
+  const rollingTeamIds = [...new Set(storedContexts.rows.flatMap((context) => [
+    context.away_team_id,
+    context.home_team_id
+  ]).filter((id): id is number => typeof id === "number"))];
+  const rollingPitchers = rollingMetricDates.length && rollingPitcherIds.length
+    ? await client.query<RollingMetric & { as_of_date: string; player_id: number }>(
+      `
+        SELECT as_of_date::text, player_id, fip, xfip_like, sw_fip, sw_xfip, sw_siera, k_minus_bb_pct
+        FROM mlb_pitcher_rolling_metric
+        WHERE as_of_date = ANY($1::date[])
+          AND player_id = ANY($2::int[])
+          AND role = 'starter'
+          AND window_days = 30
+      `,
+      [rollingMetricDates, rollingPitcherIds]
+    )
+    : { rows: [] };
+  const rollingBullpens = rollingMetricDates.length && rollingTeamIds.length
+    ? await client.query<RollingMetric & { as_of_date: string; team_id: number }>(
+      `
+        SELECT as_of_date::text, team_id, fip, xfip_like, sw_fip, sw_xfip, sw_siera, k_minus_bb_pct
+        FROM mlb_team_bullpen_rolling_metric
+        WHERE as_of_date = ANY($1::date[])
+          AND team_id = ANY($2::int[])
+          AND window_days = 30
+      `,
+      [rollingMetricDates, rollingTeamIds]
+    )
+    : { rows: [] };
+  const rollingPitcherByDatePlayer = new Map(rollingPitchers.rows.map((row) => [`${row.as_of_date}:${row.player_id}`, row]));
+  const rollingBullpenByDateTeam = new Map(rollingBullpens.rows.map((row) => [`${row.as_of_date}:${row.team_id}`, row]));
   const storedByExactGame = new Map<string, MlbStoredContext>();
   const storedByDateGame = new Map<string, Array<MlbStoredContext & { away_team: string; home_team: string }>>();
   for (const context of storedContexts.rows) {
+    context.awayStarterRolling = context.away_probable_pitcher_id
+      ? rollingPitcherByDatePlayer.get(`${context.starts_on}:${context.away_probable_pitcher_id}`) ?? null
+      : null;
+    context.homeStarterRolling = context.home_probable_pitcher_id
+      ? rollingPitcherByDatePlayer.get(`${context.starts_on}:${context.home_probable_pitcher_id}`) ?? null
+      : null;
+    context.awayBullpenRolling = context.away_team_id
+      ? rollingBullpenByDateTeam.get(`${context.starts_on}:${context.away_team_id}`) ?? null
+      : null;
+    context.homeBullpenRolling = context.home_team_id
+      ? rollingBullpenByDateTeam.get(`${context.starts_on}:${context.home_team_id}`) ?? null
+      : null;
     storedByExactGame.set(storedContextExactKey(context.starts_at, context.away_team, context.home_team), context);
     const dateKey = storedContextDateKey(context.starts_on, context.away_team, context.home_team);
     storedByDateGame.set(dateKey, [...(storedByDateGame.get(dateKey) ?? []), context]);
@@ -1524,6 +1962,45 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
   pick.provider_event_id?.split(":")[0]
     ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
 
+const updateAiPickClosingLines = async (client: pg.PoolClient, sport: CandidateLine["sport"], beforeDate: string) => {
+  const result = await client.query<{ id: string }>(
+    `
+      WITH closing AS (
+        SELECT DISTINCT ON (p.id)
+          p.id AS pick_id,
+          s.game_line_id AS closing_game_line_id,
+          s.odds_american,
+          s.spread,
+          s.captured_at
+        FROM ai_pick p
+        JOIN game_line gl ON gl.id = p.game_line_id
+        JOIN ai_candidate_snapshot s ON s.sport = gl.sport
+          AND s.market_key = gl.market_key
+          AND s.selected_team = p.selected_team
+          AND s.away_team = gl.away_team
+          AND s.home_team = gl.home_team
+          AND s.starts_at BETWEEN gl.starts_at - interval '3 hours' AND gl.starts_at + interval '3 hours'
+          AND s.captured_at <= gl.starts_at
+        WHERE gl.sport = $1
+          AND p.locked_at IS NOT NULL
+          AND p.closing_odds_american IS NULL
+          AND p.published_for < $2::date
+        ORDER BY p.id, s.captured_at DESC
+      )
+      UPDATE ai_pick p
+      SET closing_game_line_id = closing.closing_game_line_id,
+          closing_odds_american = closing.odds_american,
+          closing_spread = closing.spread,
+          closing_captured_at = closing.captured_at
+      FROM closing
+      WHERE p.id = closing.pick_id
+      RETURNING p.id
+    `,
+    [sport, beforeDate]
+  );
+  return result.rowCount ?? 0;
+};
+
 export const generateAiPicks = async ({
   sport = "MLB",
   maxPicks = 3,
@@ -1558,6 +2035,7 @@ export const generateAiPicks = async ({
   const result = await transaction(async (client) => {
     const runId = randomUUID();
     const today = forDate ?? centralDate();
+    const activeModelVersion = modelVersionForDate(today);
     const now = new Date();
 
     const run = await client.query<{ id: string }>(
@@ -1568,7 +2046,15 @@ export const generateAiPicks = async ({
         DO UPDATE SET created_at = now(), notes = EXCLUDED.notes
         RETURNING id
       `,
-      [runId, modelVersion, sport, today, "Transparent heuristic using market, recent form, rest, and venue-change features"]
+      [
+        runId,
+        activeModelVersion,
+        sport,
+        today,
+        activeModelVersion === modelVersion
+          ? "Transparent heuristic v7 using calibrated confidence, market-specific profiles, starter certainty, lineup splits, and market sanity checks"
+          : "Transparent heuristic using market, recent form, rest, and venue-change features"
+      ]
     );
 
     const activeLines = await client.query<CandidateLine>(
@@ -1601,8 +2087,14 @@ export const generateAiPicks = async ({
     }
 
     const mlbContexts = await buildMlbContexts(client, activeLines.rows);
+    const confidenceCalibration = activeModelVersion === modelVersion
+      ? await buildConfidenceCalibration(client, today)
+      : undefined;
     const scored = activeLines.rows
-      .map((line) => scoreLine(line, eventMarketCounts, mlbContexts.get(line.id) ?? null))
+      .map((line) => scoreLine(line, eventMarketCounts, mlbContexts.get(line.id) ?? null, {
+        modelVersion: activeModelVersion,
+        confidenceCalibration
+      }))
       .sort((a, b) =>
         sortBy === "confidence"
           ? b.confidence - a.confidence || b.score - a.score
@@ -1852,9 +2344,10 @@ export const generateAiPicks = async ({
         `
           INSERT INTO ai_pick (
             id, game_line_id, selected_team, published_for, run_id, score,
-            confidence, reasons, features, locked_at, wager_id, explanation
+            confidence, reasons, features, locked_at, wager_id, explanation,
+            model_version, locked_odds_american, locked_spread, locked_line_captured_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
           ON CONFLICT (game_line_id, published_for) DO UPDATE SET
             selected_team = EXCLUDED.selected_team,
             run_id = EXCLUDED.run_id,
@@ -1864,7 +2357,11 @@ export const generateAiPicks = async ({
             features = EXCLUDED.features,
             locked_at = COALESCE(ai_pick.locked_at, EXCLUDED.locked_at),
             wager_id = COALESCE(ai_pick.wager_id, EXCLUDED.wager_id),
-            explanation = EXCLUDED.explanation
+            explanation = EXCLUDED.explanation,
+            model_version = COALESCE(ai_pick.model_version, EXCLUDED.model_version),
+            locked_odds_american = COALESCE(ai_pick.locked_odds_american, EXCLUDED.locked_odds_american),
+            locked_spread = COALESCE(ai_pick.locked_spread, EXCLUDED.locked_spread),
+            locked_line_captured_at = COALESCE(ai_pick.locked_line_captured_at, EXCLUDED.locked_line_captured_at)
           RETURNING id
         `,
         [
@@ -1879,7 +2376,11 @@ export const generateAiPicks = async ({
           JSON.stringify(candidate.features),
           shouldLock ? now : null,
           wagerId,
-          explanation
+          explanation,
+          activeModelVersion,
+          shouldLock ? candidate.odds_american : null,
+          shouldLock ? candidate.spread : null,
+          shouldLock ? now : null
         ]
       );
       published.push({
@@ -1906,7 +2407,7 @@ export const generateAiPicks = async ({
 
     const result = {
       runId: run.rows[0].id,
-      modelVersion,
+      modelVersion: activeModelVersion,
       candidates: scored.length,
       locked: lockedGameKeys.size + published.filter((pick) => pick.locked).length,
       projected: published.filter((pick) => !pick.locked).length,
@@ -1928,6 +2429,8 @@ export const snapshotAiCandidates = async ({
   source?: string;
 } = {}) => {
   return transaction(async (client) => {
+    const today = centralDate();
+    const activeModelVersion = modelVersionForDate(today);
     const activeLines = await client.query<CandidateLine>(
       `
         SELECT
@@ -1956,7 +2459,13 @@ export const snapshotAiCandidates = async ({
     }
 
     const mlbContexts = await buildMlbContexts(client, activeLines.rows);
-    const scored = activeLines.rows.map((line) => scoreLine(line, eventMarketCounts, mlbContexts.get(line.id) ?? null));
+    const confidenceCalibration = activeModelVersion === modelVersion
+      ? await buildConfidenceCalibration(client, today)
+      : undefined;
+    const scored = activeLines.rows.map((line) => scoreLine(line, eventMarketCounts, mlbContexts.get(line.id) ?? null, {
+      modelVersion: activeModelVersion,
+      confidenceCalibration
+    }));
     const capturedAt = new Date();
 
     for (const candidate of scored) {
@@ -1978,7 +2487,7 @@ export const snapshotAiCandidates = async ({
         [
           randomUUID(),
           capturedAt,
-          modelVersion,
+          activeModelVersion,
           candidate.sport,
           candidate.id,
           candidate.provider_event_id,
@@ -2001,11 +2510,14 @@ export const snapshotAiCandidates = async ({
       );
     }
 
+    const closingLinesUpdated = await updateAiPickClosingLines(client, sport, today);
+
     return {
       capturedAt: capturedAt.toISOString(),
-      modelVersion,
+      modelVersion: activeModelVersion,
       sport,
-      snapshots: scored.length
+      snapshots: scored.length,
+      closingLinesUpdated
     };
   });
 };

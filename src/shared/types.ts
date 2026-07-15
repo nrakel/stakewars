@@ -7,6 +7,7 @@ export type SessionUser = {
   username: string;
   fullName: string | null;
   email: string | null;
+  emailVerified: boolean;
   displayName: string | null;
   rewardBalanceCents: number;
   payoutMethod: "none" | "paypal" | "venmo";
@@ -128,6 +129,64 @@ export type LeaderboardRow = {
   balanceCents: number;
   settledProfitCents: number;
   beatAi: boolean;
+  isCurrentUser: boolean;
+  weeklyWagers: number | null;
+  weeklyStakeCents: number | null;
+  requiredStakeCents: number | null;
+  emailVerified: boolean | null;
+  eligible: boolean;
+};
+
+export type AiPickResultStatus = "pending" | "won" | "lost" | "push" | "void";
+
+export type DailyAiPick = {
+  id: string;
+  selectedTeam: string;
+  publishedFor: string;
+  score: number;
+  confidence: number | string | null;
+  reasons: string[];
+  features: Record<string, unknown>;
+  explanation: string | null;
+  lockedAt: string | null;
+  wagerId: string | null;
+  wagerStatus: AiPickResultStatus | null;
+  legStatus: AiPickResultStatus | null;
+  resultStatus: AiPickResultStatus | null;
+  sport: SportKey;
+  league: string;
+  startsAt: string;
+  homeTeam: string;
+  awayTeam: string;
+  spread: string;
+  oddsAmerican: number;
+  marketKey: MarketKey;
+};
+
+export type DailyChineParlayLeg = {
+  id: string;
+  selectedTeam: string;
+  legIndex: number;
+  status: AiPickResultStatus;
+  decimalOdds: string;
+  oddsAmerican: number;
+  sport: SportKey;
+  league: string;
+  startsAt: string;
+  homeTeam: string;
+  awayTeam: string;
+  spread: string;
+  marketKey: MarketKey;
+};
+
+export type DailyChineParlay = {
+  id: string;
+  pickDate: string;
+  units: string;
+  potentialReturnUnits?: string;
+  status: AiPickResultStatus;
+  profitUnits: string;
+  legs: DailyChineParlayLeg[];
 };
 
 export type OpenBetLeg = {

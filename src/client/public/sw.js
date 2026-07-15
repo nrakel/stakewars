@@ -1,4 +1,4 @@
-const CACHE_VERSION = "stakewars-v2";
+const CACHE_VERSION = "stakewars-v3";
 const APP_SHELL = [
   "/",
   "/offline.html",
@@ -64,18 +64,28 @@ self.addEventListener("fetch", (event) => {
 self.addEventListener("push", (event) => {
   const data = event.data?.json?.() ?? {};
   const title = data.title || "StakeWars";
+  const tag = typeof data.tag === "string" && data.tag.trim() ? data.tag.trim() : undefined;
   const options = {
     body: data.body || "You have a new StakeWars update.",
     icon: "/icons/icon-192.png",
     badge: "/icons/icon-192.png",
-    tag: data.tag,
+    tag,
     renotify: Boolean(data.renotify),
     data: {
-      url: data.url || "/"
+      url: data.url || "/",
+      tag
     }
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil((async () => {
+    if (tag && "getNotifications" in self.registration) {
+      const existing = await self.registration.getNotifications({ tag });
+      for (const notification of existing) {
+        notification.close();
+      }
+    }
+    await self.registration.showNotification(title, options);
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {
