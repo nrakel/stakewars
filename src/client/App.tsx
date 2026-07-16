@@ -962,8 +962,10 @@ function AuthPanel({
               <h1>StakeWars</h1>
               <h2>Can You Beat Chine?</h2>
             </div>
-            <p>The autonomous AI has already made today's picks.</p>
-            <p>Now make yours.</p>
+            <p className="auth-pitch">
+              Chine is building today's card.<br />
+              <strong>Now build a better one.</strong>
+            </p>
             <div className="auth-benefits" aria-label="StakeWars benefits">
               <span>🏆 Free to Play</span>
               <span>🤖 Compete Against Chine</span>

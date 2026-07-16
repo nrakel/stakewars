@@ -96,6 +96,19 @@ button:disabled {
   color: #65736d;
 }
 
+.auth-heading .auth-pitch {
+  margin-top: 12px;
+  color: #24322d;
+  font-size: 1.08rem;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
+.auth-heading .auth-pitch strong {
+  color: #ff6900;
+  font-weight: 950;
+}
+
 .auth-benefits {
   display: grid;
   gap: 6px;
