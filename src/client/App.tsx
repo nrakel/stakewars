@@ -959,7 +959,16 @@ function AuthPanel({
           <img className="auth-logo" src="/icons/icon-192.png" alt="" />
           <div>
             <h1>StakeWars</h1>
-            <p>Challenge the field weekly for free prizes and prove AI wrong!</p>
+            <h2>Can You Beat Chine?</h2>
+            <p>Chine, our autonomous AI competitor, makes its own sports picks every day. Build your own card, climb the leaderboard, and compete for free weekly prizes.</p>
+            <div className="auth-benefits" aria-label="StakeWars benefits">
+              <span>🏆 Free to Play</span>
+              <span>🤖 Challenge Chine</span>
+              <span>💰 Win Weekly Prizes</span>
+            </div>
+            <button className="auth-signup-cta" type="button" onClick={() => switchMode("register")}>
+              Sign Up Free
+            </button>
             <button className="rules-link" type="button" onClick={() => setRulesOpen(true)}>
               Rules and Terms
             </button>

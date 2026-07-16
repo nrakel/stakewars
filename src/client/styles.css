@@ -77,15 +77,51 @@ button:disabled {
   font-size: 2rem;
 }
 
-.auth-heading p {
+.auth-heading h2 {
   margin: 6px 0 0;
+  color: #14201c;
+  font-size: 1.35rem;
+  line-height: 1.15;
+}
+
+.auth-heading p {
+  margin: 8px 0 0;
   color: #65736d;
+}
+
+.auth-benefits {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  color: #14201c;
+  font-weight: 900;
+}
+
+.auth-benefits span {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+
+.auth-signup-cta {
+  width: fit-content;
+  min-height: 42px;
+  margin-top: 16px;
+  padding: 0 18px;
+  border-radius: 8px;
+  background: #ff6900;
+  color: #fff;
+  font-weight: 900;
+}
+
+.auth-signup-cta:hover {
+  background: #e85f00;
 }
 
 .rules-link {
   width: fit-content;
   min-height: 0;
-  margin-top: 8px;
+  margin-top: 10px;
   padding: 0;
   border-radius: 0;
   background: transparent;
