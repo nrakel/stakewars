@@ -67,8 +67,15 @@ button:disabled {
 
 .auth-heading {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 14px;
+}
+
+.auth-title-block {
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 
 .auth-heading h1 {
