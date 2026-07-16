@@ -963,7 +963,7 @@ function AuthPanel({
               <h2>Can You Beat Chine?</h2>
             </div>
             <p className="auth-pitch">
-              Chine is building today's card.<br />
+              <span>Chine is building today's card.</span><br />
               <strong>Now build a better one.</strong>
             </p>
             <div className="auth-benefits" aria-label="StakeWars benefits">
