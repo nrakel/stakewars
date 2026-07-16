@@ -86,6 +86,7 @@ type MlbScheduleGame = {
   gameDate?: string;
   status?: {
     abstractGameState?: string;
+    codedGameState?: string;
     detailedState?: string;
   };
   teams?: {
@@ -602,7 +603,11 @@ const normalizeMlbGame = async (game: MlbScheduleGame): Promise<NormalizedLiveMa
 
   const startsAt = game.gameDate ? new Date(game.gameDate) : null;
   const safeStartsAt = startsAt && Number.isFinite(startsAt.getTime()) ? startsAt : null;
-  const isLive = game.status?.abstractGameState === "Live";
+  const detailedState = game.status?.detailedState?.toLowerCase() ?? "";
+  const codedGameState = game.status?.codedGameState?.toUpperCase() ?? "";
+  const isLive = game.status?.abstractGameState === "Live"
+    && codedGameState !== "P"
+    && !/warmup|pre-game|pregame|scheduled/.test(detailedState);
   const liveDetails = isLive ? await fetchMlbLiveDetails(game.gamePk) : null;
   const lastPlay = liveDetails?.lastPlay ?? null;
   const lastScoringPlay = liveDetails?.lastScoringPlay ?? null;
