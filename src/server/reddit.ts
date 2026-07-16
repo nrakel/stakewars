@@ -32,6 +32,7 @@ type RedditPickRow = {
   starts_at: Date;
   confidence: string | null;
   edge: string | null;
+  features: Record<string, unknown> | null;
   reasons: string[];
   explanation: string | null;
 };
@@ -163,6 +164,7 @@ const compactTeamName = (team: string) => {
     "New York Yankees": "Yankees",
     "Seattle Mariners": "Mariners",
     "Miami Marlins": "Marlins",
+    "New York Mets": "Mets",
     "Philadelphia Phillies": "Phillies",
     "Cincinnati Reds": "Reds",
     "Milwaukee Brewers": "Brewers",
@@ -250,15 +252,134 @@ const parlayNarrative = (legs: RedditParlayLegRow[]) => {
   return `${clauses[0]}. ${clauses.slice(1).join(", while ")}. The parlay leans on correlated model positives without stretching beyond the top available Chine plays.`;
 };
 
-const pickNarrative = (pick: Pick<RedditPickRow, "selected_team" | "reasons" | "confidence" | "edge" | "explanation" | "units">) => {
-  const reasons = redditWhyBullets(pick.reasons).map((reason) => reason.toLowerCase());
+const featureNumber = (features: Record<string, unknown> | null | undefined, key: string) => {
+  const raw = features?.[key];
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && raw.trim()) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const formatStat = (value: number, digits = 1) => value.toFixed(digits);
+
+const formatSignedStat = (value: number, digits = 1) => `${value > 0 ? "+" : ""}${value.toFixed(digits)}`;
+
+const formatProb = (value: number) => `${(value * 100).toFixed(1)}%`;
+
+const selectedOpponent = (pick: Pick<RedditPickRow, "selected_team" | "away_team" | "home_team">) =>
+  pick.selected_team === pick.away_team ? pick.home_team : pick.away_team;
+
+const concretePickFacts = (pick: Pick<RedditPickRow, "selected_team" | "away_team" | "home_team" | "odds_american" | "features">) => {
+  const features = pick.features;
+  const opponent = selectedOpponent(pick);
+  const selectedShort = compactTeamName(pick.selected_team);
+  const opponentShort = compactTeamName(opponent);
+  const facts: Array<{ priority: number; text: string }> = [];
+
+  const selectedRunsAgainst7 = featureNumber(features, "selectedRunsAgainstPerGame7");
+  const opponentRunsAgainst7 = featureNumber(features, "opponentRunsAgainstPerGame7");
+  if (selectedRunsAgainst7 !== null && opponentRunsAgainst7 !== null && selectedRunsAgainst7 <= opponentRunsAgainst7 - 0.75) {
+    facts.push({
+      priority: Math.abs(opponentRunsAgainst7 - selectedRunsAgainst7) + 9,
+      text: `Over the last seven games, ${selectedShort} have allowed ${formatStat(selectedRunsAgainst7)} runs per game while ${opponentShort} have allowed ${formatStat(opponentRunsAgainst7)}.`
+    });
+  }
+
+  const selectedRunsFor7 = featureNumber(features, "selectedRunsForPerGame7");
+  const opponentRunsFor7 = featureNumber(features, "opponentRunsForPerGame7");
+  if (selectedRunsFor7 !== null && opponentRunsFor7 !== null && selectedRunsFor7 >= opponentRunsFor7 + 0.75) {
+    facts.push({
+      priority: Math.abs(selectedRunsFor7 - opponentRunsFor7) + 7,
+      text: `${selectedShort} are scoring ${formatStat(selectedRunsFor7)} runs per game over the last week, compared with ${formatStat(opponentRunsFor7)} for ${opponentShort}.`
+    });
+  }
+
+  const selectedStarterEra = featureNumber(features, "selectedStarterEra");
+  const opponentStarterEra = featureNumber(features, "opponentStarterEra");
+  if (selectedStarterEra !== null && opponentStarterEra !== null && selectedStarterEra <= opponentStarterEra - 0.5) {
+    facts.push({
+      priority: Math.abs(opponentStarterEra - selectedStarterEra) + 8,
+      text: `The listed starter matchup leans ${selectedShort}: ${formatStat(selectedStarterEra, 2)} ERA versus ${formatStat(opponentStarterEra, 2)} for ${opponentShort}.`
+    });
+  }
+
+  const selectedStarterRecentEra = featureNumber(features, "selectedStarterRecentEra");
+  const opponentStarterRecentEra = featureNumber(features, "opponentStarterRecentEra");
+  if (selectedStarterRecentEra !== null && opponentStarterRecentEra !== null && selectedStarterRecentEra <= opponentStarterRecentEra - 0.75) {
+    facts.push({
+      priority: Math.abs(opponentStarterRecentEra - selectedStarterRecentEra) + 7,
+      text: `Recent starter form also favors ${selectedShort}, ${formatStat(selectedStarterRecentEra, 2)} ERA to ${formatStat(opponentStarterRecentEra, 2)}.`
+    });
+  }
+
+  const selectedBullpenPitches3 = featureNumber(features, "selectedBullpenPitchesLast3");
+  const opponentBullpenPitches3 = featureNumber(features, "opponentBullpenPitchesLast3");
+  if (selectedBullpenPitches3 !== null && opponentBullpenPitches3 !== null && selectedBullpenPitches3 <= opponentBullpenPitches3 - 20) {
+    facts.push({
+      priority: Math.min(Math.abs(opponentBullpenPitches3 - selectedBullpenPitches3) / 20, 5) + 6,
+      text: `${opponentShort}' bullpen has been busier recently, throwing ${Math.round(opponentBullpenPitches3)} pitches over the last three games versus ${Math.round(selectedBullpenPitches3)} for ${selectedShort}.`
+    });
+  }
+
+  const selectedVenueRunDiff = featureNumber(features, "selectedVenueRunDiffPerGame");
+  const opponentVenueRunDiff = featureNumber(features, "opponentVenueRunDiffPerGame");
+  if (selectedVenueRunDiff !== null && opponentVenueRunDiff !== null && selectedVenueRunDiff >= opponentVenueRunDiff + 1) {
+    facts.push({
+      priority: Math.abs(selectedVenueRunDiff - opponentVenueRunDiff) + 5,
+      text: `The home/road split is meaningful: ${selectedShort} are ${formatSignedStat(selectedVenueRunDiff)} runs per game in this venue split, while ${opponentShort} are ${formatSignedStat(opponentVenueRunDiff)}.`
+    });
+  }
+
+  const selectedOps = featureNumber(features, "selectedHitterOpsVsPitchHand");
+  const opponentOps = featureNumber(features, "opponentHitterOpsVsPitchHand");
+  if (selectedOps !== null && opponentOps !== null && selectedOps >= opponentOps + 0.01) {
+    facts.push({
+      priority: Math.abs(selectedOps - opponentOps) * 100 + 4,
+      text: `The projected handedness matchup is slightly better for ${selectedShort}, with a ${formatStat(selectedOps, 3)} OPS profile versus ${formatStat(opponentOps, 3)} for ${opponentShort}.`
+    });
+  }
+
+  const selectedIl = featureNumber(features, "selectedActiveIlPlayers");
+  const opponentIl = featureNumber(features, "opponentActiveIlPlayers");
+  if (selectedIl !== null && opponentIl !== null && selectedIl <= opponentIl - 3) {
+    facts.push({
+      priority: Math.min(Math.abs(opponentIl - selectedIl), 7) + 3,
+      text: `${selectedShort} also have the cleaner availability table, with ${Math.round(selectedIl)} active IL players versus ${Math.round(opponentIl)} for ${opponentShort}.`
+    });
+  }
+
+  const fairProbability = featureNumber(features, "fairProbability");
+  const impliedProbability = featureNumber(features, "impliedProbability");
+  if (fairProbability !== null && impliedProbability !== null && fairProbability >= impliedProbability + 0.015) {
+    facts.push({
+      priority: Math.abs(fairProbability - impliedProbability) * 100 + 2,
+      text: `At ${formatAmericanOdds(pick.odds_american)}, Chine prices the win chance around ${formatProb(fairProbability)} versus ${formatProb(impliedProbability)} implied by the market.`
+    });
+  }
+
+  return facts
+    .sort((left, right) => right.priority - left.priority)
+    .map((fact) => fact.text)
+    .filter((text, index, all) => all.indexOf(text) === index)
+    .slice(0, 3);
+};
+
+const pickNarrative = (pick: Pick<RedditPickRow, "selected_team" | "away_team" | "home_team" | "odds_american" | "sport" | "market_key" | "spread" | "reasons" | "confidence" | "edge" | "features" | "explanation" | "units">) => {
   const confidence = pick.confidence ? `${Math.round(Number(pick.confidence) * 100)}%` : null;
   const edge = pick.edge ? `${(Number(pick.edge) * 100).toFixed(1)}%` : null;
+  const lead = `Chine's top play is ${pickBullet(pick)}${confidence ? ` at ${confidence} confidence` : ""}${edge ? ` with a ${edge} projected edge` : ""}.`;
+  const facts = concretePickFacts(pick);
+  if (facts.length) {
+    return [lead, ...facts, `That is enough for a ${formatUnits(pick.units)} play.`].join(" ");
+  }
+
+  const reasons = redditWhyBullets(pick.reasons).map((reason) => reason.toLowerCase());
   const reasonText = reasons.length > 1
     ? `${reasons.slice(0, -1).join(", ")} and ${reasons.at(-1)}`
     : reasons[0] ?? "a favorable model profile";
-  const verb = pick.selected_team.trim().toLowerCase().endsWith("s") ? "are" : "is";
-  return `${pick.selected_team} ${verb} Chine's highest-confidence play today${confidence ? ` at ${confidence}` : ""}. The model points to ${reasonText}${edge ? `, with a projected edge of ${edge}` : ""}. The price is good enough for a ${formatUnits(pick.units)} play.`;
+  return `${lead} The model points to ${reasonText}. That is enough for a ${formatUnits(pick.units)} play.`;
 };
 
 const settleTrackedRedditPicks = async () => {
@@ -292,6 +413,7 @@ const settleTrackedRedditPicks = async () => {
         gl.starts_at,
         p.confidence,
         p.features->>'edge' AS edge,
+        p.features,
         p.reasons,
         p.explanation,
         gr.id AS result_id,
@@ -416,6 +538,7 @@ const settleTrackedRedditParlays = async () => {
         gl.starts_at,
         p.confidence,
         p.features->>'edge' AS edge,
+        p.features,
         p.reasons,
         p.explanation,
         gr.id AS result_id,
@@ -566,6 +689,7 @@ const selectTodayRedditPick = async () => {
         gl.starts_at,
         p.confidence,
         p.features->>'edge' AS edge,
+        p.features,
         p.reasons,
         p.explanation
       FROM reddit_pick_track rpt
@@ -612,6 +736,7 @@ const selectTodayRedditParlay = async () => {
         gl.starts_at,
         p.confidence,
         p.features->>'edge' AS edge,
+        p.features,
         p.reasons,
         p.explanation
       FROM reddit_parlay_leg_track rplt
@@ -718,6 +843,7 @@ const getOrCreateTodayRedditParlay = async () => {
           p.confidence,
           p.score,
           p.features->>'edge' AS edge,
+          p.features,
           p.reasons,
           p.explanation,
           split_part(gl.provider_event_id, ':', 1) AS event_key
@@ -748,6 +874,7 @@ const getOrCreateTodayRedditParlay = async () => {
         starts_at,
         confidence,
         edge,
+        features,
         reasons,
         explanation
       FROM one_per_event
@@ -890,6 +1017,7 @@ const getPreviousRedditPick = async () => {
         gl.starts_at,
         p.confidence,
         p.features->>'edge' AS edge,
+        p.features,
         p.reasons,
         p.explanation
       FROM reddit_pick_track rpt
@@ -941,6 +1069,7 @@ const getPreviousRedditParlay = async () => {
         gl.starts_at,
         p.confidence,
         p.features->>'edge' AS edge,
+        p.features,
         p.reasons,
         p.explanation
       FROM reddit_parlay_leg_track rplt
