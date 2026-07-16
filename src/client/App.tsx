@@ -962,10 +962,11 @@ function AuthPanel({
               <h1>StakeWars</h1>
               <h2>Can You Beat Chine?</h2>
             </div>
-            <p>Chine, our autonomous AI competitor, makes its own sports picks every day. Build your own card, climb the leaderboard, and compete for free weekly prizes.</p>
+            <p>The autonomous AI has already made today's picks.</p>
+            <p>Now make yours.</p>
             <div className="auth-benefits" aria-label="StakeWars benefits">
               <span>🏆 Free to Play</span>
-              <span>🤖 Challenge Chine</span>
+              <span>🤖 Compete Against Chine</span>
               <span>💰 Win Weekly Prizes</span>
             </div>
             <button className="auth-signup-cta" type="button" onClick={() => switchMode("register")}>
