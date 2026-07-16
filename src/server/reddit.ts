@@ -646,7 +646,7 @@ const getOrCreateTodayRedditPick = async () => {
       return null;
     }
     await query(
-      "DELETE FROM reddit_pick_track WHERE id = $1 AND status = 'pending'",
+      "DELETE FROM reddit_pick_track WHERE id = $1 AND status = 'pending' AND locked_at IS NULL",
       [existing.rows[0].id]
     );
   }
@@ -694,7 +694,7 @@ const getOrCreateTodayRedditParlay = async () => {
     if (existing.legs.length === 3) {
       return existing;
     }
-    await query("DELETE FROM reddit_parlay_track WHERE id = $1 AND status = 'pending'", [existing.parlay.id]);
+    await query("DELETE FROM reddit_parlay_track WHERE id = $1 AND status = 'pending' AND locked_at IS NULL", [existing.parlay.id]);
   }
 
   const candidates = await query<RedditCandidatePickRow>(
