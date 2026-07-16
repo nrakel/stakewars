@@ -1324,14 +1324,33 @@ export const registerRoutes = (router: Router) => {
           WITH current_week AS (
             SELECT (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS week_start
           ),
+          wager_profit AS (
+            SELECT
+              w.weekly_entry_id,
+              COALESCE(sum(CASE
+                WHEN w.kind = 'round_robin' THEN COALESCE(rr.profit_cents, 0)
+                WHEN w.status = 'won' THEN w.potential_payout_cents - w.stake_cents
+                WHEN w.status = 'lost' THEN -w.stake_cents
+                WHEN w.status IN ('push', 'void') THEN 0
+                ELSE 0
+              END), 0)::int AS settled_profit_cents
+            FROM wager w
+            LEFT JOIN (
+              SELECT wager_id, sum(profit_cents)::int AS profit_cents
+              FROM round_robin_way_settlement
+              GROUP BY wager_id
+            ) rr ON rr.wager_id = w.id
+            GROUP BY w.weekly_entry_id
+          ),
           ranked AS (
             SELECT
               u.id,
               (row_number() OVER (
-                ORDER BY e.starting_bankroll_cents + e.settled_profit_cents DESC, e.settled_profit_cents DESC
+                ORDER BY e.starting_bankroll_cents + COALESCE(wp.settled_profit_cents, 0) DESC, COALESCE(wp.settled_profit_cents, 0) DESC
               ))::int AS rank
             FROM weekly_entry e
             JOIN app_user u ON u.id = e.user_id
+            LEFT JOIN wager_profit wp ON wp.weekly_entry_id = e.id
             JOIN current_week cw ON cw.week_start = e.week_starts_on
             WHERE u.role = 'player'
           )
@@ -1925,14 +1944,32 @@ export const registerRoutes = (router: Router) => {
             SELECT
               w.weekly_entry_id,
               count(*)::int AS weekly_wagers,
-              coalesce(sum(w.stake_cents), 0)::int AS weekly_stake_cents
+              coalesce(sum(w.stake_cents), 0)::int AS weekly_stake_cents,
+              COALESCE(sum(CASE
+                WHEN w.kind = 'round_robin' THEN COALESCE(rr.profit_cents, 0)
+                WHEN w.status = 'won' THEN w.potential_payout_cents - w.stake_cents
+                WHEN w.status = 'lost' THEN -w.stake_cents
+                WHEN w.status IN ('push', 'void') THEN 0
+                ELSE 0
+              END), 0)::int AS settled_profit_cents
             FROM wager w
+            LEFT JOIN (
+              SELECT wager_id, sum(profit_cents)::int AS profit_cents
+              FROM round_robin_way_settlement
+              GROUP BY wager_id
+            ) rr ON rr.wager_id = w.id
             GROUP BY w.weekly_entry_id
           ),
           ai AS (
-            SELECT e.starting_bankroll_cents + e.settled_profit_cents AS leaderboard_cents
+            SELECT e.starting_bankroll_cents
+              + CASE
+                WHEN sw.week_start = (SELECT week_start FROM current_week)
+                THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
+                ELSE e.settled_profit_cents
+              END AS leaderboard_cents
             FROM weekly_entry e
             JOIN app_user u ON u.id = e.user_id
+            LEFT JOIN wager_activity wa ON wa.weekly_entry_id = e.id
             JOIN selected_week sw ON sw.week_start = e.week_starts_on
             WHERE u.username = $1
             LIMIT 1
@@ -1946,8 +1983,17 @@ export const registerRoutes = (router: Router) => {
               coalesce(wa.weekly_wagers, 0) AS weekly_wagers,
               coalesce(wa.weekly_stake_cents, 0) AS weekly_stake_cents,
               (e.starting_bankroll_cents * 1.5)::int AS required_stake_cents,
-              e.starting_bankroll_cents + e.settled_profit_cents AS leaderboard_cents,
-              e.settled_profit_cents
+              e.starting_bankroll_cents
+                + CASE
+                  WHEN sw.week_start = (SELECT week_start FROM current_week)
+                  THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
+                  ELSE e.settled_profit_cents
+                END AS leaderboard_cents,
+              CASE
+                WHEN sw.week_start = (SELECT week_start FROM current_week)
+                THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
+                ELSE e.settled_profit_cents
+              END AS settled_profit_cents
             FROM weekly_entry e
             JOIN app_user u ON u.id = e.user_id
             LEFT JOIN wager_activity wa ON wa.weekly_entry_id = e.id
