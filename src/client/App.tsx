@@ -76,6 +76,13 @@ type RedditPreview = {
   body: string;
 };
 
+type RedditLockResult = {
+  id: string;
+  lockedAt: string;
+  postType: "single" | "parlay";
+  legs: number;
+};
+
 type ReferralInfo = {
   referralCode: string;
   referralUrl: string;
@@ -1180,6 +1187,9 @@ function App() {
   const [redditParlayTitle, setRedditParlayTitle] = useState("");
   const [redditParlayBody, setRedditParlayBody] = useState("");
   const [redditNotice, setRedditNotice] = useState("");
+  const [redditSingleLock, setRedditSingleLock] = useState<RedditLockResult | null>(null);
+  const [redditParlayLock, setRedditParlayLock] = useState<RedditLockResult | null>(null);
+  const [redditLockingType, setRedditLockingType] = useState<"single" | "parlay" | null>(null);
   const [userDisplayMap, setUserDisplayMap] = useState<UserDisplayMapRow[]>([]);
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
   const [visitorMetrics, setVisitorMetrics] = useState<VisitorMetrics | null>(null);
@@ -2406,6 +2416,8 @@ function App() {
       setRedditBody(singleResult.preview.body);
       setRedditParlayTitle(parlayResult.preview.title);
       setRedditParlayBody(parlayResult.preview.body);
+      setRedditSingleLock(null);
+      setRedditParlayLock(null);
       setRedditNotice("Manual Reddit posts generated.");
       await refreshRedditStatus();
     } catch (err) {
@@ -2423,6 +2435,7 @@ function App() {
       setRedditSubreddit(result.preview.subreddit);
       setRedditParlayTitle(result.preview.title);
       setRedditParlayBody(result.preview.body);
+      setRedditParlayLock(null);
       setRedditNotice("3-team parlay Reddit post generated.");
       await refreshRedditStatus();
     } catch (err) {
@@ -2455,14 +2468,23 @@ function App() {
     const isParlay = postType === "parlay";
     const title = isParlay ? redditParlayTitle.trim() : redditTitle.trim();
     const body = isParlay ? redditParlayBody.trim() : redditBody.trim();
+    setRedditLockingType(postType);
     try {
-      await api<{ id: string; lockedAt: string; postType: "single" | "parlay"; legs: number }>("/admin/reddit/lock", {
+      const result = await api<RedditLockResult>("/admin/reddit/lock", {
         method: "POST",
         body: JSON.stringify({ postType, title, body })
       }, token);
-      setRedditNotice(isParlay ? "3-team parlay tracking locked." : "Single pick tracking locked.");
+      if (isParlay) {
+        setRedditParlayLock(result);
+      } else {
+        setRedditSingleLock(result);
+      }
+      const lockTime = new Date(result.lockedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
+      setRedditNotice(isParlay ? `3-team parlay tracking locked at ${lockTime}. Safe to post.` : `Single pick tracking locked at ${lockTime}. Safe to post.`);
     } catch (err) {
       setRedditNotice((err as Error).message);
+    } finally {
+      setRedditLockingType(null);
     }
   };
 
@@ -3297,29 +3319,57 @@ function App() {
                   <button className="secondary-action" onClick={generateRedditPreview}>Generate preview</button>
                   <label>
                     Title
-                    <input value={redditTitle} maxLength={300} onChange={(event) => setRedditTitle(event.target.value)} />
+                    <input value={redditTitle} maxLength={300} onChange={(event) => {
+                      setRedditTitle(event.target.value);
+                      setRedditSingleLock(null);
+                    }} />
                   </label>
                   <label>
                     Body
-                    <textarea value={redditBody} rows={12} onChange={(event) => setRedditBody(event.target.value)} />
+                    <textarea value={redditBody} rows={12} onChange={(event) => {
+                      setRedditBody(event.target.value);
+                      setRedditSingleLock(null);
+                    }} />
                   </label>
                   <div className="notification-actions">
                     <button className="primary" disabled={!redditTitle || !redditBody} onClick={copyRedditPost}>Copy post</button>
-                    <button className="secondary-action" disabled={!redditTitle || !redditBody} onClick={() => lockRedditPostTracking("single")}>Lock single</button>
+                    <button className={redditSingleLock ? "primary" : "secondary-action"} disabled={!redditTitle || !redditBody || redditLockingType !== null} onClick={() => lockRedditPostTracking("single")}>
+                      {redditLockingType === "single" ? "Locking..." : redditSingleLock ? "Single locked" : "Lock single"}
+                    </button>
                   </div>
+                  {redditSingleLock && (
+                    <div className="reddit-lock-status">
+                      <Lock size={16} />
+                      <span>Single saved at {new Date(redditSingleLock.lockedAt).toLocaleString()}. Safe to post.</span>
+                    </div>
+                  )}
                   <button className="secondary-action" onClick={generateRedditParlayPreview}>Generate 3-team parlay</button>
                   <label>
                     3-Team Parlay Title
-                    <input value={redditParlayTitle} maxLength={300} onChange={(event) => setRedditParlayTitle(event.target.value)} />
+                    <input value={redditParlayTitle} maxLength={300} onChange={(event) => {
+                      setRedditParlayTitle(event.target.value);
+                      setRedditParlayLock(null);
+                    }} />
                   </label>
                   <label>
                     3-Team Parlay Body
-                    <textarea value={redditParlayBody} rows={10} onChange={(event) => setRedditParlayBody(event.target.value)} />
+                    <textarea value={redditParlayBody} rows={10} onChange={(event) => {
+                      setRedditParlayBody(event.target.value);
+                      setRedditParlayLock(null);
+                    }} />
                   </label>
                   <div className="notification-actions">
                     <button className="primary" disabled={!redditParlayTitle || !redditParlayBody} onClick={copyRedditParlayPost}>Copy parlay post</button>
-                    <button className="secondary-action" disabled={!redditParlayTitle || !redditParlayBody} onClick={() => lockRedditPostTracking("parlay")}>Lock parlay</button>
+                    <button className={redditParlayLock ? "primary" : "secondary-action"} disabled={!redditParlayTitle || !redditParlayBody || redditLockingType !== null} onClick={() => lockRedditPostTracking("parlay")}>
+                      {redditLockingType === "parlay" ? "Locking..." : redditParlayLock ? "Parlay locked" : "Lock parlay"}
+                    </button>
                   </div>
+                  {redditParlayLock && (
+                    <div className="reddit-lock-status">
+                      <Lock size={16} />
+                      <span>Parlay saved at {new Date(redditParlayLock.lockedAt).toLocaleString()}. Safe to post.</span>
+                    </div>
+                  )}
                 </div>
                 {redditNotice && <p className={redditNotice.includes("generated") || redditNotice.includes("copied") || redditNotice.includes("locked") ? "success" : "error"}>{redditNotice}</p>}
               </div>
