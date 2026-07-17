@@ -168,10 +168,16 @@ const compactTeamName = (team: string) => {
     "Philadelphia Phillies": "Phillies",
     "Cincinnati Reds": "Reds",
     "Milwaukee Brewers": "Brewers",
-    "St. Louis Cardinals": "Cardinals"
+    "St. Louis Cardinals": "Cardinals",
+    "San Francisco Giants": "Giants",
+    "Colorado Rockies": "Rockies",
+    "Chicago Cubs": "Cubs",
+    "Arizona Diamondbacks": "Diamondbacks"
   };
   return aliases[team] ?? team;
 };
+
+const possessiveTeam = (team: string) => `${team}${team.endsWith("s") ? "'" : "'s"}`;
 
 const joinTeamNames = (teams: string[]) => {
   const unique = [...new Set(teams.map(compactTeamName))];
@@ -214,7 +220,127 @@ const parlayReasonPriority = (label: string) => {
   return priorities[label] ?? 50;
 };
 
+type ParlayFact = {
+  category: string;
+  priority: number;
+  team: string;
+  text: string;
+};
+
+const addParlayFact = (facts: ParlayFact[], fact: ParlayFact | null) => {
+  if (fact) {
+    facts.push(fact);
+  }
+};
+
+const concreteParlayFacts = (legs: RedditParlayLegRow[]) => {
+  const facts: ParlayFact[] = [];
+
+  for (const leg of legs) {
+    const features = leg.features;
+    const selectedShort = compactTeamName(leg.selected_team);
+    const opponentShort = compactTeamName(selectedOpponent(leg));
+
+    const selectedRunsAgainst7 = featureNumber(features, "selectedRunsAgainstPerGame7");
+    const opponentRunsAgainst7 = featureNumber(features, "opponentRunsAgainstPerGame7");
+    addParlayFact(facts, selectedRunsAgainst7 !== null && opponentRunsAgainst7 !== null && selectedRunsAgainst7 <= opponentRunsAgainst7 - 0.75
+      ? {
+        category: "run prevention",
+        priority: Math.abs(opponentRunsAgainst7 - selectedRunsAgainst7) + 10,
+        team: leg.selected_team,
+        text: `${selectedShort} have allowed ${formatStat(selectedRunsAgainst7)} runs per game over the last week versus ${formatStat(opponentRunsAgainst7)} for ${opponentShort}`
+      }
+      : null);
+
+    const selectedRunsFor7 = featureNumber(features, "selectedRunsForPerGame7");
+    const opponentRunsFor7 = featureNumber(features, "opponentRunsForPerGame7");
+    addParlayFact(facts, selectedRunsFor7 !== null && opponentRunsFor7 !== null && selectedRunsFor7 >= opponentRunsFor7 + 0.75
+      ? {
+        category: "offense",
+        priority: Math.abs(selectedRunsFor7 - opponentRunsFor7) + 8,
+        team: leg.selected_team,
+        text: `${selectedShort} are scoring ${formatStat(selectedRunsFor7)} runs per game over the last week compared with ${formatStat(opponentRunsFor7)} for ${opponentShort}`
+      }
+      : null);
+
+    const selectedStarterEra = featureNumber(features, "selectedStarterEra");
+    const opponentStarterEra = featureNumber(features, "opponentStarterEra");
+    addParlayFact(facts, selectedStarterEra !== null && opponentStarterEra !== null && selectedStarterEra <= opponentStarterEra - 0.5
+      ? {
+        category: "starter",
+        priority: Math.abs(opponentStarterEra - selectedStarterEra) + 9,
+        team: leg.selected_team,
+        text: `${selectedShort} get the listed starter edge at ${formatStat(selectedStarterEra, 2)} ERA against ${formatStat(opponentStarterEra, 2)} for ${opponentShort}`
+      }
+      : null);
+
+    const selectedStarterVenueEra = featureNumber(features, "selectedStarterVenueEra");
+    const opponentStarterVenueEra = featureNumber(features, "opponentStarterVenueEra");
+    addParlayFact(facts, selectedStarterVenueEra !== null && opponentStarterVenueEra !== null && selectedStarterVenueEra <= opponentStarterVenueEra - 1
+      ? {
+        category: "starter venue split",
+        priority: Math.abs(opponentStarterVenueEra - selectedStarterVenueEra) + 8,
+        team: leg.selected_team,
+        text: `${possessiveTeam(selectedShort)} starter also fits today's venue split better, ${formatStat(selectedStarterVenueEra, 2)} ERA to ${formatStat(opponentStarterVenueEra, 2)}`
+      }
+      : null);
+
+    const selectedBullpenPitches3 = featureNumber(features, "selectedBullpenPitchesLast3");
+    const opponentBullpenPitches3 = featureNumber(features, "opponentBullpenPitchesLast3");
+    addParlayFact(facts, selectedBullpenPitches3 !== null && opponentBullpenPitches3 !== null && selectedBullpenPitches3 <= opponentBullpenPitches3 - 20
+      ? {
+        category: "bullpen freshness",
+        priority: Math.min(Math.abs(opponentBullpenPitches3 - selectedBullpenPitches3) / 20, 5) + 7,
+        team: leg.selected_team,
+        text: `${possessiveTeam(opponentShort)} bullpen has been worked harder recently, ${Math.round(opponentBullpenPitches3)} pitches over three games versus ${Math.round(selectedBullpenPitches3)} for ${selectedShort}`
+      }
+      : null);
+
+    const selectedVenueRunDiff = featureNumber(features, "selectedVenueRunDiffPerGame");
+    const opponentVenueRunDiff = featureNumber(features, "opponentVenueRunDiffPerGame");
+    addParlayFact(facts, selectedVenueRunDiff !== null && opponentVenueRunDiff !== null && selectedVenueRunDiff >= opponentVenueRunDiff + 1
+      ? {
+        category: "home/road split",
+        priority: Math.abs(selectedVenueRunDiff - opponentVenueRunDiff) + 6,
+        team: leg.selected_team,
+        text: `${possessiveTeam(selectedShort)} home/road profile is stronger at ${formatSignedStat(selectedVenueRunDiff)} runs per game while ${opponentShort} sit at ${formatSignedStat(opponentVenueRunDiff)}`
+      }
+      : null);
+
+    const fairProbability = featureNumber(features, "fairProbability");
+    const impliedProbability = featureNumber(features, "impliedProbability");
+    addParlayFact(facts, fairProbability !== null && impliedProbability !== null && fairProbability >= impliedProbability + 0.02
+      ? {
+        category: "price",
+        priority: Math.abs(fairProbability - impliedProbability) * 100 + 4,
+        team: leg.selected_team,
+        text: `${selectedShort} still price above the market, ${formatProb(fairProbability)} fair win chance versus ${formatProb(impliedProbability)} implied`
+      }
+      : null);
+  }
+
+  return facts
+    .sort((left, right) => right.priority - left.priority)
+    .filter((fact, index, all) =>
+      all.findIndex((candidate) => candidate.category === fact.category && candidate.team === fact.team) === index
+    );
+};
+
 const parlayNarrative = (legs: RedditParlayLegRow[]) => {
+  const concreteFacts = concreteParlayFacts(legs).slice(0, 4);
+  if (concreteFacts.length) {
+    const categories = [...new Set(concreteFacts.map((fact) => fact.category))];
+    const lead = categories.length >= 2
+      ? `Chine is pairing these legs because the card has multiple independent edges: ${categories.slice(0, 3).join(", ")}.`
+      : `Chine is pairing these legs around a clear ${categories[0]} theme.`;
+    const sentences = concreteFacts.map((fact) => `${fact.text}.`);
+    return [
+      lead,
+      ...sentences,
+      "The goal is not to force a long shot, but to combine the strongest prices from today's board."
+    ].join(" ");
+  }
+
   const reasonMap = new Map<string, string[]>();
   for (const leg of legs) {
     for (const label of positiveReasonLabels(leg.reasons)) {
@@ -842,7 +968,7 @@ const getOrCreateTodayRedditParlay = async () => {
   const existing = await selectTodayRedditParlay();
   if (existing) {
     if (existing.parlay.locked_at) {
-      return existing;
+      return existing.legs.length === 3 ? existing : null;
     }
     if (existing.legs.length === 3) {
       return existing;
