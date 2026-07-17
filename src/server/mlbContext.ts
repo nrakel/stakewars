@@ -139,6 +139,10 @@ type PitcherStatsSummary = {
     excludedWorstOlderStartDate: string | null;
     excludedWorstOlderStartEarnedRuns: number | null;
   } | null;
+  venueSplits: {
+    home: PitcherVenueSplitSummary | null;
+    away: PitcherVenueSplitSummary | null;
+  };
   recent: {
     starts: number;
     inningsPitched: number;
@@ -149,6 +153,17 @@ type PitcherStatsSummary = {
     era: number | null;
     strikeoutWalkRatio: number | null;
   };
+};
+
+type PitcherVenueSplitSummary = {
+  gamesStarted: number | null;
+  era: number | null;
+  whip: number | null;
+  inningsPitched: number | null;
+  strikeoutsPer9: number | null;
+  walksPer9: number | null;
+  homeRunsPer9: number | null;
+  strikeoutWalkRatio: number | null;
 };
 
 type BullpenSummary = {
@@ -284,13 +299,33 @@ const fetchPitcherStats = async (pitcher: MlbPersonRef | undefined, season: numb
   gameLogUrl.searchParams.set("group", "pitching");
   gameLogUrl.searchParams.set("season", String(season));
 
-  const [personBody, seasonBody, gameLogBody] = await Promise.all([
+  const venueSplitUrl = new URL(`https://statsapi.mlb.com/api/v1/people/${pitcher.id}/stats`);
+  venueSplitUrl.searchParams.set("stats", "statSplits");
+  venueSplitUrl.searchParams.set("group", "pitching");
+  venueSplitUrl.searchParams.set("season", String(season));
+  venueSplitUrl.searchParams.set("sitCodes", "h,a");
+
+  const [personBody, seasonBody, gameLogBody, venueSplitBody] = await Promise.all([
     fetchPerson(pitcher.id),
     fetchJson<MlbStatsResponse>(seasonUrl),
-    fetchJson<MlbStatsResponse>(gameLogUrl)
+    fetchJson<MlbStatsResponse>(gameLogUrl),
+    fetchJson<MlbStatsResponse>(venueSplitUrl)
   ]);
 
   const seasonStat = seasonBody.stats?.[0]?.splits?.[0]?.stat ?? null;
+  const venueSplitSummary = (code: "h" | "a"): PitcherVenueSplitSummary | null => {
+    const stat = venueSplitBody.stats?.[0]?.splits?.find((split) => split.split?.code === code)?.stat;
+    return stat ? {
+      gamesStarted: parseNumber(stat.gamesStarted),
+      era: parseNumber(stat.era),
+      whip: parseNumber(stat.whip),
+      inningsPitched: parseNumber(stat.inningsPitched),
+      strikeoutsPer9: parseNumber(stat.strikeoutsPer9Inn),
+      walksPer9: parseNumber(stat.walksPer9Inn),
+      homeRunsPer9: parseNumber(stat.homeRunsPer9),
+      strikeoutWalkRatio: parseNumber(stat.strikeoutWalkRatio)
+    } : null;
+  };
   const starts = [...(gameLogBody.stats?.[0]?.splits ?? [])]
     .filter((split) => parseNumber(split.stat?.gamesStarted) === 1)
     .sort((left, right) => (left.date ?? "").localeCompare(right.date ?? ""));
@@ -346,6 +381,10 @@ const fetchPitcherStats = async (pitcher: MlbPersonRef | undefined, season: numb
       excludedWorstOlderStartDate: worstOlderStart?.date ?? null,
       excludedWorstOlderStartEarnedRuns: worstOlderStart ? parseNumber(worstOlderStart.stat?.earnedRuns) : null
     } : null,
+    venueSplits: {
+      home: venueSplitSummary("h"),
+      away: venueSplitSummary("a")
+    },
     recent: {
       starts: recent.starts,
       inningsPitched: outsToInnings(recent.outs),

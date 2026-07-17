@@ -129,6 +129,24 @@ export type MlbHeuristicContext = {
   selectedStarterKbb: number | null;
   opponentStarterKbb: number | null;
   starterKbbDiff: number | null;
+  selectedStarterVenueEra: number | null;
+  opponentStarterVenueEra: number | null;
+  starterVenueEraDiff: number | null;
+  selectedStarterVenueWhip: number | null;
+  opponentStarterVenueWhip: number | null;
+  starterVenueWhipDiff: number | null;
+  selectedStarterVenueHomeRunsPer9: number | null;
+  opponentStarterVenueHomeRunsPer9: number | null;
+  starterVenueHomeRunsPer9Diff: number | null;
+  selectedStarterVenueStrikeoutsPer9: number | null;
+  opponentStarterVenueStrikeoutsPer9: number | null;
+  starterVenueStrikeoutsPer9Diff: number | null;
+  selectedStarterVenueWalksPer9: number | null;
+  opponentStarterVenueWalksPer9: number | null;
+  starterVenueWalksPer9Diff: number | null;
+  selectedStarterVenueKbb: number | null;
+  opponentStarterVenueKbb: number | null;
+  starterVenueKbbDiff: number | null;
   selectedStarterRecentEra: number | null;
   opponentStarterRecentEra: number | null;
   starterRecentEraDiff: number | null;
@@ -628,6 +646,24 @@ const contextFromStored = (
     | "selectedStarterKbb"
     | "opponentStarterKbb"
     | "starterKbbDiff"
+    | "selectedStarterVenueEra"
+    | "opponentStarterVenueEra"
+    | "starterVenueEraDiff"
+    | "selectedStarterVenueWhip"
+    | "opponentStarterVenueWhip"
+    | "starterVenueWhipDiff"
+    | "selectedStarterVenueHomeRunsPer9"
+    | "opponentStarterVenueHomeRunsPer9"
+    | "starterVenueHomeRunsPer9Diff"
+    | "selectedStarterVenueStrikeoutsPer9"
+    | "opponentStarterVenueStrikeoutsPer9"
+    | "starterVenueStrikeoutsPer9Diff"
+    | "selectedStarterVenueWalksPer9"
+    | "opponentStarterVenueWalksPer9"
+    | "starterVenueWalksPer9Diff"
+    | "selectedStarterVenueKbb"
+    | "opponentStarterVenueKbb"
+    | "starterVenueKbbDiff"
     | "selectedStarterRecentEra"
     | "opponentStarterRecentEra"
     | "starterRecentEraDiff"
@@ -744,6 +780,20 @@ const contextFromStored = (
   const opponentStarterWalksPer9 = nestedNumber(opponent.pitcher, ["season", "walksPer9"]);
   const selectedStarterKbb = nestedNumber(selected.pitcher, ["season", "strikeoutWalkRatio"]);
   const opponentStarterKbb = nestedNumber(opponent.pitcher, ["season", "strikeoutWalkRatio"]);
+  const selectedVenueSplitKey = selectedSide === "home" ? "home" : "away";
+  const opponentVenueSplitKey = opponentSide === "home" ? "home" : "away";
+  const selectedStarterVenueEra = nestedNumber(selected.pitcher, ["venueSplits", selectedVenueSplitKey, "era"]);
+  const opponentStarterVenueEra = nestedNumber(opponent.pitcher, ["venueSplits", opponentVenueSplitKey, "era"]);
+  const selectedStarterVenueWhip = nestedNumber(selected.pitcher, ["venueSplits", selectedVenueSplitKey, "whip"]);
+  const opponentStarterVenueWhip = nestedNumber(opponent.pitcher, ["venueSplits", opponentVenueSplitKey, "whip"]);
+  const selectedStarterVenueHomeRunsPer9 = nestedNumber(selected.pitcher, ["venueSplits", selectedVenueSplitKey, "homeRunsPer9"]);
+  const opponentStarterVenueHomeRunsPer9 = nestedNumber(opponent.pitcher, ["venueSplits", opponentVenueSplitKey, "homeRunsPer9"]);
+  const selectedStarterVenueStrikeoutsPer9 = nestedNumber(selected.pitcher, ["venueSplits", selectedVenueSplitKey, "strikeoutsPer9"]);
+  const opponentStarterVenueStrikeoutsPer9 = nestedNumber(opponent.pitcher, ["venueSplits", opponentVenueSplitKey, "strikeoutsPer9"]);
+  const selectedStarterVenueWalksPer9 = nestedNumber(selected.pitcher, ["venueSplits", selectedVenueSplitKey, "walksPer9"]);
+  const opponentStarterVenueWalksPer9 = nestedNumber(opponent.pitcher, ["venueSplits", opponentVenueSplitKey, "walksPer9"]);
+  const selectedStarterVenueKbb = nestedNumber(selected.pitcher, ["venueSplits", selectedVenueSplitKey, "strikeoutWalkRatio"]);
+  const opponentStarterVenueKbb = nestedNumber(opponent.pitcher, ["venueSplits", opponentVenueSplitKey, "strikeoutWalkRatio"]);
   const selectedStarterRecentEra = nestedNumber(selected.pitcher, ["recent", "era"]);
   const opponentStarterRecentEra = nestedNumber(opponent.pitcher, ["recent", "era"]);
   const selectedStarterRecentKbb = nestedNumber(selected.pitcher, ["recent", "strikeoutWalkRatio"]);
@@ -840,6 +890,24 @@ const contextFromStored = (
     selectedStarterKbb,
     opponentStarterKbb,
     starterKbbDiff: diffOrNull(selectedStarterKbb, opponentStarterKbb),
+    selectedStarterVenueEra,
+    opponentStarterVenueEra,
+    starterVenueEraDiff: diffOrNull(selectedStarterVenueEra, opponentStarterVenueEra),
+    selectedStarterVenueWhip,
+    opponentStarterVenueWhip,
+    starterVenueWhipDiff: diffOrNull(selectedStarterVenueWhip, opponentStarterVenueWhip),
+    selectedStarterVenueHomeRunsPer9,
+    opponentStarterVenueHomeRunsPer9,
+    starterVenueHomeRunsPer9Diff: diffOrNull(selectedStarterVenueHomeRunsPer9, opponentStarterVenueHomeRunsPer9),
+    selectedStarterVenueStrikeoutsPer9,
+    opponentStarterVenueStrikeoutsPer9,
+    starterVenueStrikeoutsPer9Diff: diffOrNull(selectedStarterVenueStrikeoutsPer9, opponentStarterVenueStrikeoutsPer9),
+    selectedStarterVenueWalksPer9,
+    opponentStarterVenueWalksPer9,
+    starterVenueWalksPer9Diff: diffOrNull(selectedStarterVenueWalksPer9, opponentStarterVenueWalksPer9),
+    selectedStarterVenueKbb,
+    opponentStarterVenueKbb,
+    starterVenueKbbDiff: diffOrNull(selectedStarterVenueKbb, opponentStarterVenueKbb),
     selectedStarterRecentEra,
     opponentStarterRecentEra,
     starterRecentEraDiff: diffOrNull(selectedStarterRecentEra, opponentStarterRecentEra),
@@ -1304,6 +1372,56 @@ export const scoreLine = (
       reasons.push("Starting pitcher command concern");
     }
 
+    if (useV7) {
+      if ((context.starterVenueEraDiff ?? 0) <= -1.25) {
+        fair += 0.003;
+        reasons.push("Starting pitcher venue ERA edge");
+      } else if ((context.starterVenueEraDiff ?? 0) >= 1.25) {
+        fair -= 0.003;
+        reasons.push("Starting pitcher venue ERA concern");
+      }
+
+      if ((context.starterVenueWhipDiff ?? 0) <= -0.2) {
+        fair += 0.002;
+        reasons.push("Starting pitcher venue traffic edge");
+      } else if ((context.starterVenueWhipDiff ?? 0) >= 0.2) {
+        fair -= 0.002;
+        reasons.push("Starting pitcher venue traffic concern");
+      }
+
+      if ((context.starterVenueHomeRunsPer9Diff ?? 0) <= -0.45) {
+        fair += 0.002;
+        reasons.push("Starting pitcher venue home-run suppression edge");
+      } else if ((context.starterVenueHomeRunsPer9Diff ?? 0) >= 0.45) {
+        fair -= 0.002;
+        reasons.push("Starting pitcher venue home-run concern");
+      }
+
+      if ((context.starterVenueStrikeoutsPer9Diff ?? 0) >= 1.25) {
+        fair += 0.002;
+        reasons.push("Starting pitcher venue strikeout edge");
+      } else if ((context.starterVenueStrikeoutsPer9Diff ?? 0) <= -1.25) {
+        fair -= 0.002;
+        reasons.push("Starting pitcher venue strikeout concern");
+      }
+
+      if ((context.starterVenueWalksPer9Diff ?? 0) <= -0.75) {
+        fair += 0.0015;
+        reasons.push("Starting pitcher venue walk-rate edge");
+      } else if ((context.starterVenueWalksPer9Diff ?? 0) >= 0.75) {
+        fair -= 0.0015;
+        reasons.push("Starting pitcher venue walk-rate concern");
+      }
+
+      if ((context.starterVenueKbbDiff ?? 0) >= 1.25) {
+        fair += 0.002;
+        reasons.push("Starting pitcher venue command edge");
+      } else if ((context.starterVenueKbbDiff ?? 0) <= -1.25) {
+        fair -= 0.002;
+        reasons.push("Starting pitcher venue command concern");
+      }
+    }
+
     const dominantStarterEdgeSignals = [
       (context.starterEraDiff ?? 0) <= -2,
       (context.starterWhipDiff ?? 0) <= -0.4,
@@ -1597,6 +1715,24 @@ export const scoreLine = (
       selectedStarterKbb: context?.selectedStarterKbb ?? null,
       opponentStarterKbb: context?.opponentStarterKbb ?? null,
       starterKbbDiff: context?.starterKbbDiff ?? null,
+      selectedStarterVenueEra: context?.selectedStarterVenueEra ?? null,
+      opponentStarterVenueEra: context?.opponentStarterVenueEra ?? null,
+      starterVenueEraDiff: context?.starterVenueEraDiff ?? null,
+      selectedStarterVenueWhip: context?.selectedStarterVenueWhip ?? null,
+      opponentStarterVenueWhip: context?.opponentStarterVenueWhip ?? null,
+      starterVenueWhipDiff: context?.starterVenueWhipDiff ?? null,
+      selectedStarterVenueHomeRunsPer9: context?.selectedStarterVenueHomeRunsPer9 ?? null,
+      opponentStarterVenueHomeRunsPer9: context?.opponentStarterVenueHomeRunsPer9 ?? null,
+      starterVenueHomeRunsPer9Diff: context?.starterVenueHomeRunsPer9Diff ?? null,
+      selectedStarterVenueStrikeoutsPer9: context?.selectedStarterVenueStrikeoutsPer9 ?? null,
+      opponentStarterVenueStrikeoutsPer9: context?.opponentStarterVenueStrikeoutsPer9 ?? null,
+      starterVenueStrikeoutsPer9Diff: context?.starterVenueStrikeoutsPer9Diff ?? null,
+      selectedStarterVenueWalksPer9: context?.selectedStarterVenueWalksPer9 ?? null,
+      opponentStarterVenueWalksPer9: context?.opponentStarterVenueWalksPer9 ?? null,
+      starterVenueWalksPer9Diff: context?.starterVenueWalksPer9Diff ?? null,
+      selectedStarterVenueKbb: context?.selectedStarterVenueKbb ?? null,
+      opponentStarterVenueKbb: context?.opponentStarterVenueKbb ?? null,
+      starterVenueKbbDiff: context?.starterVenueKbbDiff ?? null,
       selectedStarterRecentEra: context?.selectedStarterRecentEra ?? null,
       opponentStarterRecentEra: context?.opponentStarterRecentEra ?? null,
       starterRecentEraDiff: context?.starterRecentEraDiff ?? null,
