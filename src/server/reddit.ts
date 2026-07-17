@@ -416,13 +416,13 @@ const settleTrackedRedditPicks = async () => {
         p.features,
         p.reasons,
         p.explanation,
-        gr.id AS result_id,
-        gr.starts_on::text AS result_starts_on,
-        gr.away_team AS result_away_team,
-        gr.home_team AS result_home_team,
-        gr.away_score,
-        gr.home_score,
-        gr.result_metadata
+        COALESCE(gr.id::text, lgs.match_id) AS result_id,
+        COALESCE(gr.starts_on::text, lgs.starts_at::date::text) AS result_starts_on,
+        COALESCE(gr.away_team, lgs.away_team) AS result_away_team,
+        COALESCE(gr.home_team, lgs.home_team) AS result_home_team,
+        COALESCE(gr.away_score, lgs.away_score) AS away_score,
+        COALESCE(gr.home_score, lgs.home_score) AS home_score,
+        COALESCE(gr.result_metadata, '{}'::jsonb) AS result_metadata
       FROM reddit_pick_track rpt
       JOIN ai_pick p ON p.id = rpt.ai_pick_id
       JOIN game_line gl ON gl.id = rpt.game_line_id
@@ -437,6 +437,20 @@ const settleTrackedRedditPicks = async () => {
                  candidate.fetched_at DESC
         LIMIT 1
       ) gr ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM live_game_state candidate
+        WHERE candidate.sport = gl.sport
+          AND candidate.away_team = gl.away_team
+          AND candidate.home_team = gl.home_team
+          AND candidate.away_score IS NOT NULL
+          AND candidate.home_score IS NOT NULL
+          AND lower(candidate.game_status) IN ('final', 'final/ot', 'final/aet', 'full time')
+          AND abs(extract(epoch from candidate.starts_at - gl.starts_at)) <= 10800
+        ORDER BY abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC,
+                 candidate.updated_at DESC
+        LIMIT 1
+      ) lgs ON gr.id IS NULL
       WHERE rpt.status = 'pending'
         AND rpt.locked_at IS NOT NULL
     `
@@ -541,13 +555,13 @@ const settleTrackedRedditParlays = async () => {
         p.features,
         p.reasons,
         p.explanation,
-        gr.id AS result_id,
-        gr.starts_on::text AS result_starts_on,
-        gr.away_team AS result_away_team,
-        gr.home_team AS result_home_team,
-        gr.away_score,
-        gr.home_score,
-        gr.result_metadata
+        COALESCE(gr.id::text, lgs.match_id) AS result_id,
+        COALESCE(gr.starts_on::text, lgs.starts_at::date::text) AS result_starts_on,
+        COALESCE(gr.away_team, lgs.away_team) AS result_away_team,
+        COALESCE(gr.home_team, lgs.home_team) AS result_home_team,
+        COALESCE(gr.away_score, lgs.away_score) AS away_score,
+        COALESCE(gr.home_score, lgs.home_score) AS home_score,
+        COALESCE(gr.result_metadata, '{}'::jsonb) AS result_metadata
       FROM reddit_parlay_leg_track rplt
       JOIN reddit_parlay_track rpt ON rpt.id = rplt.parlay_id
       JOIN ai_pick p ON p.id = rplt.ai_pick_id
@@ -563,6 +577,20 @@ const settleTrackedRedditParlays = async () => {
                  candidate.fetched_at DESC
         LIMIT 1
       ) gr ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM live_game_state candidate
+        WHERE candidate.sport = gl.sport
+          AND candidate.away_team = gl.away_team
+          AND candidate.home_team = gl.home_team
+          AND candidate.away_score IS NOT NULL
+          AND candidate.home_score IS NOT NULL
+          AND lower(candidate.game_status) IN ('final', 'final/ot', 'final/aet', 'full time')
+          AND abs(extract(epoch from candidate.starts_at - gl.starts_at)) <= 10800
+        ORDER BY abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC,
+                 candidate.updated_at DESC
+        LIMIT 1
+      ) lgs ON gr.id IS NULL
       WHERE rplt.status = 'pending'
         AND rpt.locked_at IS NOT NULL
     `
@@ -1038,8 +1066,10 @@ const getPreviousRedditParlay = async () => {
     `
       SELECT id, pick_date::text, units, status, profit_units
       FROM reddit_parlay_track
-      WHERE pick_date = (now() AT TIME ZONE 'America/Chicago')::date - 1
+      WHERE pick_date < (now() AT TIME ZONE 'America/Chicago')::date
         AND locked_at IS NOT NULL
+        AND status IN ('won', 'lost', 'push', 'void')
+      ORDER BY pick_date DESC
       LIMIT 1
     `
   );
