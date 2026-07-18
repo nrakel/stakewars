@@ -153,6 +153,9 @@ export type DailyAiPick = {
   wagerStatus: AiPickResultStatus | null;
   legStatus: AiPickResultStatus | null;
   resultStatus: AiPickResultStatus | null;
+  stakeCents: number | null;
+  potentialReturnCents: number | null;
+  resultValueCents: number | null;
   sport: SportKey;
   league: string;
   startsAt: string;
@@ -183,8 +186,11 @@ export type DailyChineParlay = {
   id: string;
   pickDate: string;
   units: string;
+  stakeCents?: number;
+  potentialReturnCents?: number;
   potentialReturnUnits?: string;
   status: AiPickResultStatus;
+  profitCents?: number;
   profitUnits: string;
   legs: DailyChineParlayLeg[];
 };

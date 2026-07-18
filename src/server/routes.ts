@@ -2091,6 +2091,14 @@ export const registerRoutes = (router: Router) => {
               w.status AS "wagerStatus",
               wl.status AS "legStatus",
               COALESCE(wl.status, w.status) AS "resultStatus",
+              w.stake_cents AS "stakeCents",
+              w.potential_payout_cents AS "potentialReturnCents",
+              CASE
+                WHEN COALESCE(wl.status, w.status) = 'won' THEN w.potential_payout_cents - w.stake_cents
+                WHEN COALESCE(wl.status, w.status) = 'lost' THEN -w.stake_cents
+                WHEN COALESCE(wl.status, w.status) IN ('push', 'void') THEN 0
+                ELSE NULL
+              END AS "resultValueCents",
               l.sport,
               l.league,
               l.starts_at AS "startsAt",
@@ -2126,7 +2134,10 @@ export const registerRoutes = (router: Router) => {
         pickDate: string;
         units: string;
         potentialReturnUnits: string;
+        stakeCents: number;
+        potentialReturnCents: number;
         status: string;
+        profitCents: number;
         profitUnits: string;
         legs: Array<{
           id: string;
@@ -2149,8 +2160,16 @@ export const registerRoutes = (router: Router) => {
             w.id,
             (w.placed_at AT TIME ZONE 'America/Chicago')::date::text AS "pickDate",
             (w.stake_cents / 10000.0)::numeric(8,2)::text AS units,
+            w.stake_cents AS "stakeCents",
+            w.potential_payout_cents AS "potentialReturnCents",
             (w.potential_payout_cents / 10000.0)::numeric(8,2)::text AS "potentialReturnUnits",
             w.status::text AS status,
+            CASE
+              WHEN w.status = 'won' THEN w.potential_payout_cents - w.stake_cents
+              WHEN w.status = 'lost' THEN -w.stake_cents
+              WHEN w.status IN ('push', 'void') THEN 0
+              ELSE NULL
+            END AS "profitCents",
             ((w.potential_payout_cents - w.stake_cents) / 10000.0)::numeric(8,2)::text AS "profitUnits",
             COALESCE(
               json_agg(

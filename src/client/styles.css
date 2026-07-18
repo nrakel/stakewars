@@ -2041,6 +2041,11 @@ textarea {
   color: #65736d;
 }
 
+.ai-pick .chine-wager-summary {
+  color: #14201c;
+  font-weight: 800;
+}
+
 .ai-pick small {
   color: #8b93a1;
 }

@@ -348,12 +348,39 @@ const aiPickResultLabel = (status: DailyAiPick["resultStatus"]) => {
   return "No Action";
 };
 
+const signedMoney = (cents: number) => `${cents >= 0 ? "+" : "-"}${money(Math.abs(cents))}`;
+
+const aiPickWagerSummary = (pick: DailyAiPick) => {
+  if (!pick.wagerId || pick.stakeCents == null) return null;
+  if (pick.resultStatus && pick.resultStatus !== "pending" && pick.resultValueCents != null) {
+    if (pick.resultStatus === "won") return `Won ${signedMoney(pick.resultValueCents)}`;
+    if (pick.resultStatus === "lost") return `Lost ${signedMoney(pick.resultValueCents)}`;
+    if (pick.resultStatus === "push") return "Push $0.00";
+    return "No Action $0.00";
+  }
+  if (pick.potentialReturnCents == null) return `Wagered ${money(pick.stakeCents)}`;
+  return `Wagered ${money(pick.stakeCents)} • Could return ${money(pick.potentialReturnCents)}`;
+};
+
 const trackedResultLabel = (status: DailyChineParlay["status"]) => {
   if (!status || status === "pending") return null;
   if (status === "won") return "Won";
   if (status === "lost") return "Lost";
   if (status === "push") return "Push";
   return "No Action";
+};
+
+const dailyChineParlayWagerSummary = (parlay: DailyChineParlay) => {
+  if (parlay.status !== "pending" && parlay.profitCents != null) {
+    if (parlay.status === "won") return `Won ${signedMoney(parlay.profitCents)}`;
+    if (parlay.status === "lost") return `Lost ${signedMoney(parlay.profitCents)}`;
+    if (parlay.status === "push") return "Push $0.00";
+    return "No Action $0.00";
+  }
+  if (parlay.stakeCents != null && parlay.potentialReturnCents != null) {
+    return `Wagered ${money(parlay.stakeCents)} • Could return ${money(parlay.potentialReturnCents)}`;
+  }
+  return null;
 };
 
 const teamAbbreviations: Record<string, string> = {
@@ -1637,6 +1664,7 @@ function App() {
 
   const renderAiPick = (pick: DailyAiPick) => {
     const resultLabel = aiPickResultLabel(pick.resultStatus);
+    const wagerSummary = aiPickWagerSummary(pick);
     return (
     <div className="ai-pick" key={pick.id}>
       <div className="pick-badges">
@@ -1651,6 +1679,7 @@ function App() {
       </div>
       <strong>{pick.selectedTeam} {pick.marketKey === "h2h" ? americanOdds(pick.oddsAmerican) : `${pick.spread} ${americanOdds(pick.oddsAmerican)}`}</strong>
       <span>{pick.awayTeam} at {pick.homeTeam}</span>
+      {wagerSummary && <span className="chine-wager-summary">{wagerSummary}</span>}
       {pick.confidence && <span>Confidence {Math.round(Number(pick.confidence) * 100)}%</span>}
       {pick.explanation
         ? <small className="ai-explanation">{pick.explanation}</small>
@@ -1683,6 +1712,7 @@ function App() {
     const returnUnits = parlay.potentialReturnUnits ? Number(parlay.potentialReturnUnits) : parlayReturnUnits(parlay);
     const legCount = parlay.legs.length;
     const roundRobinLabel = `${legCount}-Game Round Robin`;
+    const wagerSummary = dailyChineParlayWagerSummary(parlay);
     return (
       <div className="ai-pick daily-parlay" key={parlay.id}>
         <div className="pick-badges">
@@ -1690,6 +1720,7 @@ function App() {
           {resultLabel && <small className={`pick-result ${parlay.status}`}>{resultLabel}</small>}
         </div>
         <strong>{formatUnitAmount(Number(parlay.units))} to return {formatUnitAmount(returnUnits)}</strong>
+        {wagerSummary && <span className="chine-wager-summary">{wagerSummary}</span>}
         <ul className="daily-parlay-legs">
           {parlay.legs.map(renderParlayLeg)}
         </ul>
