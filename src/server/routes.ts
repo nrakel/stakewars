@@ -1797,7 +1797,7 @@ export const registerRoutes = (router: Router) => {
       }>();
 
       for (const row of result.rows) {
-        const providerEventBase = row.providerEventId?.split(":")[0];
+        const providerEventBase = row.providerEventId?.split(":")[0]?.split("|")[0];
         const eventKey = providerEventBase ?? `${row.sport}:${row.startsAt}:${row.awayTeam}:${row.homeTeam}:${row.marketKey}`;
         const key = `${eventKey}:${row.marketKey}`;
         const market = marketMap.get(key) ?? {
@@ -2071,21 +2071,54 @@ export const registerRoutes = (router: Router) => {
     try {
       const result = await query(
         `
-          SELECT p.id, p.selected_team AS "selectedTeam", p.published_for AS "publishedFor",
-                 p.score, p.confidence, p.reasons, p.features, p.explanation, p.locked_at AS "lockedAt",
-                 p.wager_id AS "wagerId", w.status AS "wagerStatus", wl.status AS "legStatus",
-                 COALESCE(wl.status, w.status) AS "resultStatus",
-                 l.sport, l.league, l.starts_at AS "startsAt", l.home_team AS "homeTeam",
-                 l.away_team AS "awayTeam", l.spread, l.odds_american AS "oddsAmerican",
-                 l.market_key AS "marketKey"
-          FROM ai_pick p
-          JOIN game_line l ON l.id = p.game_line_id
-          LEFT JOIN wager w ON w.id = p.wager_id
-          LEFT JOIN wager_leg wl ON wl.wager_id = w.id
-            AND wl.game_line_id = p.game_line_id
-            AND wl.selected_team = p.selected_team
-          WHERE p.published_for = (now() AT TIME ZONE 'America/Chicago')::date
-          ORDER BY p.locked_at DESC NULLS LAST, p.confidence DESC NULLS LAST, p.score DESC NULLS LAST, l.starts_at ASC
+          WITH ranked AS (
+            SELECT DISTINCT ON (
+              p.published_for,
+              COALESCE(split_part(split_part(l.provider_event_id, ':', 1), '|', 1), l.sport::text || ':' || l.away_team || ':' || l.home_team || ':' || l.starts_at::text),
+              l.market_key,
+              p.selected_team
+            )
+              p.id,
+              p.selected_team AS "selectedTeam",
+              p.published_for AS "publishedFor",
+              p.score,
+              p.confidence,
+              p.reasons,
+              p.features,
+              p.explanation,
+              p.locked_at AS "lockedAt",
+              p.wager_id AS "wagerId",
+              w.status AS "wagerStatus",
+              wl.status AS "legStatus",
+              COALESCE(wl.status, w.status) AS "resultStatus",
+              l.sport,
+              l.league,
+              l.starts_at AS "startsAt",
+              l.home_team AS "homeTeam",
+              l.away_team AS "awayTeam",
+              l.spread,
+              l.odds_american AS "oddsAmerican",
+              l.market_key AS "marketKey"
+            FROM ai_pick p
+            JOIN game_line l ON l.id = p.game_line_id
+            LEFT JOIN wager w ON w.id = p.wager_id
+            LEFT JOIN wager_leg wl ON wl.wager_id = w.id
+              AND wl.game_line_id = p.game_line_id
+              AND wl.selected_team = p.selected_team
+            WHERE p.published_for = (now() AT TIME ZONE 'America/Chicago')::date
+            ORDER BY
+              p.published_for,
+              COALESCE(split_part(split_part(l.provider_event_id, ':', 1), '|', 1), l.sport::text || ':' || l.away_team || ':' || l.home_team || ':' || l.starts_at::text),
+              l.market_key,
+              p.selected_team,
+              (p.wager_id IS NOT NULL) DESC,
+              p.locked_at DESC NULLS LAST,
+              p.confidence DESC NULLS LAST,
+              p.score DESC NULLS LAST
+          )
+          SELECT *
+          FROM ranked
+          ORDER BY "lockedAt" DESC NULLS LAST, confidence DESC NULLS LAST, score DESC NULLS LAST, "startsAt" ASC
         `
       );
       const chineParlay = (await query<{

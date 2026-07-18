@@ -290,8 +290,14 @@ const impliedProbability = (american: number) => {
   return Math.abs(american) / (Math.abs(american) + 100);
 };
 
+const stableProviderMatchId = (providerEventId: string | null) => {
+  const eventBase = providerEventId?.split(":")[0];
+  const matchId = eventBase?.split("|")[0];
+  return matchId || null;
+};
+
 const eventKey = (line: CandidateLine) => {
-  return line.provider_event_id?.split(":").slice(0, 3).join(":")
+  return stableProviderMatchId(line.provider_event_id)
     ?? `${line.sport}:${line.starts_at.toISOString()}:${line.away_team}:${line.home_team}:${line.market_key}`;
 };
 
@@ -2095,7 +2101,7 @@ const placeAiRoundRobinWager = async (
 };
 
 const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_at" | "away_team" | "home_team">) =>
-  pick.provider_event_id?.split(":")[0]
+  stableProviderMatchId(pick.provider_event_id)
     ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
 
 const dailyAiRoundRobinPicks = 7;
@@ -2402,6 +2408,24 @@ export const generateAiPicks = async ({
       && dailyRoundRobinWays > 0
       && now >= new Date(Math.min(...roundRobinPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))
       && roundRobinPicks.every((pick) => now < pick.starts_at);
+    let dailyRoundRobinSkippedReason: string | null = null;
+    if (roundRobinPicks.length < aiRoundRobinPicks) {
+      dailyRoundRobinSkippedReason = `only ${roundRobinPicks.length} eligible picks available`;
+    } else if (!dailyRoundRobinWays) {
+      dailyRoundRobinSkippedReason = "no round robin ways calculated";
+    } else if (now < new Date(Math.min(...roundRobinPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))) {
+      dailyRoundRobinSkippedReason = "before round robin lock window";
+    } else if (!roundRobinPicks.every((pick) => now < pick.starts_at)) {
+      dailyRoundRobinSkippedReason = "one or more round robin picks already started";
+    } else if (!placeWagers) {
+      dailyRoundRobinSkippedReason = "wager placement disabled";
+    } else if (!aiUser.rowCount) {
+      dailyRoundRobinSkippedReason = "system user missing";
+    } else if (dailyRoundRobinWagerId) {
+      dailyRoundRobinSkippedReason = "round robin already placed";
+    } else if (dailyRoundRobinStakePerWayCents <= 0) {
+      dailyRoundRobinSkippedReason = "round robin stake per way is zero";
+    }
 
     if (
       shouldLockRoundRobin
@@ -2416,6 +2440,9 @@ export const generateAiPicks = async ({
         roundRobinPicks,
         dailyRoundRobinStakePerWayCents
       );
+      if (!dailyRoundRobinWagerId) {
+        dailyRoundRobinSkippedReason = "insufficient bankroll for round robin";
+      }
     }
 
     for (const candidate of selected) {
@@ -2549,6 +2576,16 @@ export const generateAiPicks = async ({
       candidates: scored.length,
       locked: lockedGameKeys.size + published.filter((pick) => pick.locked).length,
       projected: published.filter((pick) => !pick.locked).length,
+      dailyRoundRobin: {
+        requiredPicks: aiRoundRobinPicks,
+        eligiblePicks: wageringCandidates.length,
+        selectedPicks: roundRobinPicks.length,
+        ways: dailyRoundRobinWays,
+        stakePerWayCents: dailyRoundRobinStakePerWayCents,
+        wagerId: dailyRoundRobinWagerId,
+        shouldLock: shouldLockRoundRobin,
+        skippedReason: dailyRoundRobinWagerId ? null : dailyRoundRobinSkippedReason
+      },
       published
     };
 
