@@ -1103,18 +1103,29 @@ export const lockRedditPostTracking = async ({
     if (!current || current.legs.length !== 3) {
       throw new Error("No complete 3-team Chine parlay is available to lock.");
     }
-    const result = await query<{ id: string; lockedAt: Date }>(
-      `
-        UPDATE reddit_parlay_track
-        SET locked_at = COALESCE(locked_at, now()),
-            locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
-            locked_title = $3,
-            locked_body = $4
-        WHERE id = $1
-        RETURNING id, locked_at AS "lockedAt"
-      `,
-      [current.parlay.id, userId, title, body]
-    );
+    const result = await transaction(async (client) => {
+      const locked = await client.query<{ id: string; lockedAt: Date }>(
+        `
+          UPDATE reddit_parlay_track
+          SET locked_at = COALESCE(locked_at, now()),
+              locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
+              locked_title = $3,
+              locked_body = $4
+          WHERE id = $1
+          RETURNING id, locked_at AS "lockedAt"
+        `,
+        [current.parlay.id, userId, title, body]
+      );
+      await client.query(
+        `
+          UPDATE ai_pick
+          SET locked_at = COALESCE(locked_at, now())
+          WHERE id = ANY($1::uuid[])
+        `,
+        [current.legs.map((leg) => leg.ai_pick_id)]
+      );
+      return locked;
+    });
     return {
       postType,
       id: result.rows[0].id,
@@ -1127,18 +1138,29 @@ export const lockRedditPostTracking = async ({
   if (!current) {
     throw new Error("No Chine single pick is available to lock.");
   }
-  const result = await query<{ id: string; lockedAt: Date }>(
-    `
-      UPDATE reddit_pick_track
-      SET locked_at = COALESCE(locked_at, now()),
-          locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
-          locked_title = $3,
-          locked_body = $4
-      WHERE id = $1
-      RETURNING id, locked_at AS "lockedAt"
-    `,
-    [current.id, userId, title, body]
-  );
+  const result = await transaction(async (client) => {
+    const locked = await client.query<{ id: string; lockedAt: Date }>(
+      `
+        UPDATE reddit_pick_track
+        SET locked_at = COALESCE(locked_at, now()),
+            locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
+            locked_title = $3,
+            locked_body = $4
+        WHERE id = $1
+        RETURNING id, locked_at AS "lockedAt"
+      `,
+      [current.id, userId, title, body]
+    );
+    await client.query(
+      `
+        UPDATE ai_pick
+        SET locked_at = COALESCE(locked_at, now())
+        WHERE id = $1
+      `,
+      [current.ai_pick_id]
+    );
+    return locked;
+  });
   return {
     postType,
     id: result.rows[0].id,
@@ -1179,6 +1201,7 @@ const getPreviousRedditPick = async () => {
       JOIN game_line gl ON gl.id = rpt.game_line_id
       WHERE rpt.pick_date < (now() AT TIME ZONE 'America/Chicago')::date
         AND rpt.locked_at IS NOT NULL
+        AND rpt.status IN ('won', 'lost', 'push', 'void')
       ORDER BY rpt.pick_date DESC
       LIMIT 1
     `
