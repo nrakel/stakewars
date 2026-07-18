@@ -2088,67 +2088,7 @@ export const registerRoutes = (router: Router) => {
           ORDER BY p.locked_at DESC NULLS LAST, p.confidence DESC NULLS LAST, p.score DESC NULLS LAST, l.starts_at ASC
         `
       );
-      const parlay = await query<{
-        id: string;
-        pickDate: string;
-        units: string;
-        potentialReturnUnits?: string;
-        status: string;
-        profitUnits: string;
-        legs: Array<{
-          id: string;
-          selectedTeam: string;
-          legIndex: number;
-          status: string;
-          decimalOdds: string;
-          oddsAmerican: number;
-          sport: string;
-          league: string;
-          startsAt: Date;
-          homeTeam: string;
-          awayTeam: string;
-          spread: string;
-          marketKey: string;
-        }>;
-      }>(
-        `
-          SELECT
-            rpt.id,
-            rpt.pick_date::text AS "pickDate",
-            rpt.units::text AS units,
-            rpt.status::text AS status,
-            rpt.profit_units::text AS "profitUnits",
-            COALESCE(
-              json_agg(
-                json_build_object(
-                  'id', rplt.id,
-                  'selectedTeam', rplt.selected_team,
-                  'legIndex', rplt.leg_index,
-                  'status', rplt.status,
-                  'decimalOdds', rplt.decimal_odds::text,
-                  'oddsAmerican', rplt.odds_american,
-                  'sport', gl.sport,
-                  'league', gl.league,
-                  'startsAt', gl.starts_at,
-                  'homeTeam', gl.home_team,
-                  'awayTeam', gl.away_team,
-                  'spread', gl.spread::text,
-                  'marketKey', gl.market_key
-                )
-                ORDER BY rplt.leg_index ASC
-              ) FILTER (WHERE rplt.id IS NOT NULL),
-              '[]'::json
-            ) AS legs
-          FROM reddit_parlay_track rpt
-          LEFT JOIN reddit_parlay_leg_track rplt ON rplt.parlay_id = rpt.id
-          LEFT JOIN game_line gl ON gl.id = rplt.game_line_id
-          WHERE rpt.pick_date = (now() AT TIME ZONE 'America/Chicago')::date
-          GROUP BY rpt.id
-          HAVING count(rplt.id) = 3
-          LIMIT 1
-        `
-      );
-      const chineParlay = parlay.rows[0] ?? (await query<{
+      const chineParlay = (await query<{
         id: string;
         pickDate: string;
         units: string;
@@ -2216,7 +2156,7 @@ export const registerRoutes = (router: Router) => {
             AND w.kind = 'round_robin'
             AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date
           GROUP BY w.id
-          HAVING count(wl.id) = 3
+          HAVING count(wl.id) = 7
           ORDER BY w.placed_at DESC
           LIMIT 1
         `,

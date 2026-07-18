@@ -2098,6 +2098,8 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
   pick.provider_event_id?.split(":")[0]
     ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
 
+const dailyAiRoundRobinPicks = 7;
+
 const updateAiPickClosingLines = async (client: pg.PoolClient, sport: CandidateLine["sport"], beforeDate: string) => {
   const result = await client.query<{ id: string }>(
     `
@@ -2151,7 +2153,7 @@ export const generateAiPicks = async ({
   aiWagerMinConfidence = 0.67,
   aiStraightBankrollFraction = 0.5,
   aiRoundRobinBankrollFraction = 0.25,
-  aiRoundRobinPicks = 3
+  aiRoundRobinPicks = dailyAiRoundRobinPicks
 }: {
   sport?: "MLB" | "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF";
   maxPicks?: number;

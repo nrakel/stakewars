@@ -1681,10 +1681,12 @@ function App() {
   const renderDailyChineParlay = (parlay: DailyChineParlay) => {
     const resultLabel = trackedResultLabel(parlay.status);
     const returnUnits = parlay.potentialReturnUnits ? Number(parlay.potentialReturnUnits) : parlayReturnUnits(parlay);
+    const legCount = parlay.legs.length;
+    const roundRobinLabel = `${legCount}-Game Round Robin`;
     return (
       <div className="ai-pick daily-parlay" key={parlay.id}>
         <div className="pick-badges">
-          <small className="pick-status locked">3-Team Parlay</small>
+          <small className="pick-status locked">{roundRobinLabel}</small>
           {resultLabel && <small className={`pick-result ${parlay.status}`}>{resultLabel}</small>}
         </div>
         <strong>{formatUnitAmount(Number(parlay.units))} to return {formatUnitAmount(returnUnits)}</strong>
@@ -1697,9 +1699,9 @@ function App() {
 
   const aiPicksContent = (
     <>
-      {dailyChineParlay && dailyChineParlay.legs.length === 3 && (
+      {dailyChineParlay && dailyChineParlay.legs.length === 7 && (
         <>
-          <h3 className="pick-section-title">3-Team Parlay</h3>
+          <h3 className="pick-section-title">7-Game Round Robin</h3>
           {renderDailyChineParlay(dailyChineParlay)}
         </>
       )}
