@@ -2332,18 +2332,30 @@ export const generateAiPicks = async ({
       config.aiUsername
     ]);
     const aiEntry = placeWagers && aiUser.rowCount ? await ensureWeeklyEntry(client, aiUser.rows[0].id) : null;
-    const existingDailyAiStraightWager = placeWagers && aiUser.rowCount
-      ? await client.query<{ stake_cents: number }>(
+    const existingDailyAiStraightWagers = placeWagers && aiUser.rowCount
+      ? await client.query<{
+        stake_cents: number;
+        provider_event_id: string | null;
+        starts_at: Date;
+        away_team: string;
+        home_team: string;
+      }>(
         `
-          SELECT w.stake_cents
+          SELECT
+            w.stake_cents,
+            gl.provider_event_id,
+            gl.starts_at,
+            gl.away_team,
+            gl.home_team
           FROM wager w
+          JOIN wager_leg wl ON wl.wager_id = w.id
+          JOIN game_line gl ON gl.id = wl.game_line_id
           WHERE w.user_id = $1
             AND w.kind = 'straight'
             AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $2::date
-          ORDER BY w.placed_at ASC
-          LIMIT 1
+            AND gl.sport = $3
         `,
-        [aiUser.rows[0].id, today]
+        [aiUser.rows[0].id, today, sport]
       )
       : null;
     const existingDailyAiRoundRobin = placeWagers && aiUser.rowCount
@@ -2374,13 +2386,21 @@ export const generateAiPicks = async ({
     const dailyStartingBankrollCents = aiEntry
       ? aiEntry.balance_cents + Number(dailyAiStake?.rows[0]?.total_stake_cents ?? 0)
       : 0;
-    const dailyStraightStakeCents = existingDailyAiStraightWager?.rowCount
-      ? existingDailyAiStraightWager.rows[0].stake_cents
-      : aiEntry && wageringCandidates.length > 0
-        ? Math.max(1, Math.floor((dailyStartingBankrollCents * aiStraightBankrollFraction) / wageringCandidates.length))
-        : aiEntry && stakeFractionOfBalance !== undefined
-        ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
-        : stakeCents;
+    const existingStraightStakeCents = existingDailyAiStraightWagers?.rows.reduce(
+      (total, wager) => total + wager.stake_cents,
+      0
+    ) ?? 0;
+    const existingStraightGameKeys = new Set(existingDailyAiStraightWagers?.rows.map((wager) => gameKeyForPick(wager)) ?? []);
+    const newStraightCandidateCount = wageringCandidates.filter(
+      (candidate) => !existingStraightGameKeys.has(gameKeyForPick(candidate))
+    ).length;
+    const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
+    const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
+    const dailyStraightStakeCents = aiEntry && newStraightCandidateCount > 0
+      ? Math.floor(remainingDailyStraightBudgetCents / newStraightCandidateCount)
+      : aiEntry && stakeFractionOfBalance !== undefined
+      ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
+      : stakeCents;
     const roundRobinPicks = wageringCandidates.slice(0, aiRoundRobinPicks);
     const dailyRoundRobinWays = roundRobinPicks.length === aiRoundRobinPicks
       ? roundRobinWays(roundRobinPicks.length, roundRobinPicks.length, 2)
@@ -2465,7 +2485,7 @@ export const generateAiPicks = async ({
       const shouldWagerStraight = shouldLock && candidate.confidence >= aiWagerMinConfidence;
       let wagerId: string | null = null;
 
-      if (shouldWagerStraight && placeWagers && aiUser.rowCount) {
+      if (shouldWagerStraight && dailyStraightStakeCents > 0 && placeWagers && aiUser.rowCount) {
         const existing = await client.query<{ wager_id: string | null }>(
           `
             SELECT w.id AS wager_id
