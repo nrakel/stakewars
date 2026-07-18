@@ -2292,6 +2292,7 @@ export const generateAiPicks = async ({
         JOIN game_line gl ON gl.id = p.game_line_id
         WHERE p.published_for = $1
           AND p.locked_at IS NOT NULL
+          AND p.wager_id IS NOT NULL
           AND gl.sport = $2
       `,
       [today, sport]
@@ -2398,6 +2399,19 @@ export const generateAiPicks = async ({
           AND gl.sport = $1
           AND p.published_for = $2
           AND p.locked_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM reddit_pick_track rpt
+            WHERE rpt.ai_pick_id = p.id
+              AND rpt.locked_at IS NOT NULL
+          )
+          AND NOT EXISTS (
+            SELECT 1
+            FROM reddit_parlay_leg_track rplt
+            JOIN reddit_parlay_track rpt ON rpt.id = rplt.parlay_id
+            WHERE rplt.ai_pick_id = p.id
+              AND rpt.locked_at IS NOT NULL
+          )
       `,
       [sport, today]
     );
