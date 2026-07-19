@@ -206,6 +206,18 @@ test("double increases wager amount but not payout multiplier", () => {
   assert.equal(settlement.heightPayoutCents, 4_000);
 });
 
+test("doubled Value wager pays 1:1 against the full doubled stake", () => {
+  const settlement = settleTowerWagers(standingHand({
+    playerRanks: ["9", "10"],
+    dealerRanks: ["2", "3"],
+    valueWagerCents: 400,
+    heightWagerCents: 0
+  }));
+  assert.equal(settlement.valueResult, "won");
+  assert.equal(settlement.valuePayoutCents, 800);
+  assert.equal(settlement.valueProfitCents, 400);
+});
+
 test("insufficient balance prevents a double", () => {
   const initial = startTowerHand({
     shoe: shoeWith([card("6"), card("K"), card("6", "diamonds")]),

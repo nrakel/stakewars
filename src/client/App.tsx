@@ -2621,6 +2621,22 @@ function App() {
     return "Pending";
   };
 
+  const towerNetCents = (result: TowerResult, wagerCents: number, payoutCents: number) => {
+    if (result === "won") return payoutCents - wagerCents;
+    if (result === "lost") return -wagerCents;
+    return 0;
+  };
+
+  const towerResultDetail = (result: TowerResult, wagerCents: number, payoutCents: number) => {
+    if (wagerCents <= 0) return "No wager";
+    const net = towerNetCents(result, wagerCents, payoutCents);
+    if (result === "won") return `returns ${money(payoutCents)} • net +${money(net)}`;
+    if (result === "lost") return `net -${money(wagerCents)}`;
+    if (result === "push") return `returns ${money(wagerCents)} • net $0.00`;
+    if (result === "void") return `refunded ${money(wagerCents)} • net $0.00`;
+    return "pending";
+  };
+
   const TowerCardView = ({ card }: { card: TowerPublicCard }) => (
     <div className={`tower-card ${card.faceUp ? card.suit ?? "" : "hidden"} ${card.causedCollapse ? "collapse" : ""}`}>
       {card.faceUp ? (
@@ -2744,8 +2760,9 @@ function App() {
               {towerAnimationNote && <p className="tower-animation-note">{towerAnimationNote}</p>}
               {hand.status === "settled" && towerShowResult && (
                 <div className="tower-result">
-                  <span>Value {money(hand.valueWagerCents)}: <strong>{towerResultLabel(hand.valueResult)}</strong>{hand.valuePayoutCents > 0 ? ` • returns ${money(hand.valuePayoutCents)}` : ""}</span>
-                  <span>Height {money(hand.heightWagerCents)}: <strong>{towerResultLabel(hand.heightResult)}</strong>{hand.heightPayoutCents > 0 ? ` • returns ${money(hand.heightPayoutCents)}` : ""}</span>
+                  <span>Value stake {money(hand.valueWagerCents)}: <strong>{towerResultLabel(hand.valueResult)}</strong> • {towerResultDetail(hand.valueResult, hand.valueWagerCents, hand.valuePayoutCents)}</span>
+                  <span>Height stake {money(hand.heightWagerCents)}: <strong>{towerResultLabel(hand.heightResult)}</strong> • {towerResultDetail(hand.heightResult, hand.heightWagerCents, hand.heightPayoutCents)}</span>
+                  <small>Stake is reserved when the hand starts or doubles. “Returns” is the amount credited back at settlement; “net” is the bankroll change after reserved stake.</small>
                 </div>
               )}
               {hand.status === "settled" && towerShowResult && (

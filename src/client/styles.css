@@ -2760,6 +2760,12 @@ textarea {
   font-size: 0.9rem;
 }
 
+.tower-result small {
+  flex-basis: 100%;
+  color: #647067;
+  font-weight: 700;
+}
+
 .tower-counter-toggle {
   width: 100%;
   border: 0;
