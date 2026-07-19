@@ -1727,8 +1727,8 @@ function App() {
       valueWagerCents = parseTowerWagerCents(towerSimValueWager, "Simulator Value", towerState.config);
       heightWagerCents = parseTowerWagerCents(towerSimHeightWager, "Simulator Height", towerState.config);
       handCount = Number(towerSimHands.trim());
-      if (!/^\d+$/.test(towerSimHands.trim()) || !Number.isSafeInteger(handCount) || handCount < 1 || handCount > 250) {
-        throw new Error("Hands to simulate must be a whole number from 1 to 250.");
+      if (!/^\d+$/.test(towerSimHands.trim()) || !Number.isSafeInteger(handCount) || handCount < 1 || handCount > 1000) {
+        throw new Error("Hands to simulate must be a whole number from 1 to 1000.");
       }
       if (valueWagerCents + heightWagerCents <= 0) {
         throw new Error("Enter a Value wager, Height wager, or both.");
