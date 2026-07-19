@@ -203,7 +203,7 @@ test("double increases wager amount but not payout multiplier", () => {
     heightWagerCents: doubled.hand.heightWagerCents
   }));
   assert.equal(settlement.valuePayoutCents, 2_000);
-  assert.equal(settlement.heightPayoutCents, 4_000);
+  assert.equal(settlement.heightPayoutCents, 12_000);
 });
 
 test("doubled Value wager pays 1:1 against the full doubled stake", () => {
@@ -299,13 +299,13 @@ test("dealer collapse pays Value and qualified Height only", () => {
 });
 
 test("height payout bands are selected correctly", () => {
-  assert.deepEqual(heightPayoutFor(3).payout, { numerator: 1, denominator: 1 });
-  assert.deepEqual(heightPayoutFor(4).payout, { numerator: 6, denominator: 5 });
-  assert.deepEqual(heightPayoutFor(5).payout, { numerator: 3, denominator: 2 });
-  assert.deepEqual(heightPayoutFor(6).payout, { numerator: 2, denominator: 1 });
-  assert.deepEqual(heightPayoutFor(7).payout, { numerator: 4, denominator: 1 });
-  assert.deepEqual(heightPayoutFor(8).payout, { numerator: 8, denominator: 1 });
-  assert.deepEqual(heightPayoutFor(12).payout, { numerator: 8, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(3).payout, { numerator: 5, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(4).payout, { numerator: 10, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(5).payout, { numerator: 20, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(6).payout, { numerator: 40, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(7).payout, { numerator: 75, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(8).payout, { numerator: 150, denominator: 1 });
+  assert.deepEqual(heightPayoutFor(12).payout, { numerator: 150, denominator: 1 });
 });
 
 test("dealer follows configured deterministic rule and collapses lower cards", () => {

@@ -130,7 +130,7 @@ export const rankValue = (rank: TowerRank) => {
 };
 
 export const defaultTowerConfig: TowerConfig = {
-  version: "tower-mvp-v1",
+  version: "tower-height-payout-v2",
   deckCount: 6,
   shufflePenetrationRemainingCards: 78,
   minWagerCents: 100,
@@ -141,12 +141,12 @@ export const defaultTowerConfig: TowerConfig = {
   valueTieRule: "push",
   heightQualificationMinCards: 3,
   heightPayouts: [
-    { minHeight: 3, maxHeight: 3, payout: { numerator: 1, denominator: 1 } },
-    { minHeight: 4, maxHeight: 4, payout: { numerator: 6, denominator: 5 } },
-    { minHeight: 5, maxHeight: 5, payout: { numerator: 3, denominator: 2 } },
-    { minHeight: 6, maxHeight: 6, payout: { numerator: 2, denominator: 1 } },
-    { minHeight: 7, maxHeight: 7, payout: { numerator: 4, denominator: 1 } },
-    { minHeight: 8, maxHeight: null, payout: { numerator: 8, denominator: 1 } }
+    { minHeight: 3, maxHeight: 3, payout: { numerator: 5, denominator: 1 } },
+    { minHeight: 4, maxHeight: 4, payout: { numerator: 10, denominator: 1 } },
+    { minHeight: 5, maxHeight: 5, payout: { numerator: 20, denominator: 1 } },
+    { minHeight: 6, maxHeight: 6, payout: { numerator: 40, denominator: 1 } },
+    { minHeight: 7, maxHeight: 7, payout: { numerator: 75, denominator: 1 } },
+    { minHeight: 8, maxHeight: null, payout: { numerator: 150, denominator: 1 } }
   ],
   dealer: {
     minimumHeight: 2,
@@ -629,4 +629,3 @@ export const publicCard = (entry: TowerHandCard) =>
 
 export const hiddenCardsInPlay = (hand: TowerHandState) =>
   [...hand.playerCards, ...hand.dealerCards].filter((entry) => !entry.faceUp).length;
-
