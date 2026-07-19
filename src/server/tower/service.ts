@@ -688,13 +688,28 @@ export const simulateTowerHandsForUser = async ({
 
     while (hand.status !== "settled") {
       if (hand.status === "awaiting_double_decision") {
-        const doubleResult = await doubleTowerHandForUser({
-          userId,
-          handId: hand.id,
-          actionVersion: hand.actionVersion,
-          doubleValue: hand.originalValueWagerCents > 0,
-          doubleHeight: false
-        });
+        let doubleResult;
+        try {
+          doubleResult = await doubleTowerHandForUser({
+            userId,
+            handId: hand.id,
+            actionVersion: hand.actionVersion,
+            doubleValue: hand.originalValueWagerCents > 0,
+            doubleHeight: false
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "";
+          if (!message.includes("Tower exposure is above maximum") && !message.includes("Insufficient balance for Tower double")) {
+            throw error;
+          }
+          doubleResult = await doubleTowerHandForUser({
+            userId,
+            handId: hand.id,
+            actionVersion: hand.actionVersion,
+            doubleValue: false,
+            doubleHeight: false
+          });
+        }
         hand = doubleResult.hand;
         if (!hand) throw new TowerError("Tower simulator lost hand state after double.", 500);
         continue;
