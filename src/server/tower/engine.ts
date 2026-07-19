@@ -289,10 +289,35 @@ export const startTowerHand = ({
 }) => {
   validateInitialWagers(valueWagerCents, heightWagerCents, config);
   let nextShoe = shoe;
+  const dealerDeal = dealFromShoe(nextShoe);
+  nextShoe = revealCard(dealerDeal.shoe, dealerDeal.card);
+  let dealerCards: TowerHandCard[] = [appendTowerCard({
+    cards: [],
+    card: dealerDeal.card,
+    actor: "dealer",
+    faceUp: true,
+    sequenceNumber: 1
+  })];
+  let dealerCollapsed = false;
+
+  while (dealerCards.length < config.dealer.minimumHeight || (!dealerCollapsed && lastTowerCard(dealerCards)!.value <= config.dealer.buildThroughValue)) {
+    const dealt = dealFromShoe(nextShoe);
+    const entry = appendTowerCard({
+      cards: dealerCards,
+      card: dealt.card,
+      actor: "dealer",
+      faceUp: true,
+      sequenceNumber: dealerCards.length + 1
+    });
+    nextShoe = revealCard(dealt.shoe, dealt.card);
+    dealerCards = [...dealerCards, entry];
+    dealerCollapsed = entry.causedCollapse;
+    if (dealerCollapsed) break;
+    if (entry.card.value >= config.dealer.stopAtValue) break;
+  }
+
   const playerDeal = dealFromShoe(nextShoe);
   nextShoe = revealCard(playerDeal.shoe, playerDeal.card);
-  const dealerDeal = dealFromShoe(nextShoe);
-  nextShoe = dealerDeal.shoe;
 
   const hand: TowerHandState = {
     id: randomUUID(),
@@ -303,21 +328,15 @@ export const startTowerHand = ({
       card: playerDeal.card,
       actor: "player",
       faceUp: true,
-      sequenceNumber: 1
+      sequenceNumber: dealerCards.length + 1
     })],
-    dealerCards: [appendTowerCard({
-      cards: [],
-      card: dealerDeal.card,
-      actor: "dealer",
-      faceUp: false,
-      sequenceNumber: 2
-    })],
+    dealerCards,
     valueWagerCents,
     heightWagerCents,
     originalValueWagerCents: valueWagerCents,
     originalHeightWagerCents: heightWagerCents,
     playerCollapsed: false,
-    dealerCollapsed: false,
+    dealerCollapsed,
     doubleOpportunity: false,
     doubleOpportunityRank: null,
     valueResult: "pending",
@@ -346,7 +365,7 @@ export const validateInitialWagers = (valueWagerCents: number, heightWagerCents:
   }
 };
 
-export const playerBuild = (hand: TowerHandState, shoe: TowerShoeState) => {
+export const playerBuild = (hand: TowerHandState, shoe: TowerShoeState, config = defaultTowerConfig) => {
   if (hand.status !== "player_turn") {
     throw new Error("BUILD is only allowed during player turn");
   }
@@ -372,7 +391,7 @@ export const playerBuild = (hand: TowerHandState, shoe: TowerShoeState) => {
     actionVersion: hand.actionVersion + 1
   };
   return {
-    hand: collapsed ? settlePlayerCollapse(nextHand) : nextHand,
+    hand: collapsed ? settlePlayerCollapse(nextHand, config) : nextHand,
     shoe: nextShoe
   };
 };
@@ -420,40 +439,16 @@ export const playerCap = (hand: TowerHandState, shoe: TowerShoeState, config = d
   if (hand.status !== "player_turn") {
     throw new Error("CAP is only allowed during player turn");
   }
-  let nextHand: TowerHandState = {
+  const nextHand: TowerHandState = {
     ...hand,
-    status: "dealer_turn",
     doubleOpportunity: false,
     doubleOpportunityRank: null,
     actionVersion: hand.actionVersion + 1
   };
-  let nextShoe = revealDealerHoleCard(shoe, nextHand);
-  nextHand = {
-    ...nextHand,
-    dealerCards: nextHand.dealerCards.map((entry) => ({ ...entry, faceUp: true }))
-  };
-
-  while (shouldDealerBuild(nextHand, config)) {
-    const dealt = dealFromShoe(nextShoe);
-    const entry = appendTowerCard({
-      cards: nextHand.dealerCards,
-      card: dealt.card,
-      actor: "dealer",
-      faceUp: true,
-      sequenceNumber: nextHand.playerCards.length + nextHand.dealerCards.length + 1
-    });
-    nextShoe = revealCard(dealt.shoe, dealt.card);
-    nextHand = {
-      ...nextHand,
-      dealerCards: [...nextHand.dealerCards, entry],
-      dealerCollapsed: entry.causedCollapse
-    };
-    if (entry.causedCollapse) break;
-  }
 
   return {
     hand: settleStandingHand(nextHand, config),
-    shoe: nextShoe
+    shoe
   };
 };
 
@@ -495,17 +490,26 @@ export const nextHeightPayoutFor = (height: number, config = defaultTowerConfig)
   ) ?? null;
 };
 
-export const settlePlayerCollapse = (hand: TowerHandState): TowerHandState => ({
-  ...hand,
-  status: "settled",
-  playerCollapsed: true,
-  valueResult: hand.valueWagerCents > 0 ? "lost" : "void",
-  heightResult: hand.heightWagerCents > 0 ? "lost" : "void",
-  valuePayoutCents: 0,
-  heightPayoutCents: 0,
-  completedAt: new Date().toISOString(),
-  actionVersion: hand.actionVersion + 1
-});
+export const settlePlayerCollapse = (hand: TowerHandState, config = defaultTowerConfig): TowerHandState => {
+  const valueWinsAfterDealerCollapse = hand.dealerCollapsed && config.dealer.dealerCollapsePaysValue;
+  const valueResult: TowerResult = hand.valueWagerCents > 0
+    ? valueWinsAfterDealerCollapse ? "won" : "lost"
+    : "void";
+  const valuePayoutCents = valueResult === "won"
+    ? payoutReturn(hand.valueWagerCents, config.valuePayout)
+    : 0;
+  return {
+    ...hand,
+    status: "settled",
+    playerCollapsed: true,
+    valueResult,
+    heightResult: hand.heightWagerCents > 0 ? "lost" : "void",
+    valuePayoutCents,
+    heightPayoutCents: 0,
+    completedAt: new Date().toISOString(),
+    actionVersion: hand.actionVersion + 1
+  };
+};
 
 export const settleStandingHand = (hand: TowerHandState, config = defaultTowerConfig): TowerHandState => {
   const settlement = settleTowerWagers(hand, config);

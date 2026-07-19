@@ -482,8 +482,8 @@ export const startTowerHandForUser = async ({
       )
       VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        $8, $9, $10, $11, $12, $13, 0, 0,
-        false, false, 'pending', 'pending', 0, 0, $14, $15
+        $8, $9, $10, $11, $12, $13, $14, $15,
+        false, $16, 'pending', 'pending', 0, 0, $17, $18
       )
     `,
     [
@@ -500,6 +500,9 @@ export const startTowerHandForUser = async ({
       started.hand.heightWagerCents,
       towerHeight(started.hand.playerCards),
       towerValue(started.hand.playerCards),
+      towerHeight(started.hand.dealerCards),
+      towerValue(started.hand.dealerCards),
+      started.hand.dealerCollapsed,
       activeConfig.id,
       started.hand.actionVersion
     ]
@@ -512,8 +515,20 @@ export const startTowerHandForUser = async ({
       commitment: started.shoe.shuffleCommitment
     });
   }
-  await insertCardEvent(client, started.hand.id, started.hand.playerCards[0], "initial_deal", 1, towerValue(started.hand.playerCards));
-  await insertCardEvent(client, started.hand.id, started.hand.dealerCards[0], "initial_deal_hidden", 1, towerValue(started.hand.dealerCards));
+  for (const dealerCard of started.hand.dealerCards) {
+    const dealerCardsThroughEvent = started.hand.dealerCards.filter((entry) => entry.sequenceNumber <= dealerCard.sequenceNumber);
+    await insertCardEvent(
+      client,
+      started.hand.id,
+      dealerCard,
+      dealerCard.sequenceNumber === 1
+        ? "dealer_initial_deal"
+        : dealerCard.causedCollapse ? "dealer_build_collapse" : "dealer_build",
+      towerHeight(dealerCardsThroughEvent),
+      towerValue(dealerCardsThroughEvent)
+    );
+  }
+  await insertCardEvent(client, started.hand.id, started.hand.playerCards[0], "player_initial_deal", 1, towerValue(started.hand.playerCards));
   if (valueWagerCents > 0) {
     await insertWagerEvent(client, started.hand.id, "value", "placed", valueWagerCents, entry.balance_cents, entry.balance_cents - valueWagerCents);
   }
@@ -540,7 +555,8 @@ export const buildTowerHandForUser = async ({
 }) => transaction(async (client) => {
   const row = await getLockedHand(client, userId, handId, actionVersion);
   const shoe = await getLockedShoe(client, row.shoe_id);
-  const built = playerBuild(row.hand_state, shoe);
+  const activeConfig = await getActiveTowerConfig(client);
+  const built = playerBuild(row.hand_state, shoe, activeConfig.config);
   const latestPlayerCard = built.hand.playerCards[built.hand.playerCards.length - 1];
   await saveShoe(client, userId, built.shoe);
   await insertCardEvent(
@@ -624,21 +640,6 @@ export const capTowerHandForUser = async ({
   const capped = playerCap(row.hand_state, shoe, activeConfig.config);
   await saveShoe(client, userId, capped.shoe);
 
-  await client.query(
-    "UPDATE tower_hand_event SET face_up = true, publicly_revealed = true, action_type = 'dealer_reveal' WHERE hand_id = $1 AND sequence_number = 2",
-    [row.id]
-  );
-  for (const dealerCard of capped.hand.dealerCards.slice(1)) {
-    const dealerCardsThroughEvent = capped.hand.dealerCards.filter((entry) => entry.sequenceNumber <= dealerCard.sequenceNumber);
-    await insertCardEvent(
-      client,
-      row.id,
-      dealerCard,
-      dealerCard.causedCollapse ? "dealer_build_collapse" : "dealer_build",
-      towerHeight(dealerCardsThroughEvent),
-      towerValue(dealerCardsThroughEvent)
-    );
-  }
   const endingBalance = await applySettlementBalance(client, capped.hand, row.weekly_entry_id);
   await syncHand(client, userId, capped.hand, capped.shoe, endingBalance);
   return {

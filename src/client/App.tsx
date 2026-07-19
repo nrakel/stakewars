@@ -1579,49 +1579,10 @@ function App() {
     }
   };
 
-  const setTowerHandView = (hand: TowerHand, counter?: TowerCounter | null) => {
-    setTowerState((current) => current ? {
-      ...current,
-      hand,
-      counter: counter ?? current.counter
-    } : current);
-  };
-
-  const handWithoutSettlement = (hand: TowerHand, dealerCards = hand.dealerCards): TowerHand => ({
-    ...hand,
-    status: "dealer_turn",
-    dealerCards,
-    dealerHeight: null,
-    dealerValue: null,
-    dealerCollapsed: false,
-    valueResult: "pending",
-    heightResult: "pending",
-    valuePayoutCents: 0,
-    heightPayoutCents: 0,
-    completedAt: null
-  });
-
   const animateTowerCapResult = async (
-    previousHand: TowerHand,
     result: Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter | null }
   ) => {
     setTowerShowResult(false);
-    setTowerAnimationNote("Dealer is revealing the tower...");
-    setTowerHandView(handWithoutSettlement(result.hand, previousHand.dealerCards), result.counter);
-    await wait(650);
-
-    for (let index = 0; index < result.hand.dealerCards.length; index += 1) {
-      const revealedDealerCards = result.hand.dealerCards.slice(0, index + 1);
-      const allDealerCardsVisible = index === result.hand.dealerCards.length - 1;
-      setTowerHandView({
-        ...handWithoutSettlement(result.hand, revealedDealerCards),
-        dealerHeight: allDealerCardsVisible ? result.hand.dealerHeight : null,
-        dealerValue: allDealerCardsVisible ? result.hand.dealerValue : null,
-        dealerCollapsed: allDealerCardsVisible ? result.hand.dealerCollapsed : false
-      }, result.counter);
-      await wait(650);
-    }
-
     setTowerAnimationNote("Settling the hand...");
     await wait(1100);
     applyTowerResult(result);
@@ -1679,7 +1640,7 @@ function App() {
         body: JSON.stringify({ actionVersion: towerState.hand.actionVersion })
       }, token);
       if (action === "cap" && result.hand.status === "settled") {
-        await animateTowerCapResult(towerState.hand, result);
+        await animateTowerCapResult(result);
       } else {
         applyTowerResult(result);
         setTowerShowResult(false);
@@ -2961,7 +2922,7 @@ function App() {
           <section className="panel tower-help">
             <h2>How fairness works</h2>
             <p>Tower uses a six-deck shoe shuffled on the server with cryptographically secure randomness. Cards are dealt from the shoe in order, and the browser never chooses card outcomes or settlement results.</p>
-            <p>The counter shows cards not yet publicly revealed. Hidden dealer cards remain counted as unseen until they are revealed.</p>
+            <p>The counter shows cards not yet publicly revealed. In this dealer-first test, all dealer cards are public before player decisions.</p>
             <p>Every hand, card draw, double decision, and balance change is recorded.</p>
           </section>
           <section className="panel tower-history">

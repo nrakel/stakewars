@@ -12,7 +12,6 @@ import {
   heightPayoutFor,
   isHeightQualified,
   playerBuild,
-  playerCap,
   publicCard,
   publicShoeCounter,
   rankValue,
@@ -139,7 +138,7 @@ test("secure shuffle preserves every card instance", () => {
 
 test("higher or equal player BUILD keeps tower standing", () => {
   const initial = startTowerHand({
-    shoe: shoeWith([card("2"), card("K"), card("2", "clubs"), card("5")]),
+    shoe: shoeWith([card("K"), card("K", "clubs"), card("2"), card("2", "clubs"), card("5")]),
     valueWagerCents: 100,
     heightWagerCents: 0
   });
@@ -160,7 +159,7 @@ test("higher or equal player BUILD keeps tower standing", () => {
 
 test("lower player BUILD collapses the tower and settles losses", () => {
   const initial = startTowerHand({
-    shoe: shoeWith([card("7"), card("K"), card("6")]),
+    shoe: shoeWith([card("K"), card("K", "clubs"), card("7"), card("6")]),
     valueWagerCents: 100,
     heightWagerCents: 100
   });
@@ -181,7 +180,7 @@ test("consecutive equal ranks create double opportunity across suits", () => {
 
 test("double increases wager amount but not payout multiplier", () => {
   const initial = startTowerHand({
-    shoe: shoeWith([card("6"), card("K"), card("6", "diamonds")]),
+    shoe: shoeWith([card("K"), card("K", "clubs"), card("6"), card("6", "diamonds")]),
     valueWagerCents: 500,
     heightWagerCents: 1_000
   });
@@ -220,7 +219,7 @@ test("doubled Value wager pays 1:1 against the full doubled stake", () => {
 
 test("insufficient balance prevents a double", () => {
   const initial = startTowerHand({
-    shoe: shoeWith([card("6"), card("K"), card("6", "diamonds")]),
+    shoe: shoeWith([card("K"), card("K", "clubs"), card("6"), card("6", "diamonds")]),
     valueWagerCents: 500,
     heightWagerCents: 0
   });
@@ -316,47 +315,58 @@ test("dealer follows configured deterministic rule and collapses lower cards", (
   assert.equal(shouldDealerBuild(highTop), false);
 
   const initial = startTowerHand({
-    shoe: shoeWith([card("9"), card("10"), card("9")]),
+    shoe: shoeWith([card("10"), card("9"), card("5")]),
     valueWagerCents: 100,
     heightWagerCents: 100
   });
-  const capped = playerCap(initial.hand, initial.shoe);
-  assert.equal(capped.hand.dealerCollapsed, true);
-  assert.equal(capped.hand.status, "settled");
+  assert.equal(initial.hand.dealerCollapsed, true);
+  assert.equal(initial.hand.dealerCards.length, 2);
+  assert.equal(initial.hand.status, "player_turn");
 });
 
-test("hidden dealer card is not returned publicly before reveal", () => {
+test("dealer tower is public before player decisions", () => {
   const initial = startTowerHand({
-    shoe: shoeWith([card("5"), card("K")]),
+    shoe: shoeWith([card("K"), card("Q"), card("5")]),
     valueWagerCents: 100,
     heightWagerCents: 0
   });
   assert.deepEqual(publicCard(initial.hand.dealerCards[0]), {
-    rank: null,
-    suit: null,
-    value: null,
-    id: null,
-    faceUp: false,
+    rank: "K",
+    suit: "hearts",
+    value: 13,
+    id: "1-K-hearts",
+    faceUp: true,
     causedCollapse: false
   });
+  assert.equal(initial.hand.playerCards[0].card.rank, "5");
 });
 
-test("public counter ignores hidden dealer card until reveal", () => {
+test("public counter decrements visible dealer cards immediately", () => {
   let shoe = shoeWith([card("K", "hearts"), card("K", "hearts", 1)]);
   const first = dealFromShoe(shoe);
   shoe = revealCard(first.shoe, first.card);
   const second = dealFromShoe(shoe);
-  shoe = second.shoe;
+  shoe = revealCard(second.shoe, second.card);
 
-  let counter = publicShoeCounter(shoe, 1);
+  const counter = publicShoeCounter(shoe, 0);
   const kingHearts = counter.exactCards.find((item) => item.rank === "K" && item.suit === "hearts");
-  assert.equal(kingHearts?.remainingUnseen, 5);
-  assert.equal(counter.hiddenCardsInPlay, 1);
+  assert.equal(kingHearts?.remainingUnseen, 4);
+  assert.equal(counter.hiddenCardsInPlay, 0);
+});
 
-  shoe = revealCard(shoe, second.card);
-  counter = publicShoeCounter(shoe, 0);
-  const revealedKingHearts = counter.exactCards.find((item) => item.rank === "K" && item.suit === "hearts");
-  assert.equal(revealedKingHearts?.remainingUnseen, 4);
+test("player collapse after dealer collapse preserves Value win and loses Height", () => {
+  const initial = startTowerHand({
+    shoe: shoeWith([card("10"), card("9"), card("4"), card("3")]),
+    valueWagerCents: 100,
+    heightWagerCents: 100
+  });
+  assert.equal(initial.hand.dealerCollapsed, true);
+  const collapsed = playerBuild(initial.hand, initial.shoe);
+  assert.equal(collapsed.hand.status, "settled");
+  assert.equal(collapsed.hand.playerCollapsed, true);
+  assert.equal(collapsed.hand.valueResult, "won");
+  assert.equal(collapsed.hand.valuePayoutCents, 200);
+  assert.equal(collapsed.hand.heightResult, "lost");
 });
 
 test("new shoe threshold is checked before a hand only", () => {
