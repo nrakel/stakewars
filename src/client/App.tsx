@@ -3565,7 +3565,7 @@ function App() {
           </div>
         )}
 
-        {activePage === "tower" && <TowerPage />}
+        {activePage === "tower" && TowerPage()}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">
