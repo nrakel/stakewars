@@ -1530,7 +1530,24 @@ function App() {
     setBankroll((current) => current ? { ...current, balance_cents: result.balanceCents } : current);
   };
 
-  const creditsToCents = (value: string) => Math.round(Number(value || "0") * 100);
+  const parseTowerWagerCents = (value: string, label: string, config: TowerConfig) => {
+    const trimmed = value.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      throw new Error(`${label} wager must be a whole number of credits.`);
+    }
+    const credits = Number(trimmed);
+    if (!Number.isSafeInteger(credits)) {
+      throw new Error(`${label} wager is too large.`);
+    }
+    const cents = credits * 100;
+    if (cents > 0 && cents < config.minWagerCents) {
+      throw new Error(`${label} wager must be at least ${money(config.minWagerCents)}.`);
+    }
+    if (cents > config.maxWagerCents) {
+      throw new Error(`${label} wager cannot exceed ${money(config.maxWagerCents)}.`);
+    }
+    return cents;
+  };
 
   const applyTowerResult = (result: Partial<TowerState> & { balanceCents?: number; hand?: TowerHand | null; counter?: TowerCounter | null }) => {
     setTowerState((current) => current ? {
@@ -1596,14 +1613,32 @@ function App() {
 
   const startTower = async () => {
     if (!token) return;
+    const config = towerState?.config;
+    if (!config) {
+      setTowerNotice("Tower configuration is not loaded yet.");
+      return;
+    }
+    let valueWagerCents = 0;
+    let heightWagerCents = 0;
+    try {
+      valueWagerCents = parseTowerWagerCents(towerValueWager, "Value", config);
+      heightWagerCents = parseTowerWagerCents(towerHeightWager, "Height", config);
+      if (valueWagerCents + heightWagerCents <= 0) {
+        setTowerNotice("Enter a Value wager, Height wager, or both.");
+        return;
+      }
+    } catch (error) {
+      setTowerNotice((error as Error).message);
+      return;
+    }
     setTowerPending(true);
     setTowerNotice("");
     try {
       const result = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand; counter: TowerCounter }>("/tower/hands", {
         method: "POST",
         body: JSON.stringify({
-          valueWagerCents: creditsToCents(towerValueWager),
-          heightWagerCents: creditsToCents(towerHeightWager)
+          valueWagerCents,
+          heightWagerCents
         })
       }, token);
       applyTowerResult(result);
@@ -2701,8 +2736,6 @@ function App() {
     const canStart = Boolean(config && !hand);
     const canAct = Boolean(hand && hand.status === "player_turn" && !towerPending);
     const canDouble = Boolean(hand && hand.status === "awaiting_double_decision" && !towerPending);
-    const valueWagerCents = creditsToCents(towerValueWager);
-    const heightWagerCents = creditsToCents(towerHeightWager);
     return (
       <div className="tower-page">
         <section className="panel tower-table">
@@ -2719,14 +2752,30 @@ function App() {
               <label>
                 VALUE
                 <span>Beat the dealer's total.</span>
-                <input type="number" min={config ? config.minWagerCents / 100 : 1} max={config ? config.maxWagerCents / 100 : 100} step="1" value={towerValueWager} onChange={(event) => setTowerValueWager(event.target.value)} />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                  value={towerValueWager}
+                  onChange={(event) => setTowerValueWager(event.target.value)}
+                  aria-label="Value wager in whole credits"
+                />
               </label>
               <label>
                 HEIGHT
                 <span>Build at least 3 floors, then beat height and value.</span>
-                <input type="number" min={config ? config.minWagerCents / 100 : 1} max={config ? config.maxWagerCents / 100 : 100} step="1" value={towerHeightWager} onChange={(event) => setTowerHeightWager(event.target.value)} />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
+                  value={towerHeightWager}
+                  onChange={(event) => setTowerHeightWager(event.target.value)}
+                  aria-label="Height wager in whole credits"
+                />
               </label>
-              <button className="primary tower-start" type="button" disabled={!canStart || towerPending || valueWagerCents + heightWagerCents <= 0} onClick={startTower}>
+              <button className="primary tower-start" type="button" disabled={!canStart || towerPending} onClick={startTower}>
                 Start Hand
               </button>
             </div>
