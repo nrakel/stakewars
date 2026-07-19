@@ -600,7 +600,7 @@ const lineupStats = (player: { position: string | null; batSide: string | null; 
 
 const pitcherLine = (pitcher: GameCard["awayProbablePitcher"] | GameCard["homeProbablePitcher"]) => {
   if (!pitcher?.name) {
-    return "Pitcher TBD";
+    return "Probable pitcher pending";
   }
   const record = pitcher.wins !== null && pitcher.losses !== null ? `${pitcher.wins}-${pitcher.losses}` : null;
   const era = pitcher.era !== null ? `${pitcher.era.toFixed(2)} ERA` : null;

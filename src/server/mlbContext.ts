@@ -284,6 +284,46 @@ const fetchSchedule = async (startDate: string, endDate: string) => {
   return (body.dates ?? []).flatMap((date) => date.games);
 };
 
+export type MlbProbablePitcherFallback = {
+  providerGameId: string;
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+  awayProbablePitcher: null | {
+    id: number;
+    name: string;
+  };
+  homeProbablePitcher: null | {
+    id: number;
+    name: string;
+  };
+};
+
+export const fetchMlbProbablePitcherFallbacks = async (
+  startDate: string,
+  endDate: string
+): Promise<MlbProbablePitcherFallback[]> => {
+  const games = await fetchSchedule(startDate, endDate);
+  return games.map((game) => ({
+    providerGameId: String(game.gamePk),
+    startsAt: game.gameDate,
+    awayTeam: game.teams.away.team.name,
+    homeTeam: game.teams.home.team.name,
+    awayProbablePitcher: game.teams.away.probablePitcher
+      ? {
+        id: game.teams.away.probablePitcher.id,
+        name: game.teams.away.probablePitcher.fullName
+      }
+      : null,
+    homeProbablePitcher: game.teams.home.probablePitcher
+      ? {
+        id: game.teams.home.probablePitcher.id,
+        name: game.teams.home.probablePitcher.fullName
+      }
+      : null
+  }));
+};
+
 const fetchPitcherStats = async (pitcher: MlbPersonRef | undefined, season: number): Promise<PitcherStatsSummary | null> => {
   if (!pitcher) {
     return null;

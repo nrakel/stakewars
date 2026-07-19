@@ -8,6 +8,7 @@ import { query, transaction } from "./db.js";
 import { getLiveMlbStates, getLiveStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendPushToUsers, sendTestPush, updatePushPreferences } from "./push.js";
 import { sendMail } from "./mail.js";
+import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } from "./mlbContext.js";
 import { buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
@@ -147,6 +148,55 @@ const htmlEscape = (value: string) =>
     .replace(/'/g, "&#39;");
 
 const publicAppOrigin = () => (config.referralPublicOrigin || config.publicOrigin).replace(/\/+$/, "");
+
+const yyyyMmDd = (date: Date) => date.toISOString().slice(0, 10);
+
+const addDays = (date: string, days: number) => {
+  const copy = new Date(`${date}T00:00:00Z`);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return yyyyMmDd(copy);
+};
+
+const normalizeMlbTeamName = (team: string) =>
+  team
+    .toLowerCase()
+    .replace(/^(oakland|the)\s+/, "")
+    .replace(/\bathletics\b/, "athletics")
+    .replace(/[^a-z0-9]+/g, "");
+
+const providerEventBase = (providerEventId: string | null | undefined) =>
+  providerEventId?.split(":")[0]?.split("|")[0] ?? null;
+
+const gameEventKey = (row: {
+  providerEventId: string | null;
+  sport: string;
+  startsAt: Date;
+  awayTeam: string;
+  homeTeam: string;
+  marketKey?: string;
+}) => providerEventBase(row.providerEventId)
+  ?? `${row.sport}:${row.startsAt.toISOString()}:${row.awayTeam}:${row.homeTeam}`;
+
+const findMlbPitcherFallback = (
+  game: { startsAt: string; awayTeam: string; homeTeam: string },
+  fallbacks: MlbProbablePitcherFallback[]
+) => {
+  const away = normalizeMlbTeamName(game.awayTeam);
+  const home = normalizeMlbTeamName(game.homeTeam);
+  const startsAt = new Date(game.startsAt).getTime();
+  const sameTeams = fallbacks
+    .filter((candidate) =>
+      normalizeMlbTeamName(candidate.awayTeam) === away
+      && normalizeMlbTeamName(candidate.homeTeam) === home
+    )
+    .map((candidate) => ({
+      candidate,
+      delta: Math.abs(new Date(candidate.startsAt).getTime() - startsAt)
+    }))
+    .sort((left, right) => left.delta - right.delta);
+
+  return sameTeams[0]?.delta <= 12 * 60 * 60 * 1000 ? sameTeams[0].candidate : null;
+};
 
 const createVerificationToken = async (userId: string, email: string) => {
   const tokenSecret = randomBytes(32).toString("base64url");
@@ -1926,8 +1976,7 @@ export const registerRoutes = (router: Router) => {
       }>();
 
       for (const row of result.rows) {
-        const providerEventBase = row.providerEventId?.split(":")[0]?.split("|")[0];
-        const eventKey = providerEventBase ?? `${row.sport}:${row.startsAt}:${row.awayTeam}:${row.homeTeam}:${row.marketKey}`;
+        const eventKey = gameEventKey(row);
         const key = `${eventKey}:${row.marketKey}`;
         const market = marketMap.get(key) ?? {
           eventKey,
@@ -1983,13 +2032,30 @@ export const registerRoutes = (router: Router) => {
         homeLineup: unknown;
         markets: typeof markets;
       }>();
+      const needsMlbPitcherFallback = result.rows.some((row) =>
+        row.sport === "MLB" && (!row.awayProbablePitcherName || !row.homeProbablePitcherName)
+      );
+      const mlbDates = result.rows
+        .filter((row) => row.sport === "MLB")
+        .map((row) => yyyyMmDd(row.startsAt));
+      const mlbPitcherFallbacks = needsMlbPitcherFallback && mlbDates.length
+        ? await fetchMlbProbablePitcherFallbacks(
+          addDays(mlbDates.sort()[0], -1),
+          addDays(mlbDates.sort()[mlbDates.length - 1], 1)
+        ).catch((error) => {
+          console.error("MLB probable pitcher fallback failed", error);
+          return [] as MlbProbablePitcherFallback[];
+        })
+        : [];
 
       for (const market of markets) {
         const sourceRow = result.rows.find((row) => {
-          const rowEventKey = row.providerEventId?.split(":")[0]
-            ?? `${row.sport}:${row.startsAt}:${row.awayTeam}:${row.homeTeam}:${row.marketKey}`;
+          const rowEventKey = gameEventKey(row);
           return rowEventKey === market.eventKey;
         });
+        const fallback = market.sport === "MLB"
+          ? findMlbPitcherFallback(market, mlbPitcherFallbacks)
+          : null;
         const game = gameMap.get(market.eventKey) ?? {
           eventKey: market.eventKey,
           sport: market.sport,
@@ -1998,18 +2064,30 @@ export const registerRoutes = (router: Router) => {
           homeTeam: market.homeTeam,
           awayTeam: market.awayTeam,
           awayProbablePitcher: sourceRow ? {
-            id: sourceRow.awayProbablePitcherId,
-            name: sourceRow.awayProbablePitcherName,
+            id: sourceRow.awayProbablePitcherId ?? fallback?.awayProbablePitcher?.id ?? null,
+            name: sourceRow.awayProbablePitcherName || fallback?.awayProbablePitcher?.name || null,
             wins: sourceRow.awayPitcherWins === null ? null : Number(sourceRow.awayPitcherWins),
             losses: sourceRow.awayPitcherLosses === null ? null : Number(sourceRow.awayPitcherLosses),
             era: sourceRow.awayPitcherEra === null ? null : Number(sourceRow.awayPitcherEra)
+          } : fallback?.awayProbablePitcher ? {
+            id: fallback.awayProbablePitcher.id,
+            name: fallback.awayProbablePitcher.name,
+            wins: null,
+            losses: null,
+            era: null
           } : null,
           homeProbablePitcher: sourceRow ? {
-            id: sourceRow.homeProbablePitcherId,
-            name: sourceRow.homeProbablePitcherName,
+            id: sourceRow.homeProbablePitcherId ?? fallback?.homeProbablePitcher?.id ?? null,
+            name: sourceRow.homeProbablePitcherName || fallback?.homeProbablePitcher?.name || null,
             wins: sourceRow.homePitcherWins === null ? null : Number(sourceRow.homePitcherWins),
             losses: sourceRow.homePitcherLosses === null ? null : Number(sourceRow.homePitcherLosses),
             era: sourceRow.homePitcherEra === null ? null : Number(sourceRow.homePitcherEra)
+          } : fallback?.homeProbablePitcher ? {
+            id: fallback.homeProbablePitcher.id,
+            name: fallback.homeProbablePitcher.name,
+            wins: null,
+            losses: null,
+            era: null
           } : null,
           aiConfidence: null,
           awayLineup: sourceRow?.context?.awayLineup ?? null,
