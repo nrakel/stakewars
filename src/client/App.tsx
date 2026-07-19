@@ -1749,19 +1749,17 @@ function App() {
     try {
       for (let handIndex = 0; handIndex < handCount; handIndex += 1) {
         if (towerSimStopRef.current) break;
-        setTowerAnimationNote(`Simulator hand ${handIndex + 1} of ${handCount}: starting...`);
+        setTowerAnimationNote(`Simulator hand ${handIndex + 1} of ${handCount}`);
         let result = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand; counter: TowerCounter }>("/tower/hands", {
           method: "POST",
           body: JSON.stringify({ valueWagerCents, heightWagerCents })
         }, token);
         applyTowerResult(result);
         setTowerShowResult(false);
-        await wait(700);
 
         let hand = result.hand;
         while (!towerSimStopRef.current && hand.status !== "settled") {
           if (hand.status === "awaiting_double_decision") {
-            setTowerAnimationNote(`Simulator hand ${handIndex + 1}: matching ${hand.doubleOpportunityRank}, doubling Value.`);
             const doubleResult = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand }>(`/tower/hands/${hand.id}/double`, {
               method: "POST",
               body: JSON.stringify({
@@ -1772,19 +1770,16 @@ function App() {
             }, token);
             applyTowerResult(doubleResult);
             hand = doubleResult.hand;
-            await wait(700);
             continue;
           }
 
           if (hand.status !== "player_turn") {
-            await wait(350);
             break;
           }
 
           const latestPlayerCard = hand.playerCards.at(-1);
           const shouldBuild = typeof latestPlayerCard?.value === "number" && latestPlayerCard.value <= 8;
           if (shouldBuild) {
-            setTowerAnimationNote(`Simulator hand ${handIndex + 1}: ${latestPlayerCard?.rank} is 8 or lower, building.`);
             const buildResult = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${hand.id}/build`, {
               method: "POST",
               body: JSON.stringify({ actionVersion: hand.actionVersion })
@@ -1792,36 +1787,28 @@ function App() {
             applyTowerResult(buildResult);
             hand = buildResult.hand;
             if (hand.status === "settled") {
-              setTowerAnimationNote("Settling the hand...");
-              await wait(1100);
               setTowerShowResult(true);
               await refreshTower().catch(() => undefined);
             } else {
               setTowerShowResult(false);
-              await wait(700);
             }
             continue;
           }
 
-          setTowerAnimationNote(`Simulator hand ${handIndex + 1}: ${latestPlayerCard?.rank ?? "top card"} is above 8, capping.`);
           const capResult = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${hand.id}/cap`, {
             method: "POST",
             body: JSON.stringify({ actionVersion: hand.actionVersion })
           }, token);
-          await animateTowerCapResult(hand, {
-            ...capResult,
-            hand: capResult.hand
-          });
+          applyTowerResult(capResult);
+          setTowerShowResult(true);
           hand = capResult.hand;
         }
 
         setTowerSimCompleted(handIndex + 1);
-        await wait(1300);
         if (!towerSimStopRef.current) {
           setTowerState((current) => current ? { ...current, hand: null } : current);
           setTowerShowResult(false);
           await refreshTower().catch(() => undefined);
-          await wait(500);
         }
       }
       setTowerSimNotice(towerSimStopRef.current ? "Simulator stopped." : "Simulator complete.");
