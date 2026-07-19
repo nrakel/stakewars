@@ -648,6 +648,115 @@ export const capTowerHandForUser = async ({
   };
 });
 
+const emptyResultCounts = (): Record<TowerResult, number> => ({
+  pending: 0,
+  won: 0,
+  lost: 0,
+  push: 0,
+  void: 0
+});
+
+export const simulateTowerHandsForUser = async ({
+  userId,
+  valueWagerCents,
+  heightWagerCents,
+  hands
+}: {
+  userId: string;
+  valueWagerCents: number;
+  heightWagerCents: number;
+  hands: number;
+}) => {
+  const summary = {
+    requestedHands: hands,
+    completedHands: 0,
+    valueResults: emptyResultCounts(),
+    heightResults: emptyResultCounts(),
+    playerCollapses: 0,
+    dealerCollapses: 0,
+    playerValueTotal: 0,
+    dealerValueTotal: 0,
+    avgPlayerValue: null as number | null,
+    avgDealerValue: null as number | null,
+    balanceCents: 0
+  };
+
+  for (let index = 0; index < hands; index += 1) {
+    let result = await startTowerHandForUser({ userId, valueWagerCents, heightWagerCents });
+    let hand = result.hand;
+    if (!hand) throw new TowerError("Tower simulator could not start a hand.", 500);
+
+    while (hand.status !== "settled") {
+      if (hand.status === "awaiting_double_decision") {
+        const doubleResult = await doubleTowerHandForUser({
+          userId,
+          handId: hand.id,
+          actionVersion: hand.actionVersion,
+          doubleValue: hand.originalValueWagerCents > 0,
+          doubleHeight: false
+        });
+        hand = doubleResult.hand;
+        if (!hand) throw new TowerError("Tower simulator lost hand state after double.", 500);
+        continue;
+      }
+
+      if (hand.status !== "player_turn") {
+        throw new TowerError(`Tower simulator reached unsupported hand state: ${hand.status}`, 409);
+      }
+
+      const latestPlayerCard = hand.playerCards[hand.playerCards.length - 1];
+      if (typeof latestPlayerCard?.value === "number" && latestPlayerCard.value <= 8) {
+        const buildResult = await buildTowerHandForUser({
+          userId,
+          handId: hand.id,
+          actionVersion: hand.actionVersion
+        });
+        hand = buildResult.hand;
+        if (!hand) throw new TowerError("Tower simulator lost hand state after build.", 500);
+        continue;
+      }
+
+      const capResult = await capTowerHandForUser({
+        userId,
+        handId: hand.id,
+        actionVersion: hand.actionVersion
+      });
+      hand = capResult.hand;
+      if (!hand) throw new TowerError("Tower simulator lost hand state after cap.", 500);
+    }
+
+    summary.completedHands += 1;
+    summary.valueResults[hand.valueResult] += 1;
+    summary.heightResults[hand.heightResult] += 1;
+    if (hand.playerCollapsed) summary.playerCollapses += 1;
+    if (hand.dealerCollapsed) summary.dealerCollapses += 1;
+    summary.playerValueTotal += hand.playerValue;
+    summary.dealerValueTotal += hand.dealerValue ?? 0;
+  }
+
+  if (summary.completedHands > 0) {
+    summary.avgPlayerValue = summary.playerValueTotal / summary.completedHands;
+    summary.avgDealerValue = summary.dealerValueTotal / summary.completedHands;
+  }
+  const state = await getTowerState(userId);
+  summary.balanceCents = state.balanceCents;
+
+  return {
+    simulation: {
+      requestedHands: summary.requestedHands,
+      completedHands: summary.completedHands,
+      valueResults: summary.valueResults,
+      heightResults: summary.heightResults,
+      playerCollapses: summary.playerCollapses,
+      dealerCollapses: summary.dealerCollapses,
+      avgPlayerValue: summary.avgPlayerValue,
+      avgDealerValue: summary.avgDealerValue,
+      balanceCents: summary.balanceCents
+    },
+    state
+  };
+};
+
 export const getRecentTowerHands = async (userId: string, client?: pg.PoolClient) => {
   const result = client
     ? await client.query<{

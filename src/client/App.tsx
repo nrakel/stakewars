@@ -233,6 +233,18 @@ type TowerState = {
   history: TowerHistoryHand[];
 };
 
+type TowerSimulationSummary = {
+  requestedHands: number;
+  completedHands: number;
+  valueResults: Record<TowerResult, number>;
+  heightResults: Record<TowerResult, number>;
+  playerCollapses: number;
+  dealerCollapses: number;
+  avgPlayerValue: number | null;
+  avgDealerValue: number | null;
+  balanceCents: number;
+};
+
 type LeaderboardWeek = {
   weekStart: string;
   isCurrent: boolean;
@@ -1296,7 +1308,6 @@ function App() {
   const [towerSimRunning, setTowerSimRunning] = useState(false);
   const [towerSimCompleted, setTowerSimCompleted] = useState(0);
   const [towerSimNotice, setTowerSimNotice] = useState("");
-  const towerSimStopRef = useRef(false);
   const [kind, setKind] = useState<WagerKind>("straight");
   const [stake, setStake] = useState("100");
   const [roundRobinMaxLegs, setRoundRobinMaxLegs] = useState(2);
@@ -1738,80 +1749,29 @@ function App() {
       return;
     }
 
-    towerSimStopRef.current = false;
     setTowerSimRunning(true);
     setTowerPending(true);
     setTowerShowResult(false);
     setTowerNotice("");
-    setTowerSimNotice("Simulator running: build on 8 or lower, cap on 9 or higher, double Value when available.");
+    setTowerSimNotice("Server simulator running: build on 8 or lower, cap on 9 or higher, double Value when available.");
     setTowerSimCompleted(0);
 
     try {
-      for (let handIndex = 0; handIndex < handCount; handIndex += 1) {
-        if (towerSimStopRef.current) break;
-        setTowerAnimationNote(`Simulator hand ${handIndex + 1} of ${handCount}`);
-        let result = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand; counter: TowerCounter }>("/tower/hands", {
-          method: "POST",
-          body: JSON.stringify({ valueWagerCents, heightWagerCents })
-        }, token);
-        applyTowerResult(result);
-        setTowerShowResult(false);
-
-        let hand = result.hand;
-        while (!towerSimStopRef.current && hand.status !== "settled") {
-          if (hand.status === "awaiting_double_decision") {
-            const doubleResult = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand }>(`/tower/hands/${hand.id}/double`, {
-              method: "POST",
-              body: JSON.stringify({
-                actionVersion: hand.actionVersion,
-                doubleValue: hand.originalValueWagerCents > 0,
-                doubleHeight: false
-              })
-            }, token);
-            applyTowerResult(doubleResult);
-            hand = doubleResult.hand;
-            continue;
-          }
-
-          if (hand.status !== "player_turn") {
-            break;
-          }
-
-          const latestPlayerCard = hand.playerCards.at(-1);
-          const shouldBuild = typeof latestPlayerCard?.value === "number" && latestPlayerCard.value <= 8;
-          if (shouldBuild) {
-            const buildResult = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${hand.id}/build`, {
-              method: "POST",
-              body: JSON.stringify({ actionVersion: hand.actionVersion })
-            }, token);
-            applyTowerResult(buildResult);
-            hand = buildResult.hand;
-            if (hand.status === "settled") {
-              setTowerShowResult(true);
-              await refreshTower().catch(() => undefined);
-            } else {
-              setTowerShowResult(false);
-            }
-            continue;
-          }
-
-          const capResult = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${hand.id}/cap`, {
-            method: "POST",
-            body: JSON.stringify({ actionVersion: hand.actionVersion })
-          }, token);
-          applyTowerResult(capResult);
-          setTowerShowResult(true);
-          hand = capResult.hand;
-        }
-
-        setTowerSimCompleted(handIndex + 1);
-        if (!towerSimStopRef.current) {
-          setTowerState((current) => current ? { ...current, hand: null } : current);
-          setTowerShowResult(false);
-          await refreshTower().catch(() => undefined);
-        }
-      }
-      setTowerSimNotice(towerSimStopRef.current ? "Simulator stopped." : "Simulator complete.");
+      setTowerAnimationNote(`Running ${handCount} Tower hands server-side`);
+      const result = await api<{ simulation: TowerSimulationSummary; state: TowerState }>("/admin/tower/simulate", {
+        method: "POST",
+        body: JSON.stringify({ valueWagerCents, heightWagerCents, hands: handCount })
+      }, token);
+      setTowerState(result.state);
+      setBankroll((current) => current ? { ...current, balanceCents: result.state.balanceCents } : current);
+      setTowerShowResult(false);
+      setTowerSimCompleted(result.simulation.completedHands);
+      setTowerSimNotice(
+        `Simulator complete: ${result.simulation.completedHands} hands. `
+        + `Value ${result.simulation.valueResults.won}-${result.simulation.valueResults.lost}-${result.simulation.valueResults.push}; `
+        + `Height ${result.simulation.heightResults.won}-${result.simulation.heightResults.lost}. `
+        + `Player collapsed ${result.simulation.playerCollapses} times; dealer collapsed ${result.simulation.dealerCollapses} times.`
+      );
     } catch (error) {
       setTowerSimNotice((error as Error).message);
       if (error instanceof ApiError && error.status === 409) {
@@ -1821,13 +1781,7 @@ function App() {
       setTowerAnimationNote("");
       setTowerPending(false);
       setTowerSimRunning(false);
-      towerSimStopRef.current = false;
     }
-  };
-
-  const stopTowerSimulator = () => {
-    towerSimStopRef.current = true;
-    setTowerSimNotice("Stopping simulator after the current action...");
   };
 
   const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
@@ -2943,12 +2897,12 @@ function App() {
                   />
                 </label>
                 {towerSimRunning ? (
-                  <button type="button" onClick={stopTowerSimulator}>Stop</button>
+                  <button type="button" disabled>Running...</button>
                 ) : (
                   <button className="primary" type="button" disabled={Boolean(hand) || towerPending || !config} onClick={startTowerSimulator}>Simulate</button>
                 )}
               </div>
-              <small>{towerSimRunning ? `Completed ${towerSimCompleted} of ${towerSimHands || "0"} hands.` : towerSimCompleted > 0 ? `Last run completed ${towerSimCompleted} hands.` : "Ready to simulate."}</small>
+              <small>{towerSimRunning ? `Running ${towerSimHands || "0"} hands server-side.` : towerSimCompleted > 0 ? `Last run completed ${towerSimCompleted} hands.` : "Ready to simulate."}</small>
               {towerSimNotice && <p>{towerSimNotice}</p>}
             </div>
           )}

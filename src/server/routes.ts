@@ -20,6 +20,7 @@ import {
   getRecentTowerHands,
   getTowerAnalytics,
   getTowerState,
+  simulateTowerHandsForUser,
   startTowerHandForUser,
   TowerError
 } from "./tower/service.js";
@@ -83,6 +84,10 @@ const placeWagerSchema = z.object({
 const towerStartHandSchema = z.object({
   valueWagerCents: z.number().int().min(0).max(100_000_000).default(0),
   heightWagerCents: z.number().int().min(0).max(100_000_000).default(0)
+});
+
+const towerSimulateSchema = towerStartHandSchema.extend({
+  hands: z.number().int().min(1).max(1000)
 });
 
 const towerActionSchema = z.object({
@@ -1132,6 +1137,25 @@ export const registerRoutes = (router: Router) => {
         handId: String(req.params.id),
         actionVersion: input.actionVersion
       }));
+    } catch (error) {
+      if (error instanceof TowerError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/admin/tower/simulate", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const input = towerSimulateSchema.parse(req.body);
+      const result = await simulateTowerHandsForUser({
+        userId: req.user!.id,
+        valueWagerCents: input.valueWagerCents,
+        heightWagerCents: input.heightWagerCents,
+        hands: input.hands
+      });
+      res.json(result);
     } catch (error) {
       if (error instanceof TowerError) {
         res.status(error.statusCode).json({ error: error.message });
