@@ -1290,6 +1290,13 @@ function App() {
   const [towerNotice, setTowerNotice] = useState("");
   const [towerCounterExpanded, setTowerCounterExpanded] = useState(false);
   const [towerCounterView, setTowerCounterView] = useState<"rank" | "exact">("rank");
+  const [towerSimValueWager, setTowerSimValueWager] = useState("100");
+  const [towerSimHeightWager, setTowerSimHeightWager] = useState("100");
+  const [towerSimHands, setTowerSimHands] = useState("10");
+  const [towerSimRunning, setTowerSimRunning] = useState(false);
+  const [towerSimCompleted, setTowerSimCompleted] = useState(0);
+  const [towerSimNotice, setTowerSimNotice] = useState("");
+  const towerSimStopRef = useRef(false);
   const [kind, setKind] = useState<WagerKind>("straight");
   const [stake, setStake] = useState("100");
   const [roundRobinMaxLegs, setRoundRobinMaxLegs] = useState(2);
@@ -1709,6 +1716,131 @@ function App() {
     } finally {
       setTowerPending(false);
     }
+  };
+
+  const startTowerSimulator = async () => {
+    if (!token || !towerState?.config || !isNateRakelAccount) return;
+    let valueWagerCents = 0;
+    let heightWagerCents = 0;
+    let handCount = 0;
+    try {
+      valueWagerCents = parseTowerWagerCents(towerSimValueWager, "Simulator Value", towerState.config);
+      heightWagerCents = parseTowerWagerCents(towerSimHeightWager, "Simulator Height", towerState.config);
+      handCount = Number(towerSimHands.trim());
+      if (!/^\d+$/.test(towerSimHands.trim()) || !Number.isSafeInteger(handCount) || handCount < 1 || handCount > 250) {
+        throw new Error("Hands to simulate must be a whole number from 1 to 250.");
+      }
+      if (valueWagerCents + heightWagerCents <= 0) {
+        throw new Error("Enter a Value wager, Height wager, or both.");
+      }
+    } catch (error) {
+      setTowerSimNotice((error as Error).message);
+      return;
+    }
+
+    towerSimStopRef.current = false;
+    setTowerSimRunning(true);
+    setTowerPending(true);
+    setTowerShowResult(false);
+    setTowerNotice("");
+    setTowerSimNotice("Simulator running: build on 8 or lower, cap on 9 or higher, double Value when available.");
+    setTowerSimCompleted(0);
+
+    try {
+      for (let handIndex = 0; handIndex < handCount; handIndex += 1) {
+        if (towerSimStopRef.current) break;
+        setTowerAnimationNote(`Simulator hand ${handIndex + 1} of ${handCount}: starting...`);
+        let result = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand; counter: TowerCounter }>("/tower/hands", {
+          method: "POST",
+          body: JSON.stringify({ valueWagerCents, heightWagerCents })
+        }, token);
+        applyTowerResult(result);
+        setTowerShowResult(false);
+        await wait(700);
+
+        let hand = result.hand;
+        while (!towerSimStopRef.current && hand.status !== "settled") {
+          if (hand.status === "awaiting_double_decision") {
+            setTowerAnimationNote(`Simulator hand ${handIndex + 1}: matching ${hand.doubleOpportunityRank}, doubling Value.`);
+            const doubleResult = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand }>(`/tower/hands/${hand.id}/double`, {
+              method: "POST",
+              body: JSON.stringify({
+                actionVersion: hand.actionVersion,
+                doubleValue: hand.originalValueWagerCents > 0,
+                doubleHeight: false
+              })
+            }, token);
+            applyTowerResult(doubleResult);
+            hand = doubleResult.hand;
+            await wait(700);
+            continue;
+          }
+
+          if (hand.status !== "player_turn") {
+            await wait(350);
+            break;
+          }
+
+          const latestPlayerCard = hand.playerCards.at(-1);
+          const shouldBuild = typeof latestPlayerCard?.value === "number" && latestPlayerCard.value <= 8;
+          if (shouldBuild) {
+            setTowerAnimationNote(`Simulator hand ${handIndex + 1}: ${latestPlayerCard?.rank} is 8 or lower, building.`);
+            const buildResult = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${hand.id}/build`, {
+              method: "POST",
+              body: JSON.stringify({ actionVersion: hand.actionVersion })
+            }, token);
+            applyTowerResult(buildResult);
+            hand = buildResult.hand;
+            if (hand.status === "settled") {
+              setTowerAnimationNote("Settling the hand...");
+              await wait(1100);
+              setTowerShowResult(true);
+              await refreshTower().catch(() => undefined);
+            } else {
+              setTowerShowResult(false);
+              await wait(700);
+            }
+            continue;
+          }
+
+          setTowerAnimationNote(`Simulator hand ${handIndex + 1}: ${latestPlayerCard?.rank ?? "top card"} is above 8, capping.`);
+          const capResult = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${hand.id}/cap`, {
+            method: "POST",
+            body: JSON.stringify({ actionVersion: hand.actionVersion })
+          }, token);
+          await animateTowerCapResult(hand, {
+            ...capResult,
+            hand: capResult.hand
+          });
+          hand = capResult.hand;
+        }
+
+        setTowerSimCompleted(handIndex + 1);
+        await wait(1300);
+        if (!towerSimStopRef.current) {
+          setTowerState((current) => current ? { ...current, hand: null } : current);
+          setTowerShowResult(false);
+          await refreshTower().catch(() => undefined);
+          await wait(500);
+        }
+      }
+      setTowerSimNotice(towerSimStopRef.current ? "Simulator stopped." : "Simulator complete.");
+    } catch (error) {
+      setTowerSimNotice((error as Error).message);
+      if (error instanceof ApiError && error.status === 409) {
+        await refreshTower().catch(() => undefined);
+      }
+    } finally {
+      setTowerAnimationNote("");
+      setTowerPending(false);
+      setTowerSimRunning(false);
+      towerSimStopRef.current = false;
+    }
+  };
+
+  const stopTowerSimulator = () => {
+    towerSimStopRef.current = true;
+    setTowerSimNotice("Stopping simulator after the current action...");
   };
 
   const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
@@ -2778,6 +2910,59 @@ function App() {
               <button className="primary tower-start" type="button" disabled={!canStart || towerPending} onClick={startTower}>
                 Start Hand
               </button>
+            </div>
+          )}
+          {isNateRakelAccount && (
+            <div className="tower-simulator">
+              <div>
+                <strong>Nate simulator</strong>
+                <span>Auto-plays Tower with server-dealt cards: doubles Value on matches, builds on 8 or lower, caps above 8.</span>
+              </div>
+              <div className="tower-sim-grid">
+                <label>
+                  Value
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
+                    value={towerSimValueWager}
+                    onChange={(event) => setTowerSimValueWager(event.target.value)}
+                    disabled={towerSimRunning}
+                  />
+                </label>
+                <label>
+                  Height
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
+                    value={towerSimHeightWager}
+                    onChange={(event) => setTowerSimHeightWager(event.target.value)}
+                    disabled={towerSimRunning}
+                  />
+                </label>
+                <label>
+                  Hands
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
+                    value={towerSimHands}
+                    onChange={(event) => setTowerSimHands(event.target.value)}
+                    disabled={towerSimRunning}
+                  />
+                </label>
+                {towerSimRunning ? (
+                  <button type="button" onClick={stopTowerSimulator}>Stop</button>
+                ) : (
+                  <button className="primary" type="button" disabled={Boolean(hand) || towerPending || !config} onClick={startTowerSimulator}>Simulate</button>
+                )}
+              </div>
+              <small>{towerSimRunning ? `Completed ${towerSimCompleted} of ${towerSimHands || "0"} hands.` : towerSimCompleted > 0 ? `Last run completed ${towerSimCompleted} hands.` : "Ready to simulate."}</small>
+              {towerSimNotice && <p>{towerSimNotice}</p>}
             </div>
           )}
           {hand && (

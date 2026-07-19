@@ -2640,6 +2640,57 @@ textarea {
   height: 44px;
 }
 
+.tower-simulator {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  padding: 12px;
+}
+
+.tower-simulator > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.tower-simulator strong {
+  color: #7c2d12;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.tower-simulator span,
+.tower-simulator small,
+.tower-simulator p {
+  margin: 0;
+  color: #7c2d12;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.tower-sim-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.tower-sim-grid label {
+  display: grid;
+  gap: 4px;
+  color: #7c2d12;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.tower-sim-grid input {
+  width: 100%;
+  background: white;
+}
+
 .tower-status-strip {
   display: flex;
   flex-wrap: wrap;
@@ -2862,6 +2913,7 @@ textarea {
   }
 
   .tower-wager-grid,
+  .tower-sim-grid,
   .tower-board {
     grid-template-columns: 1fr;
   }
