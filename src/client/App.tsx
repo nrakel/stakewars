@@ -306,6 +306,7 @@ const isVerificationRequiredResponse = (value: unknown): value is VerificationRe
   );
 
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 const pct = (value: number | null | undefined) => value == null ? "-" : `${(value * 100).toFixed(1)}%`;
 const units = (value: number | null | undefined) => value == null ? "-" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}u`;
 
@@ -1284,6 +1285,8 @@ function App() {
   const [towerValueWager, setTowerValueWager] = useState("5");
   const [towerHeightWager, setTowerHeightWager] = useState("5");
   const [towerPending, setTowerPending] = useState(false);
+  const [towerShowResult, setTowerShowResult] = useState(false);
+  const [towerAnimationNote, setTowerAnimationNote] = useState("");
   const [towerNotice, setTowerNotice] = useState("");
   const [towerCounterExpanded, setTowerCounterExpanded] = useState(false);
   const [towerCounterView, setTowerCounterView] = useState<"rank" | "exact">("rank");
@@ -1522,6 +1525,8 @@ function App() {
     if (!authToken) return;
     const result = await api<TowerState>("/tower/state", {}, authToken);
     setTowerState(result);
+    setTowerShowResult(Boolean(result.hand && result.hand.status === "settled"));
+    setTowerAnimationNote("");
     setBankroll((current) => current ? { ...current, balance_cents: result.balanceCents } : current);
   };
 
@@ -1539,6 +1544,56 @@ function App() {
     }
   };
 
+  const setTowerHandView = (hand: TowerHand, counter?: TowerCounter | null) => {
+    setTowerState((current) => current ? {
+      ...current,
+      hand,
+      counter: counter ?? current.counter
+    } : current);
+  };
+
+  const handWithoutSettlement = (hand: TowerHand, dealerCards = hand.dealerCards): TowerHand => ({
+    ...hand,
+    status: "dealer_turn",
+    dealerCards,
+    dealerHeight: null,
+    dealerValue: null,
+    dealerCollapsed: false,
+    valueResult: "pending",
+    heightResult: "pending",
+    valuePayoutCents: 0,
+    heightPayoutCents: 0,
+    completedAt: null
+  });
+
+  const animateTowerCapResult = async (
+    previousHand: TowerHand,
+    result: Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter | null }
+  ) => {
+    setTowerShowResult(false);
+    setTowerAnimationNote("Dealer is revealing the tower...");
+    setTowerHandView(handWithoutSettlement(result.hand, previousHand.dealerCards), result.counter);
+    await wait(650);
+
+    for (let index = 0; index < result.hand.dealerCards.length; index += 1) {
+      const revealedDealerCards = result.hand.dealerCards.slice(0, index + 1);
+      const allDealerCardsVisible = index === result.hand.dealerCards.length - 1;
+      setTowerHandView({
+        ...handWithoutSettlement(result.hand, revealedDealerCards),
+        dealerHeight: allDealerCardsVisible ? result.hand.dealerHeight : null,
+        dealerValue: allDealerCardsVisible ? result.hand.dealerValue : null,
+        dealerCollapsed: allDealerCardsVisible ? result.hand.dealerCollapsed : false
+      }, result.counter);
+      await wait(650);
+    }
+
+    setTowerAnimationNote("Settling the hand...");
+    await wait(1100);
+    applyTowerResult(result);
+    setTowerShowResult(true);
+    setTowerAnimationNote("");
+  };
+
   const startTower = async () => {
     if (!token) return;
     setTowerPending(true);
@@ -1552,6 +1607,8 @@ function App() {
         })
       }, token);
       applyTowerResult(result);
+      setTowerShowResult(false);
+      setTowerAnimationNote("");
     } catch (error) {
       setTowerNotice((error as Error).message);
     } finally {
@@ -1568,8 +1625,19 @@ function App() {
         method: "POST",
         body: JSON.stringify({ actionVersion: towerState.hand.actionVersion })
       }, token);
-      applyTowerResult(result);
+      if (action === "cap" && result.hand.status === "settled") {
+        await animateTowerCapResult(towerState.hand, result);
+      } else {
+        applyTowerResult(result);
+        setTowerShowResult(false);
+      }
       if (result.hand.status === "settled") {
+        if (action !== "cap") {
+          setTowerAnimationNote("Settling the hand...");
+          await wait(1000);
+          setTowerShowResult(true);
+          setTowerAnimationNote("");
+        }
         await refreshTower().catch(() => undefined);
       }
     } catch (error) {
@@ -1596,6 +1664,8 @@ function App() {
         })
       }, token);
       applyTowerResult(result);
+      setTowerShowResult(false);
+      setTowerAnimationNote("");
     } catch (error) {
       setTowerNotice((error as Error).message);
       if (error instanceof ApiError && error.status === 409) {
@@ -2671,13 +2741,17 @@ function App() {
                   </>
                 )}
               </div>
-              <div className="tower-result">
-                <span>Value {money(hand.valueWagerCents)}: <strong>{towerResultLabel(hand.valueResult)}</strong>{hand.valuePayoutCents > 0 ? ` • returns ${money(hand.valuePayoutCents)}` : ""}</span>
-                <span>Height {money(hand.heightWagerCents)}: <strong>{towerResultLabel(hand.heightResult)}</strong>{hand.heightPayoutCents > 0 ? ` • returns ${money(hand.heightPayoutCents)}` : ""}</span>
-              </div>
-              {hand.status === "settled" && (
+              {towerAnimationNote && <p className="tower-animation-note">{towerAnimationNote}</p>}
+              {hand.status === "settled" && towerShowResult && (
+                <div className="tower-result">
+                  <span>Value {money(hand.valueWagerCents)}: <strong>{towerResultLabel(hand.valueResult)}</strong>{hand.valuePayoutCents > 0 ? ` • returns ${money(hand.valuePayoutCents)}` : ""}</span>
+                  <span>Height {money(hand.heightWagerCents)}: <strong>{towerResultLabel(hand.heightResult)}</strong>{hand.heightPayoutCents > 0 ? ` • returns ${money(hand.heightPayoutCents)}` : ""}</span>
+                </div>
+              )}
+              {hand.status === "settled" && towerShowResult && (
                 <button type="button" onClick={() => {
                   setTowerState((current) => current ? { ...current, hand: null } : current);
+                  setTowerShowResult(false);
                   void refreshTower();
                 }}>Clear Hand</button>
               )}

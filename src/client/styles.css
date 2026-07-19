@@ -2747,6 +2747,14 @@ textarea {
   padding-top: 12px;
 }
 
+.tower-animation-note {
+  margin: 0;
+  border-top: 1px solid #edf1ed;
+  padding-top: 12px;
+  color: #7c2d12;
+  font-weight: 900;
+}
+
 .tower-result span {
   color: #43524c;
   font-size: 0.9rem;
