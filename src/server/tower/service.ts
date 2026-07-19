@@ -721,7 +721,11 @@ export const simulateTowerHandsForUser = async ({
       }
 
       const latestPlayerCard = hand.playerCards[hand.playerCards.length - 1];
-      if (typeof latestPlayerCard?.value === "number" && latestPlayerCard.value <= 8) {
+      const shouldBuild = hand.dealerCollapsed
+        ? hand.playerHeight < 3 || (typeof latestPlayerCard?.value === "number" && latestPlayerCard.value < 9)
+        : hand.dealerValue == null || hand.playerValue <= hand.dealerValue;
+
+      if (shouldBuild) {
         const buildResult = await buildTowerHandForUser({
           userId,
           handId: hand.id,

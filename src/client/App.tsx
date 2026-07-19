@@ -1714,7 +1714,7 @@ function App() {
     setTowerPending(true);
     setTowerShowResult(false);
     setTowerNotice("");
-    setTowerSimNotice("Server simulator running: build on 8 or lower, cap on 9 or higher, double Value when available.");
+    setTowerSimNotice("Server simulator running: chase dealer Value unless the dealer collapses; then build for 3+ floors and a 9+ top card.");
     setTowerSimCompleted(0);
 
     try {
@@ -2818,7 +2818,7 @@ function App() {
             <div className="tower-simulator">
               <div>
                 <strong>Nate simulator</strong>
-                <span>Auto-plays Tower with server-dealt cards: doubles Value on matches, builds on 8 or lower, caps above 8.</span>
+                <span>Auto-plays Tower with server-dealt cards: doubles Value on matches, chases dealer Value, and pushes collapsed dealers for Height.</span>
               </div>
               <div className="tower-sim-grid">
                 <label>
