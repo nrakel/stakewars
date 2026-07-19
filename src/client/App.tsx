@@ -1,12 +1,12 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Lock, LogOut, Mail, Radio, Save, ShieldCheck, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
+import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
 import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "ai-picks" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
 type AdminSection = "traffic" | "support" | "prizes" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
@@ -135,6 +135,102 @@ type SupportMessage = {
   senderRole: "user" | "admin";
   body: string;
   createdAt: string;
+};
+
+type TowerRank = "A" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "10" | "J" | "Q" | "K";
+type TowerSuit = "hearts" | "diamonds" | "clubs" | "spades";
+type TowerResult = "pending" | "won" | "lost" | "push" | "void";
+type TowerPublicCard = {
+  rank: TowerRank | null;
+  suit: TowerSuit | null;
+  value: number | null;
+  id: string | null;
+  faceUp: boolean;
+  causedCollapse: boolean;
+};
+
+type TowerPayoutRatio = {
+  numerator: number;
+  denominator: number;
+};
+
+type TowerPayoutBand = {
+  minHeight: number;
+  maxHeight: number | null;
+  payout: TowerPayoutRatio;
+};
+
+type TowerConfig = {
+  minWagerCents: number;
+  maxWagerCents: number;
+  defaultWagerCents: number;
+  maxExposureCents: number;
+  heightQualificationMinCards: number;
+  heightPayouts: TowerPayoutBand[];
+};
+
+type TowerHand = {
+  id: string;
+  status: "player_turn" | "awaiting_double_decision" | "settled" | "voided" | string;
+  actionVersion: number;
+  playerCards: TowerPublicCard[];
+  dealerCards: TowerPublicCard[];
+  playerHeight: number;
+  playerValue: number;
+  dealerHeight: number | null;
+  dealerValue: number | null;
+  playerCollapsed: boolean;
+  dealerCollapsed: boolean;
+  doubleOpportunity: boolean;
+  doubleOpportunityRank: TowerRank | null;
+  valueWagerCents: number;
+  heightWagerCents: number;
+  originalValueWagerCents: number;
+  originalHeightWagerCents: number;
+  valueResult: TowerResult;
+  heightResult: TowerResult;
+  valuePayoutCents: number;
+  heightPayoutCents: number;
+  heightQualified: boolean;
+  currentHeightPayoutBand: TowerPayoutBand | null;
+  nextHeightPayoutBand: TowerPayoutBand | null;
+  dealerOpeningRankCategory: "J" | "Q" | "K" | "lower_than_jack" | null;
+  completedAt: string | null;
+};
+
+type TowerCounter = {
+  exactCards: Array<{ rank: TowerRank; suit: TowerSuit; remainingUnseen: number }>;
+  ranks: Array<{ rank: TowerRank; value: number; remainingUnseen: number }>;
+  totalPubliclyUnseenCards: number;
+  totalPhysicallyUndealtCards: number;
+  hiddenCardsInPlay: number;
+};
+
+type TowerHistoryHand = {
+  id: string;
+  status: string;
+  playerCards: TowerPublicCard[];
+  dealerCards: TowerPublicCard[];
+  playerHeight: number;
+  playerValue: number;
+  dealerHeight: number | null;
+  dealerValue: number | null;
+  valueWagerCents: number;
+  heightWagerCents: number;
+  valueResult: TowerResult;
+  heightResult: TowerResult;
+  valuePayoutCents: number;
+  heightPayoutCents: number;
+  startedAt: string;
+  completedAt: string | null;
+};
+
+type TowerState = {
+  balanceCents: number;
+  hand: TowerHand | null;
+  counter: TowerCounter | null;
+  config: TowerConfig;
+  history: TowerHistoryHand[];
 };
 
 type LeaderboardWeek = {
@@ -540,6 +636,7 @@ const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: S
   if (page === "contact") return "Contact Us";
   if (page === "install") return "Install App";
   if (page === "ai-picks") return "Daily Chine Picks";
+  if (page === "tower") return "Tower";
   if (page === "admin") return "Admin";
   return page.charAt(0).toUpperCase() + page.slice(1);
 };
@@ -1183,6 +1280,13 @@ function App() {
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
   const [aiPicks, setAiPicks] = useState<DailyAiPick[]>([]);
   const [dailyChineParlay, setDailyChineParlay] = useState<DailyChineParlay | null>(null);
+  const [towerState, setTowerState] = useState<TowerState | null>(null);
+  const [towerValueWager, setTowerValueWager] = useState("5");
+  const [towerHeightWager, setTowerHeightWager] = useState("5");
+  const [towerPending, setTowerPending] = useState(false);
+  const [towerNotice, setTowerNotice] = useState("");
+  const [towerCounterExpanded, setTowerCounterExpanded] = useState(false);
+  const [towerCounterView, setTowerCounterView] = useState<"rank" | "exact">("rank");
   const [kind, setKind] = useState<WagerKind>("straight");
   const [stake, setStake] = useState("100");
   const [roundRobinMaxLegs, setRoundRobinMaxLegs] = useState(2);
@@ -1313,11 +1417,12 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, towerResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
-        api<ReferralInfo>("/me/referral", {}, authToken)
+        api<ReferralInfo>("/me/referral", {}, authToken),
+        api<TowerState>("/tower/state", {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1331,6 +1436,7 @@ function App() {
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
       setReferralInfo(referralResult);
+      setTowerState(towerResult);
       setReferralQr(await QRCode.toDataURL(referralResult.referralUrl, {
         width: 220,
         margin: 1,
@@ -1410,6 +1516,94 @@ function App() {
 
   const jumpToBetSlip = () => {
     document.getElementById("bet-slip")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const refreshTower = async (authToken = token) => {
+    if (!authToken) return;
+    const result = await api<TowerState>("/tower/state", {}, authToken);
+    setTowerState(result);
+    setBankroll((current) => current ? { ...current, balance_cents: result.balanceCents } : current);
+  };
+
+  const creditsToCents = (value: string) => Math.round(Number(value || "0") * 100);
+
+  const applyTowerResult = (result: Partial<TowerState> & { balanceCents?: number; hand?: TowerHand | null; counter?: TowerCounter | null }) => {
+    setTowerState((current) => current ? {
+      ...current,
+      balanceCents: result.balanceCents ?? current.balanceCents,
+      hand: result.hand ?? current.hand,
+      counter: result.counter ?? current.counter
+    } : null);
+    if (typeof result.balanceCents === "number") {
+      setBankroll((current) => current ? { ...current, balance_cents: result.balanceCents! } : current);
+    }
+  };
+
+  const startTower = async () => {
+    if (!token) return;
+    setTowerPending(true);
+    setTowerNotice("");
+    try {
+      const result = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand; counter: TowerCounter }>("/tower/hands", {
+        method: "POST",
+        body: JSON.stringify({
+          valueWagerCents: creditsToCents(towerValueWager),
+          heightWagerCents: creditsToCents(towerHeightWager)
+        })
+      }, token);
+      applyTowerResult(result);
+    } catch (error) {
+      setTowerNotice((error as Error).message);
+    } finally {
+      setTowerPending(false);
+    }
+  };
+
+  const towerAction = async (action: "build" | "cap") => {
+    if (!token || !towerState?.hand) return;
+    setTowerPending(true);
+    setTowerNotice("");
+    try {
+      const result = await api<Partial<TowerState> & { balanceCents?: number; hand: TowerHand; counter?: TowerCounter }>(`/tower/hands/${towerState.hand.id}/${action}`, {
+        method: "POST",
+        body: JSON.stringify({ actionVersion: towerState.hand.actionVersion })
+      }, token);
+      applyTowerResult(result);
+      if (result.hand.status === "settled") {
+        await refreshTower().catch(() => undefined);
+      }
+    } catch (error) {
+      setTowerNotice((error as Error).message);
+      if (error instanceof ApiError && error.status === 409) {
+        await refreshTower().catch(() => undefined);
+      }
+    } finally {
+      setTowerPending(false);
+    }
+  };
+
+  const towerDouble = async (doubleValue: boolean, doubleHeight: boolean) => {
+    if (!token || !towerState?.hand) return;
+    setTowerPending(true);
+    setTowerNotice("");
+    try {
+      const result = await api<Partial<TowerState> & { balanceCents: number; hand: TowerHand }>("/tower/hands/" + towerState.hand.id + "/double", {
+        method: "POST",
+        body: JSON.stringify({
+          actionVersion: towerState.hand.actionVersion,
+          doubleValue,
+          doubleHeight
+        })
+      }, token);
+      applyTowerResult(result);
+    } catch (error) {
+      setTowerNotice((error as Error).message);
+      if (error instanceof ApiError && error.status === 409) {
+        await refreshTower().catch(() => undefined);
+      }
+    } finally {
+      setTowerPending(false);
+    }
   };
 
   const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
@@ -2346,6 +2540,178 @@ function App() {
     }
   };
 
+  const towerPayoutLabel = (band: TowerPayoutBand | null) =>
+    band ? `${band.minHeight}${band.maxHeight && band.maxHeight !== band.minHeight ? `-${band.maxHeight}` : band.maxHeight === null ? "+" : ""} floors pays ${band.payout.numerator}:${band.payout.denominator}` : "No band";
+
+  const towerResultLabel = (result: TowerResult) => {
+    if (result === "won") return "Won";
+    if (result === "lost") return "Lost";
+    if (result === "push") return "Push";
+    if (result === "void") return "Void";
+    return "Pending";
+  };
+
+  const TowerCardView = ({ card }: { card: TowerPublicCard }) => (
+    <div className={`tower-card ${card.faceUp ? card.suit ?? "" : "hidden"} ${card.causedCollapse ? "collapse" : ""}`}>
+      {card.faceUp ? (
+        <>
+          <strong>{card.rank}</strong>
+          <span>{card.suit}</span>
+        </>
+      ) : (
+        <strong>SW</strong>
+      )}
+    </div>
+  );
+
+  const TowerStack = ({ title, cards, value, height, collapsed }: {
+    title: string;
+    cards: TowerPublicCard[];
+    value: number | null;
+    height: number | null;
+    collapsed?: boolean;
+  }) => (
+    <div className={`tower-stack ${collapsed ? "collapsed" : ""}`}>
+      <div className="tower-stack-header">
+        <strong>{title}</strong>
+        <span>{height ?? "-"} floors • {value ?? "-"} value</span>
+      </div>
+      <div className="tower-card-stack">
+        {cards.map((card, index) => <TowerCardView key={`${card.id ?? "hidden"}-${index}`} card={card} />)}
+      </div>
+    </div>
+  );
+
+  const TowerCounterPanel = () => {
+    const counter = towerState?.counter;
+    if (!counter) return <p className="muted">A shoe counter will appear after the first Tower shoe is created.</p>;
+    return (
+      <div className="tower-counter">
+        <div className="tower-counter-stats">
+          <span><strong>{counter.totalPubliclyUnseenCards}</strong> publicly unseen</span>
+          <span><strong>{counter.totalPhysicallyUndealtCards}</strong> physically undealt</span>
+          <span><strong>{counter.hiddenCardsInPlay}</strong> hidden in play</span>
+        </div>
+        <div className="kind-tabs compact">
+          <button className={towerCounterView === "rank" ? "active" : ""} onClick={() => setTowerCounterView("rank")}>Rank summary</button>
+          <button className={towerCounterView === "exact" ? "active" : ""} onClick={() => setTowerCounterView("exact")}>Exact cards</button>
+        </div>
+        <div className={towerCounterView === "rank" ? "tower-rank-counter" : "tower-exact-counter"}>
+          {towerCounterView === "rank"
+            ? counter.ranks.map((row) => (
+              <span key={row.rank}><strong>{row.rank}</strong>{row.remainingUnseen}</span>
+            ))
+            : counter.exactCards.map((row) => (
+              <span key={`${row.rank}-${row.suit}`}><strong>{row.rank}</strong><small>{row.suit}</small>{row.remainingUnseen}</span>
+            ))}
+        </div>
+      </div>
+    );
+  };
+
+  const TowerPage = () => {
+    const hand = towerState?.hand;
+    const config = towerState?.config;
+    const canStart = Boolean(config && !hand);
+    const canAct = Boolean(hand && hand.status === "player_turn" && !towerPending);
+    const canDouble = Boolean(hand && hand.status === "awaiting_double_decision" && !towerPending);
+    const valueWagerCents = creditsToCents(towerValueWager);
+    const heightWagerCents = creditsToCents(towerHeightWager);
+    return (
+      <div className="tower-page">
+        <section className="panel tower-table">
+          <div className="panel-title">
+            <Layers size={20} />
+            <h2>Tower</h2>
+          </div>
+          <div className="tower-balance-row">
+            <span>Play-money balance</span>
+            <strong>{money(towerState?.balanceCents ?? bankroll?.balance_cents ?? 0)}</strong>
+          </div>
+          {!hand && (
+            <div className="tower-wager-grid">
+              <label>
+                VALUE
+                <span>Beat the dealer's total.</span>
+                <input type="number" min={config ? config.minWagerCents / 100 : 1} max={config ? config.maxWagerCents / 100 : 100} step="1" value={towerValueWager} onChange={(event) => setTowerValueWager(event.target.value)} />
+              </label>
+              <label>
+                HEIGHT
+                <span>Build at least 3 floors, then beat height and value.</span>
+                <input type="number" min={config ? config.minWagerCents / 100 : 1} max={config ? config.maxWagerCents / 100 : 100} step="1" value={towerHeightWager} onChange={(event) => setTowerHeightWager(event.target.value)} />
+              </label>
+              <button className="primary tower-start" type="button" disabled={!canStart || towerPending || valueWagerCents + heightWagerCents <= 0} onClick={startTower}>
+                Start Hand
+              </button>
+            </div>
+          )}
+          {hand && (
+            <>
+              <div className="tower-status-strip">
+                <span>{hand.heightQualified ? "Height: Qualified" : "Height: Not Qualified"}</span>
+                <span>Current: {towerPayoutLabel(hand.currentHeightPayoutBand)}</span>
+                <span>Next: {towerPayoutLabel(hand.nextHeightPayoutBand)}</span>
+              </div>
+              <div className="tower-board">
+                <TowerStack title="Dealer" cards={hand.dealerCards} value={hand.dealerValue} height={hand.dealerHeight} collapsed={hand.dealerCollapsed} />
+                <TowerStack title="Player" cards={hand.playerCards} value={hand.playerValue} height={hand.playerHeight} collapsed={hand.playerCollapsed} />
+              </div>
+              <div className="tower-action-row">
+                {canDouble ? (
+                  <>
+                    <button type="button" disabled={towerPending || hand.originalValueWagerCents <= 0} onClick={() => towerDouble(true, false)}>Double Value</button>
+                    <button type="button" disabled={towerPending || hand.originalHeightWagerCents <= 0} onClick={() => towerDouble(false, true)}>Double Height</button>
+                    <button type="button" disabled={towerPending || hand.originalValueWagerCents <= 0 || hand.originalHeightWagerCents <= 0} onClick={() => towerDouble(true, true)}>Double Both</button>
+                    <button type="button" disabled={towerPending} onClick={() => towerDouble(false, false)}>No Double</button>
+                  </>
+                ) : (
+                  <>
+                    <button className="primary" type="button" disabled={!canAct} onClick={() => towerAction("build")}>BUILD</button>
+                    <button type="button" disabled={!canAct} onClick={() => towerAction("cap")}>CAP</button>
+                  </>
+                )}
+              </div>
+              <div className="tower-result">
+                <span>Value {money(hand.valueWagerCents)}: <strong>{towerResultLabel(hand.valueResult)}</strong>{hand.valuePayoutCents > 0 ? ` • returns ${money(hand.valuePayoutCents)}` : ""}</span>
+                <span>Height {money(hand.heightWagerCents)}: <strong>{towerResultLabel(hand.heightResult)}</strong>{hand.heightPayoutCents > 0 ? ` • returns ${money(hand.heightPayoutCents)}` : ""}</span>
+              </div>
+              {hand.status === "settled" && (
+                <button type="button" onClick={() => {
+                  setTowerState((current) => current ? { ...current, hand: null } : current);
+                  void refreshTower();
+                }}>Clear Hand</button>
+              )}
+            </>
+          )}
+          {towerNotice && <p className="error-text">{towerNotice}</p>}
+        </section>
+        <aside className="tower-rail">
+          <section className="panel">
+            <button className="tower-counter-toggle" type="button" onClick={() => setTowerCounterExpanded((current) => !current)}>
+              Shoe Counter {towerCounterExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            {towerCounterExpanded && <TowerCounterPanel />}
+          </section>
+          <section className="panel tower-help">
+            <h2>How fairness works</h2>
+            <p>Tower uses a six-deck shoe shuffled on the server with cryptographically secure randomness. Cards are dealt from the shoe in order, and the browser never chooses card outcomes or settlement results.</p>
+            <p>The counter shows cards not yet publicly revealed. Hidden dealer cards remain counted as unseen until they are revealed.</p>
+            <p>Every hand, card draw, double decision, and balance change is recorded.</p>
+          </section>
+          <section className="panel tower-history">
+            <h2>Recent hands</h2>
+            {towerState?.history?.length ? towerState.history.slice(0, 6).map((row) => (
+              <div className="tower-history-row" key={row.id}>
+                <strong>{row.playerHeight} floors • {row.playerValue} value</strong>
+                <span>Value {towerResultLabel(row.valueResult)} • Height {towerResultLabel(row.heightResult)}</span>
+              </div>
+            )) : <p className="muted">No Tower hands yet.</p>}
+          </section>
+        </aside>
+      </div>
+    );
+  };
+
   const startSupportChat = async (category: SupportCategory) => {
     setSupportNotice("");
     setSupportCategory(category);
@@ -2629,6 +2995,7 @@ function App() {
             </div>
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
+          <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
           <button className={activePage === "leaderboard" ? "active" : ""} onClick={() => openPage("leaderboard")}><Trophy size={18} /> Leaderboard</button>
           <button className={activePage === "open-bets" ? "active" : ""} onClick={() => openPage("open-bets")}><ClipboardList size={18} /> Open Bets</button>
           <button className={activePage === "history" ? "active" : ""} onClick={() => openPage("history")}><History size={18} /> History</button>
@@ -2872,6 +3239,8 @@ function App() {
             </div>
           </div>
         )}
+
+        {activePage === "tower" && <TowerPage />}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">

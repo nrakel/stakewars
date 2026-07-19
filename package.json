@@ -54,6 +54,8 @@
     "nightly": "tsx scripts/nightly-automation.ts",
     "nightly:prod": "node dist/scripts/nightly-automation.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
+    "test": "node --import tsx --test tests/tower-engine.test.ts",
+    "simulate:tower": "tsx scripts/simulate-tower.ts",
     "security:smoke": "tsx scripts/security-smoke.ts"
   },
   "dependencies": {

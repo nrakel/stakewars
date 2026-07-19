@@ -99,7 +99,7 @@ const api = express.Router();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const clientDir = path.join(root, "dist/client");
 const allowedOrigins = new Set(config.allowedOrigins);
-const privateApiPath = /^\/(me(?:\/|$)|wagers(?:\/|$)|push(?:\/|$)|admin(?:\/|$)|support(?:\/|$))/;
+const privateApiPath = /^\/(me(?:\/|$)|wagers(?:\/|$)|push(?:\/|$)|admin(?:\/|$)|support(?:\/|$)|tower(?:\/|$))/;
 
 const noStorePrivateApi = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (privateApiPath.test(req.path) || req.header("authorization")) {
@@ -152,6 +152,7 @@ api.use("/admin", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeade
 api.use("/me/profile", rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false }));
 api.use("/push", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
 api.use("/support", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
+api.use("/tower", rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false }));
 api.use("/wagers", rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false }));
 
 registerRoutes(api);

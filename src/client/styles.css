@@ -2576,9 +2576,286 @@ textarea {
   color: #647067;
 }
 
+.tower-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px;
+  align-items: start;
+}
+
+.tower-table,
+.tower-rail,
+.tower-help,
+.tower-history {
+  display: grid;
+  gap: 14px;
+}
+
+.tower-balance-row,
+.tower-stack-header,
+.tower-result,
+.tower-counter-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tower-balance-row {
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.tower-balance-row strong {
+  font-size: 1.2rem;
+}
+
+.tower-wager-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.tower-wager-grid label {
+  display: grid;
+  gap: 5px;
+  font-weight: 900;
+  color: #14201c;
+}
+
+.tower-wager-grid label span {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #647067;
+}
+
+.tower-wager-grid input {
+  width: 100%;
+}
+
+.tower-start {
+  height: 44px;
+}
+
+.tower-status-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tower-status-strip span {
+  border: 1px solid #fed7aa;
+  background: #fff7ed;
+  color: #7c2d12;
+  border-radius: 999px;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.tower-board {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tower-stack {
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfb;
+  min-height: 290px;
+}
+
+.tower-stack.collapsed {
+  border-color: #fecaca;
+  background: #fff1f2;
+}
+
+.tower-stack-header span {
+  color: #647067;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.tower-card-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  justify-content: flex-start;
+  min-height: 230px;
+  padding-top: 12px;
+}
+
+.tower-card {
+  width: 82px;
+  height: 112px;
+  margin-top: -58px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(20, 32, 28, 0.12);
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  color: #14201c;
+  font-weight: 900;
+}
+
+.tower-card:first-child {
+  margin-top: 0;
+}
+
+.tower-card strong {
+  font-size: 1.35rem;
+}
+
+.tower-card span {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  color: #647067;
+}
+
+.tower-card.hearts strong,
+.tower-card.diamonds strong {
+  color: #b91c1c;
+}
+
+.tower-card.hidden {
+  background: #14201c;
+  color: #ff6900;
+  border-color: #14201c;
+}
+
+.tower-card.collapse {
+  border-color: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.18), 0 8px 18px rgba(20, 32, 28, 0.12);
+}
+
+.tower-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tower-result {
+  flex-wrap: wrap;
+  border-top: 1px solid #edf1ed;
+  padding-top: 12px;
+}
+
+.tower-result span {
+  color: #43524c;
+  font-size: 0.9rem;
+}
+
+.tower-counter-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #14201c;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.tower-counter {
+  display: grid;
+  gap: 12px;
+}
+
+.tower-counter-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.tower-counter-stats span,
+.tower-history-row {
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  padding: 9px;
+  background: #f8fafc;
+  font-size: 0.82rem;
+}
+
+.tower-counter-stats strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.kind-tabs.compact button {
+  padding: 7px 9px;
+  font-size: 0.8rem;
+}
+
+.tower-rank-counter,
+.tower-exact-counter {
+  display: grid;
+  gap: 6px;
+}
+
+.tower-rank-counter {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.tower-exact-counter {
+  grid-template-columns: repeat(4, 1fr);
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.tower-rank-counter span,
+.tower-exact-counter span {
+  border: 1px solid #edf1ed;
+  border-radius: 8px;
+  padding: 7px;
+  background: #fff;
+  display: grid;
+  gap: 2px;
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.tower-exact-counter small {
+  color: #647067;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+}
+
+.tower-help p {
+  margin: 0;
+  color: #43524c;
+}
+
+.tower-history-row {
+  display: grid;
+  gap: 3px;
+}
+
+.tower-history-row span {
+  color: #647067;
+  font-size: 0.82rem;
+}
+
 @media (max-width: 860px) {
+  .tower-page,
   .support-admin-layout {
     grid-template-columns: 1fr;
+  }
+
+  .tower-wager-grid,
+  .tower-board {
+    grid-template-columns: 1fr;
+  }
+
+  .tower-counter-stats,
+  .tower-rank-counter,
+  .tower-exact-counter {
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .support-widget {

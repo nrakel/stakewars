@@ -11,6 +11,17 @@ import { sendMail } from "./mail.js";
 import { buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
+import {
+  buildTowerHandForUser,
+  capTowerHandForUser,
+  doubleTowerHandForUser,
+  getActiveTowerConfig,
+  getRecentTowerHands,
+  getTowerAnalytics,
+  getTowerState,
+  startTowerHandForUser,
+  TowerError
+} from "./tower/service.js";
 import type { MarketKey, SportKey } from "../shared/types.js";
 
 const registerSchema = z.object({
@@ -66,6 +77,20 @@ const placeWagerSchema = z.object({
       expectedOddsAmerican: z.number().int().optional()
     })
   ).min(1).max(8)
+});
+
+const towerStartHandSchema = z.object({
+  valueWagerCents: z.number().int().min(0).max(100_000_000).default(0),
+  heightWagerCents: z.number().int().min(0).max(100_000_000).default(0)
+});
+
+const towerActionSchema = z.object({
+  actionVersion: z.number().int().positive()
+});
+
+const towerDoubleSchema = towerActionSchema.extend({
+  doubleValue: z.boolean().default(false),
+  doubleHeight: z.boolean().default(false)
 });
 
 const redditPreviewSchema = z.object({
@@ -965,6 +990,110 @@ export const registerRoutes = (router: Router) => {
         referralUrl: `${origin}/?ref=${encodeURIComponent(row.referralCode)}`,
         referredCount: Number(row.referredCount)
       });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/tower/config", requireAuth, async (_req, res, next) => {
+    try {
+      const configVersion = await getActiveTowerConfig();
+      res.json(configVersion);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/tower/state", requireAuth, async (req, res, next) => {
+    try {
+      res.json(await getTowerState(req.user!.id));
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/tower/history", requireAuth, async (req, res, next) => {
+    try {
+      res.json({ history: await getRecentTowerHands(req.user!.id) });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/tower/hands", requireAuth, async (req, res, next) => {
+    try {
+      const input = towerStartHandSchema.parse(req.body);
+      const result = await startTowerHandForUser({
+        userId: req.user!.id,
+        valueWagerCents: input.valueWagerCents,
+        heightWagerCents: input.heightWagerCents
+      });
+      res.status(201).json(result);
+    } catch (error) {
+      if (error instanceof TowerError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/tower/hands/:id/build", requireAuth, async (req, res, next) => {
+    try {
+      const input = towerActionSchema.parse(req.body);
+      res.json(await buildTowerHandForUser({
+        userId: req.user!.id,
+        handId: String(req.params.id),
+        actionVersion: input.actionVersion
+      }));
+    } catch (error) {
+      if (error instanceof TowerError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/tower/hands/:id/double", requireAuth, async (req, res, next) => {
+    try {
+      const input = towerDoubleSchema.parse(req.body);
+      res.json(await doubleTowerHandForUser({
+        userId: req.user!.id,
+        handId: String(req.params.id),
+        actionVersion: input.actionVersion,
+        doubleValue: input.doubleValue,
+        doubleHeight: input.doubleHeight
+      }));
+    } catch (error) {
+      if (error instanceof TowerError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/tower/hands/:id/cap", requireAuth, async (req, res, next) => {
+    try {
+      const input = towerActionSchema.parse(req.body);
+      res.json(await capTowerHandForUser({
+        userId: req.user!.id,
+        handId: String(req.params.id),
+        actionVersion: input.actionVersion
+      }));
+    } catch (error) {
+      if (error instanceof TowerError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.get("/admin/tower/analytics", requireNateRakelAccount, async (_req, res, next) => {
+    try {
+      res.json({ analytics: await getTowerAnalytics() });
     } catch (error) {
       next(error);
     }
