@@ -1521,7 +1521,13 @@ function App() {
     });
   };
 
+  const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
+
   const openPage = (page: AppPage) => {
+    if (page === "tower" && !isNateRakelAccount) {
+      setActivePage("lines");
+      return;
+    }
     setActivePage(page);
     if (page !== "lines" && page !== "scoreboard") {
       setExpandedNavGroup(null);
@@ -1745,7 +1751,6 @@ function App() {
     }
   };
 
-  const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
   const canManageReddit = Boolean(user && (user.role === "admin" || isNateRakelAccount));
 
   useEffect(() => {
@@ -1756,6 +1761,12 @@ function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (user && activePage === "tower" && !isNateRakelAccount) {
+      setActivePage("lines");
+    }
+  }, [activePage, isNateRakelAccount, user]);
 
   useEffect(() => {
     refreshHistory().catch(() => undefined);
@@ -3222,7 +3233,9 @@ function App() {
             </div>
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
-          <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
+          {isNateRakelAccount && (
+            <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
+          )}
           <button className={activePage === "leaderboard" ? "active" : ""} onClick={() => openPage("leaderboard")}><Trophy size={18} /> Leaderboard</button>
           <button className={activePage === "open-bets" ? "active" : ""} onClick={() => openPage("open-bets")}><ClipboardList size={18} /> Open Bets</button>
           <button className={activePage === "history" ? "active" : ""} onClick={() => openPage("history")}><History size={18} /> History</button>
@@ -3467,7 +3480,7 @@ function App() {
           </div>
         )}
 
-        {activePage === "tower" && TowerPage()}
+        {activePage === "tower" && isNateRakelAccount && TowerPage()}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">
