@@ -12,6 +12,7 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
+import { merchNavItemForUser } from "../shared/merch.js";
 import {
   buildTowerHandForUser,
   capTowerHandForUser,
@@ -621,13 +622,17 @@ const supportStatusSchema = z.object({
   sendTranscript: z.boolean().default(false)
 });
 
+const merchStoreClickSchema = z.object({
+  source: z.string().trim().min(1).max(80).default("nav")
+});
+
 const isAdminUser = (user: Express.Request["user"]) => Boolean(
   user
   && (user.role === "admin" || config.adminUsernames.includes(user.username.toLowerCase()))
 );
 
 const isNateRakelAccount = (user: Express.Request["user"]) => Boolean(
-  user && user.username.toLowerCase() === "nathanielrakel@gmail.com"
+  user && merchNavItemForUser(user.username)
 );
 
 const requireAdmin = (req: Parameters<typeof requireAuth>[0], res: Parameters<typeof requireAuth>[1], next: Parameters<typeof requireAuth>[2]) => {
@@ -791,6 +796,47 @@ const sendSupportTranscript = async (conversationId: string) => {
 };
 
 export const registerRoutes = (router: Router) => {
+  router.get("/merch/store", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);
+      if (!item) {
+        res.status(404).json({ error: "Merch store is not available." });
+        return;
+      }
+      res.json({ url: item.url, label: item.label });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/merch/click", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const input = merchStoreClickSchema.parse(req.body);
+      const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);
+      if (!item) {
+        res.status(404).json({ error: "Merch store is not available." });
+        return;
+      }
+      await query(
+        `
+          INSERT INTO merch_store_click (id, user_id, destination_url, source, ip_address, user_agent)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          randomUUID(),
+          req.user?.id ?? null,
+          item.url,
+          input.source,
+          req.ip,
+          req.header("user-agent") ?? null
+        ]
+      );
+      res.json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/auth/register", async (req, res, next) => {
     try {
       const input = registerSchema.parse(req.body);

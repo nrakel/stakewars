@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { defaultMerchStoreUrl, normalizeMerchStoreUrl } from "../shared/merch.js";
 
 const required = (name: string, fallback?: string) => {
   const value = process.env[name] ?? fallback;
@@ -55,5 +56,6 @@ export const config = {
   sesSecretAccessKey: process.env.SES_SECRET_ACCESS_KEY ?? process.env.AWS_SECRET_ACCESS_KEY,
   sesSessionToken: process.env.SES_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN,
   sesFromEmail: process.env.SES_FROM_EMAIL,
-  sesFromName: process.env.SES_FROM_NAME ?? "StakeWars"
+  sesFromName: process.env.SES_FROM_NAME ?? "StakeWars",
+  merchStoreUrl: normalizeMerchStoreUrl(process.env.MERCH_STORE_URL ?? defaultMerchStoreUrl)
 };

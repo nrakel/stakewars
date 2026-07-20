@@ -1,8 +1,9 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
+import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
 import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
+import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
@@ -1385,6 +1386,7 @@ function App() {
   const [referralInfo, setReferralInfo] = useState<ReferralInfo | null>(null);
   const [referralQr, setReferralQr] = useState("");
   const [referralNotice, setReferralNotice] = useState("");
+  const [merchStoreUrl, setMerchStoreUrl] = useState<string | null>(null);
 
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
@@ -1458,6 +1460,13 @@ function App() {
       setPushPreferences(pushPreferenceResult.preferences);
       setReferralInfo(referralResult);
       setTowerState(towerResult);
+      if (merchNavItemForUser(me.user.username)) {
+        api<{ url: string; label: string }>("/merch/store", {}, authToken)
+          .then((result) => setMerchStoreUrl(result.url))
+          .catch(() => setMerchStoreUrl(null));
+      } else {
+        setMerchStoreUrl(null);
+      }
       setReferralQr(await QRCode.toDataURL(referralResult.referralUrl, {
         width: 220,
         margin: 1,
@@ -1522,6 +1531,7 @@ function App() {
   };
 
   const isNateRakelAccount = user?.username.toLowerCase() === "nathanielrakel@gmail.com";
+  const merchNavItem = merchStoreUrl ? merchNavItemForUser(user?.username, merchStoreUrl) : null;
 
   const openPage = (page: AppPage) => {
     if (page === "tower" && !isNateRakelAccount) {
@@ -1543,6 +1553,21 @@ function App() {
 
   const jumpToBetSlip = () => {
     document.getElementById("bet-slip")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const openMerchStore = async () => {
+    if (!merchNavItem) return;
+    try {
+      await api<{ ok: boolean }>("/merch/click", {
+        method: "POST",
+        body: JSON.stringify({ source: "authenticated_nav" }),
+        keepalive: true
+      }, token);
+    } catch {
+      // Navigation should not be blocked by click logging.
+    } finally {
+      window.location.assign(merchNavItem.url);
+    }
   };
 
   const refreshTower = async (authToken = token) => {
@@ -2516,6 +2541,7 @@ function App() {
     setToken("");
     setUser(null);
     setBankroll(null);
+    setMerchStoreUrl(null);
   };
 
   const installApp = async () => {
@@ -3241,6 +3267,9 @@ function App() {
           <button className={activePage === "history" ? "active" : ""} onClick={() => openPage("history")}><History size={18} /> History</button>
           <button className={activePage === "rules" ? "active" : ""} onClick={() => openPage("rules")}><FileText size={18} /> Rules</button>
           <button className={activePage === "contact" ? "active" : ""} onClick={() => openPage("contact")}><Mail size={18} /> Contact Us</button>
+          {merchNavItem && (
+            <button onClick={() => void openMerchStore()}><ShoppingBag size={18} /> {merchNavItem.label}</button>
+          )}
           <button className={activePage === "install" ? "active" : ""} onClick={() => openPage("install")}><Download size={18} /> Install App</button>
           {isNateRakelAccount && (
             <button className={activePage === "admin" ? "active" : ""} onClick={() => openPage("admin")}><ShieldCheck size={18} /> Admin</button>

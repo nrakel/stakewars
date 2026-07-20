@@ -40,6 +40,7 @@ POSTGRES_PASSWORD=replace-with-a-strong-db-password
 JWT_SECRET=replace-with-a-long-random-secret
 WEEKLY_BANKROLL_CENTS=100000
 PARLAY_API_KEY=your-parlay-api-key
+MERCH_STORE_URL=https://shop.stakewars.ai
 ```
 
 Bring up Postgres and the app once, then apply schema:
@@ -73,6 +74,37 @@ Renew certificates:
 ```bash
 docker compose run --rm certbot renew --webroot --webroot-path /var/www/certbot
 docker compose exec nginx nginx -s reload
+```
+
+## Merchandise store
+
+StakeWars can link authenticated users to an external Shopify merchandise store without adding checkout logic to the StakeWars app.
+
+Configure the destination:
+
+```bash
+MERCH_STORE_URL=https://shop.stakewars.ai
+```
+
+Current behavior:
+
+- Shopify hosts the storefront, product pages, cart, checkout, payments, taxes, shipping, refunds, and order management.
+- Printful fulfillment is handled through Shopify/Printful, not through StakeWars.
+- StakeWars does not collect payment-card information.
+- StakeWars does not create a Shopify orders database.
+- The in-app Gear link is currently visible only to Nate Rakel's account.
+- Gear navigation logs a first-party `merch_store_click` event before opening `MERCH_STORE_URL` in the same tab.
+
+Apply the merch click-log migration before deploying this feature:
+
+```bash
+npm run migrate
+```
+
+Production compiled command:
+
+```bash
+npm run migrate:prod
 ```
 
 ## Odds feed
