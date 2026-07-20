@@ -802,9 +802,9 @@ export const registerRoutes = (router: Router) => {
     });
   }
 
-  router.get("/merch/store", requireAuth, async (req, res, next) => {
+  router.get("/merch/store", async (_req, res, next) => {
     try {
-      const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);
+      const item = merchNavItemForUser("public", config.merchStoreUrl);
       if (!item) {
         res.status(404).json({ error: "Merch store is not available." });
         return;
@@ -815,10 +815,10 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.post("/merch/click", requireAuth, async (req, res, next) => {
+  router.post("/merch/click", optionalAuth, async (req, res, next) => {
     try {
       const input = merchStoreClickSchema.parse(req.body);
-      const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);
+      const item = merchNavItemForUser(req.user?.username ?? "public", config.merchStoreUrl);
       if (!item) {
         res.status(404).json({ error: "Merch store is not available." });
         return;

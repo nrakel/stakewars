@@ -934,6 +934,7 @@ function AuthPanel({
   const [authNotice, setAuthNotice] = useState("");
   const [rulesOpen, setRulesOpen] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
+  const [publicMerchStoreUrl, setPublicMerchStoreUrl] = useState<string | null>(null);
   const [referralCode] = useState(() => {
     const urlCode = new URLSearchParams(window.location.search).get("ref")?.trim() ?? "";
     if (urlCode) {
@@ -942,6 +943,12 @@ function AuthPanel({
     }
     return localStorage.getItem("stakewars_referral_code") ?? "";
   });
+
+  useEffect(() => {
+    api<{ url: string; label: string }>("/merch/store")
+      .then((result) => setPublicMerchStoreUrl(result.url))
+      .catch(() => setPublicMerchStoreUrl(null));
+  }, []);
 
   const switchMode = (nextMode: AuthMode) => {
     setMode(nextMode);
@@ -1088,6 +1095,21 @@ function AuthPanel({
     }
   };
 
+  const openPublicMerchStore = async () => {
+    if (!publicMerchStoreUrl) return;
+    try {
+      await api<{ ok: boolean }>("/merch/click", {
+        method: "POST",
+        body: JSON.stringify({ source: "public_landing" }),
+        keepalive: true
+      });
+    } catch {
+      // Navigation should not be blocked by click logging.
+    } finally {
+      window.location.assign(publicMerchStoreUrl);
+    }
+  };
+
   return (
     <section className="auth-shell">
       <div className="brand-panel">
@@ -1113,6 +1135,11 @@ function AuthPanel({
             <button className="auth-signup-cta" type="button" onClick={() => switchMode("register")}>
               Sign Up Free
             </button>
+            {publicMerchStoreUrl && (
+              <button className="auth-gear-link" type="button" onClick={() => void openPublicMerchStore()}>
+                <ShoppingBag size={17} /> Gear
+              </button>
+            )}
             <button className="rules-link" type="button" onClick={() => setRulesOpen(true)}>
               Rules and Terms
             </button>

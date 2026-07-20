@@ -92,7 +92,7 @@ Current behavior:
 - Printful fulfillment is handled through Shopify/Printful, not through StakeWars.
 - StakeWars does not collect payment-card information.
 - StakeWars does not create a Shopify orders database.
-- The in-app Gear link is visible to authenticated users.
+- The Gear link is visible on the public landing page and in authenticated navigation.
 - Gear navigation logs a first-party `merch_store_click` event before opening `MERCH_STORE_URL` in the same tab.
 
 Apply the merch click-log migration before deploying this feature:
