@@ -2104,6 +2104,8 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
   stableProviderMatchId(pick.provider_event_id)
     ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
 
+const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.selected_team.trim().toLowerCase();
+
 const dailyAiRoundRobinPicks = 7;
 
 const updateAiPickClosingLines = async (client: pg.PoolClient, sport: CandidateLine["sport"], beforeDate: string) => {
@@ -2218,11 +2220,11 @@ export const generateAiPicks = async ({
         WHERE is_active = true
           AND sport = $1
           AND starts_at > now()
-          AND ($2::text IS NULL OR (starts_at AT TIME ZONE 'America/Chicago')::date = $2::date)
+          AND (starts_at AT TIME ZONE 'America/Chicago')::date = $2::date
           AND ($3::text IS NULL OR market_key = $3::text)
         ORDER BY starts_at ASC, market_key ASC
       `,
-      [sport, forDate ?? null, marketKey ?? null]
+      [sport, today, marketKey ?? null]
     );
 
     const eventMarketCounts = new Map<string, number>();
@@ -2339,6 +2341,7 @@ export const generateAiPicks = async ({
         starts_at: Date;
         away_team: string;
         home_team: string;
+        selected_team: string;
       }>(
         `
           SELECT
@@ -2346,7 +2349,8 @@ export const generateAiPicks = async ({
             gl.provider_event_id,
             gl.starts_at,
             gl.away_team,
-            gl.home_team
+            gl.home_team,
+            wl.selected_team
           FROM wager w
           JOIN wager_leg wl ON wl.wager_id = w.id
           JOIN game_line gl ON gl.id = wl.game_line_id
@@ -2391,8 +2395,9 @@ export const generateAiPicks = async ({
       0
     ) ?? 0;
     const existingStraightGameKeys = new Set(existingDailyAiStraightWagers?.rows.map((wager) => gameKeyForPick(wager)) ?? []);
+    const existingStraightTeamKeys = new Set(existingDailyAiStraightWagers?.rows.map((wager) => teamKeyForPick(wager)) ?? []);
     const newStraightCandidateCount = wageringCandidates.filter(
-      (candidate) => !existingStraightGameKeys.has(gameKeyForPick(candidate))
+      (candidate) => !existingStraightGameKeys.has(gameKeyForPick(candidate)) && !existingStraightTeamKeys.has(teamKeyForPick(candidate))
     ).length;
     const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
     const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
@@ -2401,7 +2406,22 @@ export const generateAiPicks = async ({
       : aiEntry && stakeFractionOfBalance !== undefined
       ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
       : stakeCents;
-    const roundRobinPicks = wageringCandidates.slice(0, aiRoundRobinPicks);
+    const roundRobinGameKeys = new Set<string>();
+    const roundRobinTeamKeys = new Set<string>();
+    const roundRobinPicks = wageringCandidates.reduce<ScoredCandidate[]>((acc, candidate) => {
+      if (acc.length >= aiRoundRobinPicks) {
+        return acc;
+      }
+      const gameKey = gameKeyForPick(candidate);
+      const selectedTeamKey = teamKeyForPick(candidate);
+      if (roundRobinGameKeys.has(gameKey) || roundRobinTeamKeys.has(selectedTeamKey)) {
+        return acc;
+      }
+      roundRobinGameKeys.add(gameKey);
+      roundRobinTeamKeys.add(selectedTeamKey);
+      acc.push(candidate);
+      return acc;
+    }, []);
     const dailyRoundRobinWays = roundRobinPicks.length === aiRoundRobinPicks
       ? roundRobinWays(roundRobinPicks.length, roundRobinPicks.length, 2)
       : 0;
@@ -2485,7 +2505,13 @@ export const generateAiPicks = async ({
       const shouldWagerStraight = shouldLock && candidate.confidence >= aiWagerMinConfidence;
       let wagerId: string | null = null;
 
-      if (shouldWagerStraight && dailyStraightStakeCents > 0 && placeWagers && aiUser.rowCount) {
+      if (
+        shouldWagerStraight
+        && dailyStraightStakeCents > 0
+        && placeWagers
+        && aiUser.rowCount
+        && !existingStraightTeamKeys.has(teamKeyForPick(candidate))
+      ) {
         const existing = await client.query<{ wager_id: string | null }>(
           `
             SELECT w.id AS wager_id
@@ -2522,6 +2548,9 @@ export const generateAiPicks = async ({
         wagerId = existing.rows[0]?.wager_id ?? null;
         if (!wagerId) {
           wagerId = await placeAiWager(client, aiUser.rows[0].id, candidate, dailyStraightStakeCents);
+          if (wagerId) {
+            existingStraightTeamKeys.add(teamKeyForPick(candidate));
+          }
         }
       }
 
