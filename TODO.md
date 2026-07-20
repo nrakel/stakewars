@@ -19,3 +19,16 @@
   - Add stronger protections around admin/system-only actions and scheduled jobs.
   - Review secret storage, service environment files, and logging for accidental sensitive data exposure.
   - Add security-focused tests for registration, login, profile updates, wagers, and push subscriptions.
+
+## 2026-07-21
+
+- Set up StakeWars merchandise store:
+  - Create/configure Shopify account for the official StakeWars Gear storefront.
+  - Create/configure Printly account and connect it to Shopify for print-on-demand fulfillment.
+  - Configure Shopify custom domain for `gear.stakewars.ai`.
+  - Add the DNS record Shopify requires for `gear.stakewars.ai`; prefer Shopify's instructed record over pointing it at the StakeWars server.
+  - Wait for Shopify domain verification and managed SSL certificate issuance.
+  - Confirm `https://gear.stakewars.ai` loads without browser security warnings.
+  - Update StakeWars production env to `MERCH_STORE_URL=https://gear.stakewars.ai`.
+  - Restart StakeWars after the env update and verify the Nate-only Gear nav opens the new store URL.
+  - Keep checkout, payments, taxes, shipping, refunds, inventory, and fulfillment entirely inside Shopify/Printly.
