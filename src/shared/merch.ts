@@ -1,4 +1,4 @@
-export const defaultMerchStoreUrl = "https://shop.stakewars.ai";
+export const defaultMerchStoreUrl = "https://gear.stakewars.ai";
 export const stakeWarsOwnerUsername = "nathanielrakel@gmail.com";
 
 export type MerchNavItem = {

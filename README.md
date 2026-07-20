@@ -40,7 +40,7 @@ POSTGRES_PASSWORD=replace-with-a-strong-db-password
 JWT_SECRET=replace-with-a-long-random-secret
 WEEKLY_BANKROLL_CENTS=100000
 PARLAY_API_KEY=your-parlay-api-key
-MERCH_STORE_URL=https://shop.stakewars.ai
+MERCH_STORE_URL=https://gear.stakewars.ai
 ```
 
 Bring up Postgres and the app once, then apply schema:
@@ -83,7 +83,7 @@ StakeWars can link authenticated users to an external Shopify merchandise store 
 Configure the destination:
 
 ```bash
-MERCH_STORE_URL=https://shop.stakewars.ai
+MERCH_STORE_URL=https://gear.stakewars.ai
 ```
 
 Current behavior:

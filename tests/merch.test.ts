@@ -20,7 +20,7 @@ test("merch store URL accepts configured HTTP(S) URLs and removes trailing slash
 
 test("merch navigation is visible only for Nate Rakel's login", () => {
   assert.equal(isStakeWarsOwnerUsername("NathanielRakel@GMAIL.com"), true);
-  assert.equal(merchNavItemForUser("nathanielrakel@gmail.com", "https://shop.stakewars.ai/")?.url, defaultMerchStoreUrl);
-  assert.equal(merchNavItemForUser("player@example.com", "https://shop.stakewars.ai"), null);
-  assert.equal(merchNavItemForUser(null, "https://shop.stakewars.ai"), null);
+  assert.equal(merchNavItemForUser("nathanielrakel@gmail.com", "https://gear.stakewars.ai/")?.url, defaultMerchStoreUrl);
+  assert.equal(merchNavItemForUser("player@example.com", "https://gear.stakewars.ai"), null);
+  assert.equal(merchNavItemForUser(null, "https://gear.stakewars.ai"), null);
 });
