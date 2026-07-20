@@ -107,6 +107,16 @@ Production compiled command:
 npm run migrate:prod
 ```
 
+## Dormant experimental features
+
+Tower remains in the repository for future experimentation, but it is disabled in the live app by default:
+
+```bash
+STAKEWARS_TOWER_ENABLED=false
+```
+
+When disabled, the authenticated app does not show Tower navigation, does not call Tower state APIs during refresh, and the server returns `404` for Tower play/simulator endpoints. Set `STAKEWARS_TOWER_ENABLED=true` only when intentionally reactivating Tower for testing.
+
 ## Odds feed
 
 Hourly odds refresh uses Parlay API. Configure:

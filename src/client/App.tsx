@@ -13,6 +13,7 @@ type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL
 type HistoryPeriod = "day" | "week" | "all";
 const MAX_CHECKED_LEGS = 8;
 const sportsMenu: ScoreboardSport[] = ["MLB", "NFL", "NBA", "NHL", "NCAAMB", "NCAAF", "EPL", "WORLDCUP"];
+const TOWER_FEATURE_ENABLED = false;
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -1440,12 +1441,11 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, towerResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
-        api<ReferralInfo>("/me/referral", {}, authToken),
-        api<TowerState>("/tower/state", {}, authToken)
+        api<ReferralInfo>("/me/referral", {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1459,7 +1459,13 @@ function App() {
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
       setReferralInfo(referralResult);
-      setTowerState(towerResult);
+      if (TOWER_FEATURE_ENABLED) {
+        api<TowerState>("/tower/state", {}, authToken)
+          .then((result) => setTowerState(result))
+          .catch(() => setTowerState(null));
+      } else {
+        setTowerState(null);
+      }
       if (merchNavItemForUser(me.user.username)) {
         api<{ url: string; label: string }>("/merch/store", {}, authToken)
           .then((result) => setMerchStoreUrl(result.url))
@@ -1534,7 +1540,7 @@ function App() {
   const merchNavItem = merchStoreUrl ? merchNavItemForUser(user?.username, merchStoreUrl) : null;
 
   const openPage = (page: AppPage) => {
-    if (page === "tower" && !isNateRakelAccount) {
+    if (page === "tower" && (!TOWER_FEATURE_ENABLED || !isNateRakelAccount)) {
       setActivePage("lines");
       return;
     }
@@ -1788,7 +1794,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (user && activePage === "tower" && !isNateRakelAccount) {
+    if (user && activePage === "tower" && (!TOWER_FEATURE_ENABLED || !isNateRakelAccount)) {
       setActivePage("lines");
     }
   }, [activePage, isNateRakelAccount, user]);
@@ -3259,7 +3265,7 @@ function App() {
             </div>
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
-          {isNateRakelAccount && (
+          {TOWER_FEATURE_ENABLED && isNateRakelAccount && (
             <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
           )}
           <button className={activePage === "leaderboard" ? "active" : ""} onClick={() => openPage("leaderboard")}><Trophy size={18} /> Leaderboard</button>
@@ -3509,7 +3515,7 @@ function App() {
           </div>
         )}
 
-        {activePage === "tower" && isNateRakelAccount && TowerPage()}
+        {activePage === "tower" && TOWER_FEATURE_ENABLED && isNateRakelAccount && TowerPage()}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">

@@ -57,5 +57,6 @@ export const config = {
   sesSessionToken: process.env.SES_SESSION_TOKEN ?? process.env.AWS_SESSION_TOKEN,
   sesFromEmail: process.env.SES_FROM_EMAIL,
   sesFromName: process.env.SES_FROM_NAME ?? "StakeWars",
-  merchStoreUrl: normalizeMerchStoreUrl(process.env.MERCH_STORE_URL ?? defaultMerchStoreUrl)
+  merchStoreUrl: normalizeMerchStoreUrl(process.env.MERCH_STORE_URL ?? defaultMerchStoreUrl),
+  towerEnabled: process.env.STAKEWARS_TOWER_ENABLED === "true"
 };

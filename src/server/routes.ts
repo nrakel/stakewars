@@ -796,6 +796,12 @@ const sendSupportTranscript = async (conversationId: string) => {
 };
 
 export const registerRoutes = (router: Router) => {
+  if (!config.towerEnabled) {
+    router.use(["/tower", "/admin/tower"], (_req, res) => {
+      res.status(404).json({ error: "Tower is not available." });
+    });
+  }
+
   router.get("/merch/store", requireNateRakelAccount, async (req, res, next) => {
     try {
       const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);
@@ -1096,128 +1102,130 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.get("/tower/config", requireAuth, async (_req, res, next) => {
-    try {
-      const configVersion = await getActiveTowerConfig();
-      res.json(configVersion);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get("/tower/state", requireAuth, async (req, res, next) => {
-    try {
-      res.json(await getTowerState(req.user!.id));
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.get("/tower/history", requireAuth, async (req, res, next) => {
-    try {
-      res.json({ history: await getRecentTowerHands(req.user!.id) });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  router.post("/tower/hands", requireAuth, async (req, res, next) => {
-    try {
-      const input = towerStartHandSchema.parse(req.body);
-      const result = await startTowerHandForUser({
-        userId: req.user!.id,
-        valueWagerCents: input.valueWagerCents,
-        heightWagerCents: input.heightWagerCents
-      });
-      res.status(201).json(result);
-    } catch (error) {
-      if (error instanceof TowerError) {
-        res.status(error.statusCode).json({ error: error.message });
-        return;
+  if (config.towerEnabled) {
+    router.get("/tower/config", requireAuth, async (_req, res, next) => {
+      try {
+        const configVersion = await getActiveTowerConfig();
+        res.json(configVersion);
+      } catch (error) {
+        next(error);
       }
-      next(error);
-    }
-  });
+    });
 
-  router.post("/tower/hands/:id/build", requireAuth, async (req, res, next) => {
-    try {
-      const input = towerActionSchema.parse(req.body);
-      res.json(await buildTowerHandForUser({
-        userId: req.user!.id,
-        handId: String(req.params.id),
-        actionVersion: input.actionVersion
-      }));
-    } catch (error) {
-      if (error instanceof TowerError) {
-        res.status(error.statusCode).json({ error: error.message });
-        return;
+    router.get("/tower/state", requireAuth, async (req, res, next) => {
+      try {
+        res.json(await getTowerState(req.user!.id));
+      } catch (error) {
+        next(error);
       }
-      next(error);
-    }
-  });
+    });
 
-  router.post("/tower/hands/:id/double", requireAuth, async (req, res, next) => {
-    try {
-      const input = towerDoubleSchema.parse(req.body);
-      res.json(await doubleTowerHandForUser({
-        userId: req.user!.id,
-        handId: String(req.params.id),
-        actionVersion: input.actionVersion,
-        doubleValue: input.doubleValue,
-        doubleHeight: input.doubleHeight
-      }));
-    } catch (error) {
-      if (error instanceof TowerError) {
-        res.status(error.statusCode).json({ error: error.message });
-        return;
+    router.get("/tower/history", requireAuth, async (req, res, next) => {
+      try {
+        res.json({ history: await getRecentTowerHands(req.user!.id) });
+      } catch (error) {
+        next(error);
       }
-      next(error);
-    }
-  });
+    });
 
-  router.post("/tower/hands/:id/cap", requireAuth, async (req, res, next) => {
-    try {
-      const input = towerActionSchema.parse(req.body);
-      res.json(await capTowerHandForUser({
-        userId: req.user!.id,
-        handId: String(req.params.id),
-        actionVersion: input.actionVersion
-      }));
-    } catch (error) {
-      if (error instanceof TowerError) {
-        res.status(error.statusCode).json({ error: error.message });
-        return;
+    router.post("/tower/hands", requireAuth, async (req, res, next) => {
+      try {
+        const input = towerStartHandSchema.parse(req.body);
+        const result = await startTowerHandForUser({
+          userId: req.user!.id,
+          valueWagerCents: input.valueWagerCents,
+          heightWagerCents: input.heightWagerCents
+        });
+        res.status(201).json(result);
+      } catch (error) {
+        if (error instanceof TowerError) {
+          res.status(error.statusCode).json({ error: error.message });
+          return;
+        }
+        next(error);
       }
-      next(error);
-    }
-  });
+    });
 
-  router.post("/admin/tower/simulate", requireNateRakelAccount, async (req, res, next) => {
-    try {
-      const input = towerSimulateSchema.parse(req.body);
-      const result = await simulateTowerHandsForUser({
-        userId: req.user!.id,
-        valueWagerCents: input.valueWagerCents,
-        heightWagerCents: input.heightWagerCents,
-        hands: input.hands
-      });
-      res.json(result);
-    } catch (error) {
-      if (error instanceof TowerError) {
-        res.status(error.statusCode).json({ error: error.message });
-        return;
+    router.post("/tower/hands/:id/build", requireAuth, async (req, res, next) => {
+      try {
+        const input = towerActionSchema.parse(req.body);
+        res.json(await buildTowerHandForUser({
+          userId: req.user!.id,
+          handId: String(req.params.id),
+          actionVersion: input.actionVersion
+        }));
+      } catch (error) {
+        if (error instanceof TowerError) {
+          res.status(error.statusCode).json({ error: error.message });
+          return;
+        }
+        next(error);
       }
-      next(error);
-    }
-  });
+    });
 
-  router.get("/admin/tower/analytics", requireNateRakelAccount, async (_req, res, next) => {
-    try {
-      res.json({ analytics: await getTowerAnalytics() });
-    } catch (error) {
-      next(error);
-    }
-  });
+    router.post("/tower/hands/:id/double", requireAuth, async (req, res, next) => {
+      try {
+        const input = towerDoubleSchema.parse(req.body);
+        res.json(await doubleTowerHandForUser({
+          userId: req.user!.id,
+          handId: String(req.params.id),
+          actionVersion: input.actionVersion,
+          doubleValue: input.doubleValue,
+          doubleHeight: input.doubleHeight
+        }));
+      } catch (error) {
+        if (error instanceof TowerError) {
+          res.status(error.statusCode).json({ error: error.message });
+          return;
+        }
+        next(error);
+      }
+    });
+
+    router.post("/tower/hands/:id/cap", requireAuth, async (req, res, next) => {
+      try {
+        const input = towerActionSchema.parse(req.body);
+        res.json(await capTowerHandForUser({
+          userId: req.user!.id,
+          handId: String(req.params.id),
+          actionVersion: input.actionVersion
+        }));
+      } catch (error) {
+        if (error instanceof TowerError) {
+          res.status(error.statusCode).json({ error: error.message });
+          return;
+        }
+        next(error);
+      }
+    });
+
+    router.post("/admin/tower/simulate", requireNateRakelAccount, async (req, res, next) => {
+      try {
+        const input = towerSimulateSchema.parse(req.body);
+        const result = await simulateTowerHandsForUser({
+          userId: req.user!.id,
+          valueWagerCents: input.valueWagerCents,
+          heightWagerCents: input.heightWagerCents,
+          hands: input.hands
+        });
+        res.json(result);
+      } catch (error) {
+        if (error instanceof TowerError) {
+          res.status(error.statusCode).json({ error: error.message });
+          return;
+        }
+        next(error);
+      }
+    });
+
+    router.get("/admin/tower/analytics", requireNateRakelAccount, async (_req, res, next) => {
+      try {
+        res.json({ analytics: await getTowerAnalytics() });
+      } catch (error) {
+        next(error);
+      }
+    });
+  }
 
   router.get("/push/public-key", requireAuth, async (_req, res, next) => {
     try {
