@@ -18,9 +18,10 @@ test("merch store URL accepts configured HTTP(S) URLs and removes trailing slash
   assert.equal(normalizeMerchStoreUrl("http://localhost:3001/"), "http://localhost:3001");
 });
 
-test("merch navigation is visible only for Nate Rakel's login", () => {
+test("merch navigation is visible for authenticated users", () => {
   assert.equal(isStakeWarsOwnerUsername("NathanielRakel@GMAIL.com"), true);
+  assert.equal(isStakeWarsOwnerUsername("player@example.com"), false);
   assert.equal(merchNavItemForUser("nathanielrakel@gmail.com", "https://gear.stakewars.ai/")?.url, defaultMerchStoreUrl);
-  assert.equal(merchNavItemForUser("player@example.com", "https://gear.stakewars.ai"), null);
+  assert.equal(merchNavItemForUser("player@example.com", "https://gear.stakewars.ai")?.url, defaultMerchStoreUrl);
   assert.equal(merchNavItemForUser(null, "https://gear.stakewars.ai"), null);
 });

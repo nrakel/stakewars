@@ -12,7 +12,7 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
-import { merchNavItemForUser } from "../shared/merch.js";
+import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
 import {
   buildTowerHandForUser,
   capTowerHandForUser,
@@ -632,7 +632,7 @@ const isAdminUser = (user: Express.Request["user"]) => Boolean(
 );
 
 const isNateRakelAccount = (user: Express.Request["user"]) => Boolean(
-  user && merchNavItemForUser(user.username)
+  user && isStakeWarsOwnerUsername(user.username)
 );
 
 const requireAdmin = (req: Parameters<typeof requireAuth>[0], res: Parameters<typeof requireAuth>[1], next: Parameters<typeof requireAuth>[2]) => {
@@ -802,7 +802,7 @@ export const registerRoutes = (router: Router) => {
     });
   }
 
-  router.get("/merch/store", requireNateRakelAccount, async (req, res, next) => {
+  router.get("/merch/store", requireAuth, async (req, res, next) => {
     try {
       const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);
       if (!item) {
@@ -815,7 +815,7 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.post("/merch/click", requireNateRakelAccount, async (req, res, next) => {
+  router.post("/merch/click", requireAuth, async (req, res, next) => {
     try {
       const input = merchStoreClickSchema.parse(req.body);
       const item = merchNavItemForUser(req.user?.username, config.merchStoreUrl);

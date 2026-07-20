@@ -23,6 +23,6 @@ export const isStakeWarsOwnerUsername = (username?: string | null) =>
   username?.trim().toLowerCase() === stakeWarsOwnerUsername;
 
 export const merchNavItemForUser = (username?: string | null, merchStoreUrl?: string | null): MerchNavItem | null =>
-  isStakeWarsOwnerUsername(username)
+  username?.trim()
     ? { label: "Gear", url: normalizeMerchStoreUrl(merchStoreUrl) }
     : null;

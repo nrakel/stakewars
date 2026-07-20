@@ -30,5 +30,5 @@
   - Wait for Shopify domain verification and managed SSL certificate issuance.
   - Confirm `https://gear.stakewars.ai` loads without browser security warnings.
   - Update StakeWars production env to `MERCH_STORE_URL=https://gear.stakewars.ai`.
-  - Restart StakeWars after the env update and verify the Nate-only Gear nav opens the new store URL.
+  - Restart StakeWars after the env update and verify the Gear nav opens the new store URL.
   - Keep checkout, payments, taxes, shipping, refunds, inventory, and fulfillment entirely inside Shopify/Printly.
