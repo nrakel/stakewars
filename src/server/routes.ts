@@ -9,7 +9,7 @@ import { getLiveMlbStates, getLiveStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendPushToUsers, sendTestPush, updatePushPreferences } from "./push.js";
 import { sendMail } from "./mail.js";
 import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } from "./mlbContext.js";
-import { buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
+import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
 import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
@@ -102,13 +102,13 @@ const towerDoubleSchema = towerActionSchema.extend({
 
 const redditPreviewSchema = z.object({
   subreddit: z.string().trim().min(1).max(50).optional(),
-  postType: z.enum(["single", "parlay"]).default("single")
+  postType: z.enum(["single", "parlay", "all"]).default("single")
 });
 
 const redditLockSchema = z.object({
-  postType: z.enum(["single", "parlay"]).default("single"),
+  postType: z.enum(["single", "parlay", "all"]).default("single"),
   title: z.string().trim().min(1).max(300),
-  body: z.string().trim().min(1).max(10_000)
+  body: z.string().trim().min(1).max(30_000)
 });
 
 const optionalDateParam = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional();
@@ -1899,7 +1899,9 @@ export const registerRoutes = (router: Router) => {
       const input = redditPreviewSchema.parse(req.body);
       const preview = input.postType === "parlay"
         ? await buildRedditParlayPreview(input.subreddit)
-        : await buildRedditPreview(input.subreddit);
+        : input.postType === "all"
+          ? await buildRedditAllPicksPreview(input.subreddit)
+          : await buildRedditPreview(input.subreddit);
       await logAdminAction(req, "admin.reddit.preview", {
         subreddit: preview.subreddit,
         postType: input.postType,

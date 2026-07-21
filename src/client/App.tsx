@@ -81,7 +81,7 @@ type RedditPreview = {
 type RedditLockResult = {
   id: string;
   lockedAt: string;
-  postType: "single" | "parlay";
+  postType: "single" | "parlay" | "all";
   legs: number;
 };
 
@@ -1381,10 +1381,13 @@ function App() {
   const [redditBody, setRedditBody] = useState("");
   const [redditParlayTitle, setRedditParlayTitle] = useState("");
   const [redditParlayBody, setRedditParlayBody] = useState("");
+  const [redditAllTitle, setRedditAllTitle] = useState("");
+  const [redditAllBody, setRedditAllBody] = useState("");
   const [redditNotice, setRedditNotice] = useState("");
   const [redditSingleLock, setRedditSingleLock] = useState<RedditLockResult | null>(null);
   const [redditParlayLock, setRedditParlayLock] = useState<RedditLockResult | null>(null);
-  const [redditLockingType, setRedditLockingType] = useState<"single" | "parlay" | null>(null);
+  const [redditAllLock, setRedditAllLock] = useState<RedditLockResult | null>(null);
+  const [redditLockingType, setRedditLockingType] = useState<"single" | "parlay" | "all" | null>(null);
   const [userDisplayMap, setUserDisplayMap] = useState<UserDisplayMapRow[]>([]);
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
   const [visitorMetrics, setVisitorMetrics] = useState<VisitorMetrics | null>(null);
@@ -3111,7 +3114,7 @@ function App() {
   const generateRedditPreview = async () => {
     setRedditNotice("");
     try {
-      const [singleResult, parlayResult] = await Promise.all([
+      const [singleResult, parlayResult, allResult] = await Promise.all([
         api<{ preview: RedditPreview }>("/admin/reddit/preview", {
           method: "POST",
           body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "single" })
@@ -3119,6 +3122,10 @@ function App() {
         api<{ preview: RedditPreview }>("/admin/reddit/preview", {
           method: "POST",
           body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "parlay" })
+        }, token),
+        api<{ preview: RedditPreview }>("/admin/reddit/preview", {
+          method: "POST",
+          body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "all" })
         }, token)
       ]);
       setRedditSubreddit(singleResult.preview.subreddit);
@@ -3126,8 +3133,11 @@ function App() {
       setRedditBody(singleResult.preview.body);
       setRedditParlayTitle(parlayResult.preview.title);
       setRedditParlayBody(parlayResult.preview.body);
+      setRedditAllTitle(allResult.preview.title);
+      setRedditAllBody(allResult.preview.body);
       setRedditSingleLock(null);
       setRedditParlayLock(null);
+      setRedditAllLock(null);
       setRedditNotice("Manual Reddit posts generated.");
       await refreshRedditStatus();
     } catch (err) {
@@ -3147,6 +3157,24 @@ function App() {
       setRedditParlayBody(result.preview.body);
       setRedditParlayLock(null);
       setRedditNotice("3-team parlay Reddit post generated.");
+      await refreshRedditStatus();
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const generateRedditAllPreview = async () => {
+    setRedditNotice("");
+    try {
+      const result = await api<{ preview: RedditPreview }>("/admin/reddit/preview", {
+        method: "POST",
+        body: JSON.stringify({ subreddit: redditSubreddit.trim() || undefined, postType: "all" })
+      }, token);
+      setRedditSubreddit(result.preview.subreddit);
+      setRedditAllTitle(result.preview.title);
+      setRedditAllBody(result.preview.body);
+      setRedditAllLock(null);
+      setRedditNotice("All-picks Reddit post generated.");
       await refreshRedditStatus();
     } catch (err) {
       setRedditNotice((err as Error).message);
@@ -3173,11 +3201,22 @@ function App() {
     }
   };
 
-  const lockRedditPostTracking = async (postType: "single" | "parlay") => {
+  const copyRedditAllPost = async () => {
+    setRedditNotice("");
+    try {
+      await navigator.clipboard.writeText([redditAllTitle.trim(), "", redditAllBody.trim()].filter(Boolean).join("\n"));
+      setRedditNotice("All-picks Reddit post copied.");
+    } catch (err) {
+      setRedditNotice((err as Error).message);
+    }
+  };
+
+  const lockRedditPostTracking = async (postType: "single" | "parlay" | "all") => {
     setRedditNotice("");
     const isParlay = postType === "parlay";
-    const title = isParlay ? redditParlayTitle.trim() : redditTitle.trim();
-    const body = isParlay ? redditParlayBody.trim() : redditBody.trim();
+    const isAll = postType === "all";
+    const title = isParlay ? redditParlayTitle.trim() : isAll ? redditAllTitle.trim() : redditTitle.trim();
+    const body = isParlay ? redditParlayBody.trim() : isAll ? redditAllBody.trim() : redditBody.trim();
     setRedditLockingType(postType);
     try {
       const result = await api<RedditLockResult>("/admin/reddit/lock", {
@@ -3186,11 +3225,17 @@ function App() {
       }, token);
       if (isParlay) {
         setRedditParlayLock(result);
+      } else if (isAll) {
+        setRedditAllLock(result);
       } else {
         setRedditSingleLock(result);
       }
       const lockTime = new Date(result.lockedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
-      setRedditNotice(isParlay ? `3-team parlay tracking locked at ${lockTime}. Safe to post.` : `Single pick tracking locked at ${lockTime}. Safe to post.`);
+      setRedditNotice(isParlay
+        ? `3-team parlay tracking locked at ${lockTime}. Safe to post.`
+        : isAll
+          ? `All-picks tracking locked at ${lockTime}. Safe to post.`
+          : `Single pick tracking locked at ${lockTime}. Safe to post.`);
     } catch (err) {
       setRedditNotice((err as Error).message);
     } finally {
@@ -4086,6 +4131,33 @@ function App() {
                     <div className="reddit-lock-status">
                       <Lock size={16} />
                       <span>Parlay saved at {new Date(redditParlayLock.lockedAt).toLocaleString()}. Safe to post.</span>
+                    </div>
+                  )}
+                  <button className="secondary-action" onClick={generateRedditAllPreview}>Generate all picks</button>
+                  <label>
+                    All Picks Title
+                    <input value={redditAllTitle} maxLength={300} onChange={(event) => {
+                      setRedditAllTitle(event.target.value);
+                      setRedditAllLock(null);
+                    }} />
+                  </label>
+                  <label>
+                    All Picks Body
+                    <textarea value={redditAllBody} rows={14} onChange={(event) => {
+                      setRedditAllBody(event.target.value);
+                      setRedditAllLock(null);
+                    }} />
+                  </label>
+                  <div className="notification-actions">
+                    <button className="primary" disabled={!redditAllTitle || !redditAllBody} onClick={copyRedditAllPost}>Copy all-picks post</button>
+                    <button className={redditAllLock ? "primary" : "secondary-action"} disabled={!redditAllTitle || !redditAllBody || redditLockingType !== null} onClick={() => lockRedditPostTracking("all")}>
+                      {redditLockingType === "all" ? "Locking..." : redditAllLock ? "All picks locked" : "Lock all picks"}
+                    </button>
+                  </div>
+                  {redditAllLock && (
+                    <div className="reddit-lock-status">
+                      <Lock size={16} />
+                      <span>All picks saved at {new Date(redditAllLock.lockedAt).toLocaleString()}. Safe to post.</span>
                     </div>
                   )}
                 </div>

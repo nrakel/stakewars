@@ -60,6 +60,20 @@ type RedditParlayLegRow = RedditPickRow & {
   profit_units?: string;
 };
 
+type RedditAllPickRow = {
+  id: string;
+  pick_date: string;
+  locked_at?: Date | null;
+};
+
+type RedditAllPickLegRow = RedditPickRow & {
+  id: string;
+  all_pick_id: string;
+  leg_index: number;
+  status: TrackedStatus;
+  profit_units: string;
+};
+
 const americanToDecimal = (odds: number) => odds > 0 ? 1 + odds / 100 : 1 + 100 / Math.abs(odds);
 
 const redditSingleMinAmericanOdds = -200;
@@ -508,6 +522,22 @@ const pickNarrative = (pick: Pick<RedditPickRow, "selected_team" | "away_team" |
   return `${lead} The model points to ${reasonText}. That is enough for a ${formatUnits(pick.units)} play.`;
 };
 
+const allPickNarrative = (pick: Pick<RedditAllPickLegRow, "selected_team" | "away_team" | "home_team" | "odds_american" | "sport" | "market_key" | "spread" | "reasons" | "confidence" | "edge" | "features" | "explanation" | "units">) => {
+  const confidence = pick.confidence ? `${Math.round(Number(pick.confidence) * 100)}%` : null;
+  const edge = pick.edge ? `${(Number(pick.edge) * 100).toFixed(1)}%` : null;
+  const lead = `Chine likes ${pickBullet(pick)}${confidence ? ` at ${confidence} confidence` : ""}${edge ? ` with a ${edge} projected edge` : ""}.`;
+  const facts = concretePickFacts(pick);
+  if (facts.length) {
+    return [lead, ...facts].join(" ");
+  }
+
+  const reasons = redditWhyBullets(pick.reasons).map((reason) => reason.toLowerCase());
+  const reasonText = reasons.length > 1
+    ? `${reasons.slice(0, -1).join(", ")} and ${reasons.at(-1)}`
+    : reasons[0] ?? "a favorable model profile";
+  return `${lead} The model points to ${reasonText}.`;
+};
+
 const settleTrackedRedditPicks = async () => {
   const rows = await query<RedditRecordPickRow & {
     result_id: string | null;
@@ -821,6 +851,150 @@ const getRedditParlayRecord = async () => {
   };
 };
 
+const settleTrackedRedditAllPicks = async () => {
+  const rows = await query<RedditAllPickLegRow & {
+    result_id: string | null;
+    result_starts_on: string | null;
+    result_away_team: string | null;
+    result_home_team: string | null;
+    away_score: number | null;
+    home_score: number | null;
+    result_metadata: Record<string, unknown> | null;
+  }>(
+    `
+      SELECT
+        rapl.id,
+        rapl.all_pick_id,
+        rapl.ai_pick_id,
+        rapl.game_line_id,
+        rapt.pick_date::text,
+        rapl.selected_team,
+        rapl.leg_index,
+        rapl.status,
+        rapl.profit_units,
+        rapl.decimal_odds,
+        1.00::numeric(5,2) AS units,
+        gl.sport::text AS sport,
+        gl.league,
+        gl.market_key,
+        gl.spread,
+        rapl.odds_american,
+        gl.away_team,
+        gl.home_team,
+        gl.starts_at,
+        p.confidence,
+        p.features->>'edge' AS edge,
+        p.features,
+        p.reasons,
+        p.explanation,
+        COALESCE(gr.id::text, lgs.match_id) AS result_id,
+        COALESCE(gr.starts_on::text, lgs.starts_at::date::text) AS result_starts_on,
+        COALESCE(gr.away_team, lgs.away_team) AS result_away_team,
+        COALESCE(gr.home_team, lgs.home_team) AS result_home_team,
+        COALESCE(gr.away_score, lgs.away_score) AS away_score,
+        COALESCE(gr.home_score, lgs.home_score) AS home_score,
+        COALESCE(gr.result_metadata, '{}'::jsonb) AS result_metadata
+      FROM reddit_all_pick_leg_track rapl
+      JOIN reddit_all_pick_track rapt ON rapt.id = rapl.all_pick_id
+      JOIN ai_pick p ON p.id = rapl.ai_pick_id
+      JOIN game_line gl ON gl.id = rapl.game_line_id
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM game_result candidate
+        WHERE candidate.sport = gl.sport
+          AND candidate.away_team = gl.away_team
+          AND candidate.home_team = gl.home_team
+          AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - gl.starts_at)) <= 10800
+        ORDER BY abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - gl.starts_at)) ASC,
+                 candidate.fetched_at DESC
+        LIMIT 1
+      ) gr ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM live_game_state candidate
+        WHERE candidate.sport = gl.sport
+          AND candidate.away_team = gl.away_team
+          AND candidate.home_team = gl.home_team
+          AND candidate.away_score IS NOT NULL
+          AND candidate.home_score IS NOT NULL
+          AND lower(candidate.game_status) IN ('final', 'final/ot', 'final/aet', 'full time')
+          AND abs(extract(epoch from candidate.starts_at - gl.starts_at)) <= 10800
+        ORDER BY abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC,
+                 candidate.updated_at DESC
+        LIMIT 1
+      ) lgs ON gr.id IS NULL
+      WHERE rapl.status = 'pending'
+        AND rapt.locked_at IS NOT NULL
+    `
+  );
+
+  for (const row of rows.rows) {
+    if (!row.result_id || row.away_score === null || row.home_score === null || !row.result_starts_on || !row.result_away_team || !row.result_home_team) {
+      continue;
+    }
+    const finalGame: FinalGame = {
+      startsOn: row.result_starts_on,
+      awayTeam: row.result_away_team,
+      homeTeam: row.result_home_team,
+      awayScore: row.away_score,
+      homeScore: row.home_score,
+      noAction: Boolean(row.result_metadata?.noAction)
+    };
+    const status = outcomeForSelection({
+      selectedTeam: row.selected_team,
+      awayTeam: row.away_team,
+      homeTeam: row.home_team,
+      marketKey: row.market_key,
+      spread: Number(row.spread),
+      game: finalGame
+    });
+    const profitUnits = status === "won"
+      ? Number(row.decimal_odds) - 1
+      : status === "lost"
+        ? -1
+        : 0;
+    await query(
+      `
+        UPDATE reddit_all_pick_leg_track
+        SET status = $2,
+            profit_units = $3,
+            settled_at = now()
+        WHERE id = $1 AND status = 'pending'
+      `,
+      [row.id, status, profitUnits.toFixed(2)]
+    );
+  }
+};
+
+const getRedditAllPickRecord = async () => {
+  await settleTrackedRedditAllPicks();
+  const result = await query<{
+    wins: number;
+    losses: number;
+    net_units: string;
+  }>(
+    `
+      SELECT
+        count(*) FILTER (WHERE rapl.status = 'won')::int AS wins,
+        count(*) FILTER (WHERE rapl.status = 'lost')::int AS losses,
+        coalesce(sum(rapl.profit_units), 0)::text AS net_units
+      FROM reddit_all_pick_leg_track rapl
+      JOIN reddit_all_pick_track rapt ON rapt.id = rapl.all_pick_id
+      WHERE rapt.locked_at IS NOT NULL
+        AND rapt.pick_date >= ((now() AT TIME ZONE 'America/Chicago')::date - interval '7 days')
+        AND rapl.status IN ('won', 'lost', 'push', 'void')
+    `
+  );
+  const wins = result.rows[0]?.wins ?? 0;
+  const losses = result.rows[0]?.losses ?? 0;
+  return {
+    wins,
+    losses,
+    winLossPercent: wins + losses > 0 ? wins / (wins + losses) : null,
+    netUnits: Number(result.rows[0]?.net_units ?? 0)
+  };
+};
+
 const selectTodayRedditPick = async () => {
   return query<RedditPickRow>(
     `
@@ -904,6 +1078,64 @@ const selectTodayRedditParlay = async () => {
   );
   return {
     parlay: parlay.rows[0],
+    legs: legs.rows
+  };
+};
+
+const selectRedditAllPickLegs = async (allPickId: string) => {
+  return query<RedditAllPickLegRow>(
+    `
+      SELECT
+        rapl.id,
+        rapl.all_pick_id,
+        rapl.ai_pick_id,
+        rapl.game_line_id,
+        rapt.pick_date::text,
+        rapl.selected_team,
+        rapl.leg_index,
+        rapl.status,
+        rapl.profit_units,
+        rapl.decimal_odds,
+        1.00::numeric(5,2) AS units,
+        gl.sport::text AS sport,
+        gl.league,
+        gl.market_key,
+        gl.spread,
+        rapl.odds_american,
+        gl.away_team,
+        gl.home_team,
+        gl.starts_at,
+        p.confidence,
+        p.features->>'edge' AS edge,
+        p.features,
+        p.reasons,
+        p.explanation
+      FROM reddit_all_pick_leg_track rapl
+      JOIN reddit_all_pick_track rapt ON rapt.id = rapl.all_pick_id
+      JOIN ai_pick p ON p.id = rapl.ai_pick_id
+      JOIN game_line gl ON gl.id = rapl.game_line_id
+      WHERE rapl.all_pick_id = $1
+      ORDER BY rapl.leg_index ASC
+    `,
+    [allPickId]
+  );
+};
+
+const selectTodayRedditAllPicks = async () => {
+  const allPick = await query<RedditAllPickRow>(
+    `
+      SELECT id, pick_date::text, locked_at
+      FROM reddit_all_pick_track
+      WHERE pick_date = (now() AT TIME ZONE 'America/Chicago')::date
+      LIMIT 1
+    `
+  );
+  if (!allPick.rows[0]) {
+    return null;
+  }
+  const legs = await selectRedditAllPickLegs(allPick.rows[0].id);
+  return {
+    allPick: allPick.rows[0],
     legs: legs.rows
   };
 };
@@ -1087,6 +1319,123 @@ const getOrCreateTodayRedditParlay = async () => {
   return selectTodayRedditParlay();
 };
 
+const getOrCreateTodayRedditAllPicks = async () => {
+  const existing = await selectTodayRedditAllPicks();
+  if (existing) {
+    if (existing.allPick.locked_at) {
+      return existing.legs.length ? existing : null;
+    }
+    await query("DELETE FROM reddit_all_pick_track WHERE id = $1 AND locked_at IS NULL", [existing.allPick.id]);
+  }
+
+  const candidates = await query<RedditCandidatePickRow>(
+    `
+      WITH candidates AS (
+        SELECT
+          p.id AS ai_pick_id,
+          p.game_line_id,
+          (now() AT TIME ZONE 'America/Chicago')::date::text AS pick_date,
+          p.selected_team,
+          (CASE WHEN gl.odds_american > 0 THEN 1 + gl.odds_american / 100.0 ELSE 1 + 100.0 / abs(gl.odds_american) END)::numeric(8,3) AS decimal_odds,
+          1.00::numeric(5,2) AS units,
+          gl.sport::text AS sport,
+          gl.league,
+          gl.market_key,
+          gl.spread,
+          gl.odds_american,
+          gl.away_team,
+          gl.home_team,
+          gl.starts_at,
+          p.confidence,
+          p.score,
+          p.features->>'edge' AS edge,
+          p.features,
+          p.reasons,
+          p.explanation,
+          split_part(gl.provider_event_id, ':', 1) AS event_key
+        FROM ai_pick p
+        JOIN game_line gl ON gl.id = p.game_line_id
+        WHERE p.published_for = (now() AT TIME ZONE 'America/Chicago')::date
+          AND gl.starts_at > now()
+          AND gl.market_key = 'h2h'
+      ),
+      one_per_event AS (
+        SELECT DISTINCT ON (event_key) *
+        FROM candidates
+        ORDER BY event_key, confidence DESC NULLS LAST, score DESC NULLS LAST, starts_at ASC
+      )
+      SELECT
+        ai_pick_id,
+        game_line_id,
+        pick_date,
+        selected_team,
+        decimal_odds,
+        units,
+        sport,
+        league,
+        market_key,
+        spread,
+        odds_american,
+        away_team,
+        home_team,
+        starts_at,
+        confidence,
+        edge,
+        features,
+        reasons,
+        explanation
+      FROM one_per_event
+      ORDER BY confidence DESC NULLS LAST, score DESC NULLS LAST, starts_at ASC
+    `
+  );
+
+  if (!candidates.rows.length) {
+    return null;
+  }
+
+  await transaction(async (client) => {
+    const allPickResult = await client.query<{ id: string }>(
+      `
+        INSERT INTO reddit_all_pick_track (id, pick_date)
+        VALUES ($1, (now() AT TIME ZONE 'America/Chicago')::date)
+        ON CONFLICT (pick_date) DO UPDATE
+        SET pick_date = reddit_all_pick_track.pick_date
+        WHERE reddit_all_pick_track.locked_at IS NULL
+        RETURNING id
+      `,
+      [randomUUID()]
+    );
+    const trackedAllPickId = allPickResult.rows[0]?.id;
+    if (!trackedAllPickId) {
+      return;
+    }
+    await client.query("DELETE FROM reddit_all_pick_leg_track WHERE all_pick_id = $1", [trackedAllPickId]);
+    for (const [index, pick] of candidates.rows.entries()) {
+      await client.query(
+        `
+          INSERT INTO reddit_all_pick_leg_track (
+            id, all_pick_id, ai_pick_id, game_line_id, selected_team, leg_index, decimal_odds, odds_american
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (all_pick_id, leg_index) DO NOTHING
+        `,
+        [
+          randomUUID(),
+          trackedAllPickId,
+          pick.ai_pick_id,
+          pick.game_line_id,
+          pick.selected_team,
+          index + 1,
+          Number(pick.decimal_odds).toFixed(3),
+          pick.odds_american
+        ]
+      );
+    }
+  });
+
+  return selectTodayRedditAllPicks();
+};
+
 export const lockRedditPostTracking = async ({
   userId,
   postType,
@@ -1094,10 +1443,35 @@ export const lockRedditPostTracking = async ({
   body
 }: {
   userId: string;
-  postType: "single" | "parlay";
+  postType: "single" | "parlay" | "all";
   title: string;
   body: string;
 }) => {
+  if (postType === "all") {
+    const current = await getOrCreateTodayRedditAllPicks();
+    if (!current || !current.legs.length) {
+      throw new Error("No Chine all-picks card is available to lock.");
+    }
+    const result = await query<{ id: string; lockedAt: Date }>(
+      `
+        UPDATE reddit_all_pick_track
+        SET locked_at = COALESCE(locked_at, now()),
+            locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
+            locked_title = $3,
+            locked_body = $4
+        WHERE id = $1
+        RETURNING id, locked_at AS "lockedAt"
+      `,
+      [current.allPick.id, userId, title, body]
+    );
+    return {
+      postType,
+      id: result.rows[0].id,
+      lockedAt: result.rows[0].lockedAt,
+      legs: current.legs.length
+    };
+  }
+
   if (postType === "parlay") {
     const current = await getOrCreateTodayRedditParlay();
     if (!current || current.legs.length !== 3) {
@@ -1281,6 +1655,32 @@ const trackedPickLine = (pick: Pick<RedditPickRow, "selected_team" | "market_key
 const parlayReturnUnits = (units: string | number, legs: Array<Pick<RedditParlayLegRow, "decimal_odds">>) =>
   Number(units) * legs.reduce((product, leg) => product * Number(leg.decimal_odds), 1);
 
+const formatWinLossPercent = (value: number | null) => value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
+
+const allPickLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "confidence">) =>
+  `${pickBullet(pick)} - ${formatCstTime(pick.starts_at)} - ${formatAmericanOdds(pick.odds_american)} - Confidence: ${pick.confidence ? `${Math.round(Number(pick.confidence) * 100)}%` : "N/A"}`;
+
+const getYesterdayRedditAllPicks = async () => {
+  await settleTrackedRedditAllPicks();
+  const allPick = await query<RedditAllPickRow>(
+    `
+      SELECT id, pick_date::text, locked_at
+      FROM reddit_all_pick_track
+      WHERE pick_date = ((now() AT TIME ZONE 'America/Chicago')::date - interval '1 day')
+        AND locked_at IS NOT NULL
+      LIMIT 1
+    `
+  );
+  if (!allPick.rows[0]) {
+    return null;
+  }
+  const legs = await selectRedditAllPickLegs(allPick.rows[0].id);
+  return {
+    allPick: allPick.rows[0],
+    legs: legs.rows
+  };
+};
+
 export const buildRedditPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
   const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
   const today = new Date().toLocaleDateString("en-US", {
@@ -1334,6 +1734,54 @@ export const buildRedditPreview = async (subredditInput?: string): Promise<Reddi
   return {
     subreddit,
     title: `StakeWars Chine pick - ${today}`,
+    body
+  };
+};
+
+export const buildRedditAllPicksPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
+  const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
+  const today = new Date().toLocaleDateString("en-US", {
+    timeZone: "America/Chicago",
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  });
+
+  const [record, yesterday, current] = await Promise.all([
+    getRedditAllPickRecord(),
+    getYesterdayRedditAllPicks(),
+    getOrCreateTodayRedditAllPicks()
+  ]);
+
+  const yesterdayPicks = yesterday?.legs.length
+    ? yesterday.legs.map((leg) => trackedPickLine(leg)).join("; ")
+    : "No tracked all-picks card yesterday.";
+  const yesterdayUnits = yesterday?.legs.length
+    ? yesterday.legs.reduce((sum, leg) => sum + Number(leg.profit_units), 0)
+    : null;
+  const todayLines = current?.legs.length
+    ? current.legs.flatMap((pick, index) => [
+      `Pick #${index + 1}: ${allPickLine(pick)}`,
+      allPickNarrative(pick)
+    ])
+    : ["No Chine all-picks card is posted yet today."];
+
+  const body = [
+    "You can follow all of my picks on stakewars-dot-ai. I am Chine, the autonomous daily picker fueling the challenge. To win, you must defeat me. Here is my recent form with all wagers being 1u:",
+    "",
+    "Past 7 days:",
+    `Win-Loss: ${record.wins}-${record.losses}`,
+    `Win-Loss%: ${formatWinLossPercent(record.winLossPercent)}`,
+    `Net Units: ${formatSignedUnits(record.netUnits)}`,
+    `Yesterday's picks: ${yesterdayPicks}`,
+    `Yesterday's Results: ${yesterdayUnits === null ? "N/A" : formatSignedUnits(yesterdayUnits)}`,
+    "Today's Picks:",
+    ...todayLines
+  ].join("\n");
+
+  return {
+    subreddit,
+    title: `StakeWars Chine all picks - ${today}`,
     body
   };
 };
