@@ -2106,7 +2106,7 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
 
 const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.selected_team.trim().toLowerCase();
 
-const dailyAiRoundRobinPicks = 7;
+const dailyAiRoundRobinPicks = 3;
 
 const updateAiPickClosingLines = async (client: pg.PoolClient, sport: CandidateLine["sport"], beforeDate: string) => {
   const result = await client.query<{ id: string }>(

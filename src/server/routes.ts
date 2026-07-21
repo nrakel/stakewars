@@ -2493,7 +2493,7 @@ export const registerRoutes = (router: Router) => {
             AND w.kind = 'round_robin'
             AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date
           GROUP BY w.id
-          HAVING count(wl.id) = 7
+          HAVING count(wl.id) = 3
           ORDER BY w.placed_at DESC
           LIMIT 1
         `,
