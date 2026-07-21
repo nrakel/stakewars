@@ -1657,8 +1657,8 @@ const parlayReturnUnits = (units: string | number, legs: Array<Pick<RedditParlay
 
 const formatWinLossPercent = (value: number | null) => value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
 
-const allPickLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "confidence">) =>
-  `${pickBullet(pick)} - ${formatCstTime(pick.starts_at)} - ${formatAmericanOdds(pick.odds_american)} - Confidence: ${pick.confidence ? `${Math.round(Number(pick.confidence) * 100)}%` : "N/A"}`;
+const allPickResultLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "status" | "profit_units">) =>
+  `${trackedPickSymbol(pick.status)} ${trackedPickLine(pick)} (${formatSignedUnits(Number(pick.profit_units))})`;
 
 const getYesterdayRedditAllPicks = async () => {
   await settleTrackedRedditAllPicks();
@@ -1754,29 +1754,61 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
   ]);
 
   const yesterdayPicks = yesterday?.legs.length
-    ? yesterday.legs.map((leg) => trackedPickLine(leg)).join("; ")
-    : "No tracked all-picks card yesterday.";
+    ? yesterday.legs.map((leg) => allPickResultLine(leg))
+    : ["No tracked all-picks card yesterday."];
   const yesterdayUnits = yesterday?.legs.length
     ? yesterday.legs.reduce((sum, leg) => sum + Number(leg.profit_units), 0)
     : null;
   const todayLines = current?.legs.length
     ? current.legs.flatMap((pick, index) => [
-      `Pick #${index + 1}: ${allPickLine(pick)}`,
-      allPickNarrative(pick)
+      `**${pickBullet(pick)}**`,
+      `🕒 ${formatCstTime(pick.starts_at)}`,
+      `💰 ${formatAmericanOdds(pick.odds_american)}`,
+      `🎲 Confidence: **${pick.confidence ? Math.round(Number(pick.confidence) * 100) : "N/A"}/100**`,
+      "",
+      `> ${allPickNarrative(pick)}`,
+      ...(index < current.legs.length - 1 ? ["", "---", ""] : [])
     ])
     : ["No Chine all-picks card is posted yet today."];
 
   const body = [
-    "You can follow all of my picks on stakewars-dot-ai. I am Chine, the autonomous daily picker fueling the challenge. To win, you must defeat me. Here is my recent form with all wagers being 1u:",
+    "🤖 **I am Chine.**",
     "",
-    "Past 7 days:",
-    `Win-Loss: ${record.wins}-${record.losses}`,
-    `Win-Loss%: ${formatWinLossPercent(record.winLossPercent)}`,
-    `Net Units: ${formatSignedUnits(record.netUnits)}`,
-    `Yesterday's picks: ${yesterdayPicks}`,
-    `Yesterday's Results: ${yesterdayUnits === null ? "N/A" : formatSignedUnits(yesterdayUnits)}`,
-    "Today's Picks:",
-    ...todayLines
+    "Every day I analyze the numbers, ignore the hype, and make my picks.",
+    "",
+    "Every week, thousands of decisions become one challenge:",
+    "",
+    "**Can you beat me?**",
+    "",
+    "Think you know sports better than the machine?",
+    "",
+    "Join the free competition at https://stakewars.ai",
+    "",
+    "---",
+    "",
+    "### 📊 My Recent Form",
+    "",
+    "**Last 7 Days**",
+    `🏆 Record: **${record.wins}-${record.losses}**`,
+    `📈 Win Rate: **${formatWinLossPercent(record.winLossPercent)}**`,
+    "",
+    "### Yesterday",
+    "",
+    ...yesterdayPicks,
+    "",
+    `**Daily Result:** **${yesterdayUnits === null ? "N/A" : formatSignedUnits(yesterdayUnits)}**`,
+    "",
+    "---",
+    "",
+    "## 🎯 Today's Picks",
+    "",
+    ...todayLines,
+    "",
+    "Think I'm wrong?",
+    "",
+    "**Prove it.**",
+    "",
+    "Create your own card at **https://stakewars.ai** and see if you can finish above me on the leaderboard."
   ].join("\n");
 
   return {
