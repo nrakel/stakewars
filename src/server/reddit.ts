@@ -995,6 +995,57 @@ const getRedditAllPickRecord = async () => {
   };
 };
 
+const getRecentChineStraightRecord = async () => {
+  const result = await query<{
+    wins: number;
+    losses: number;
+    net_units: string;
+  }>(
+    `
+      WITH settled AS (
+        SELECT
+          COALESCE(wl.status::text, w.status::text) AS status,
+          CASE
+            WHEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american) > 0
+              THEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american)::numeric / 100
+            ELSE 100::numeric / abs(COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american))
+          END AS win_profit_units
+        FROM ai_pick p
+        JOIN game_line gl ON gl.id = p.game_line_id
+        JOIN wager w ON w.id = p.wager_id
+        JOIN wager_leg wl ON wl.wager_id = w.id
+          AND wl.game_line_id = p.game_line_id
+          AND wl.selected_team = p.selected_team
+        WHERE p.locked_at IS NOT NULL
+          AND w.kind = 'straight'
+          AND gl.market_key = 'h2h'
+          AND p.published_for >= ((now() AT TIME ZONE 'America/Chicago')::date - interval '7 days')
+          AND p.published_for < (now() AT TIME ZONE 'America/Chicago')::date
+          AND COALESCE(wl.status::text, w.status::text) IN ('won', 'lost', 'push', 'void')
+      )
+      SELECT
+        count(*) FILTER (WHERE status = 'won')::int AS wins,
+        count(*) FILTER (WHERE status = 'lost')::int AS losses,
+        coalesce(sum(
+          CASE
+            WHEN status = 'won' THEN win_profit_units
+            WHEN status = 'lost' THEN -1::numeric
+            ELSE 0::numeric
+          END
+        ), 0)::text AS net_units
+      FROM settled
+    `
+  );
+  const wins = result.rows[0]?.wins ?? 0;
+  const losses = result.rows[0]?.losses ?? 0;
+  return {
+    wins,
+    losses,
+    winLossPercent: wins + losses > 0 ? wins / (wins + losses) : null,
+    netUnits: Number(result.rows[0]?.net_units ?? 0)
+  };
+};
+
 const selectTodayRedditPick = async () => {
   return query<RedditPickRow>(
     `
@@ -1748,7 +1799,7 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
   });
 
   const [record, previous, current] = await Promise.all([
-    getRedditAllPickRecord(),
+    getRecentChineStraightRecord(),
     getYesterdayRedditAllPicks(),
     getOrCreateTodayRedditAllPicks()
   ]);
