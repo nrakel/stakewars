@@ -995,57 +995,6 @@ const getRedditAllPickRecord = async () => {
   };
 };
 
-const getRecentChineAllPickRecord = async () => {
-  const result = await query<{
-    wins: number;
-    losses: number;
-    net_units: string;
-  }>(
-    `
-      WITH settled AS (
-        SELECT
-          COALESCE(wl.status::text, w.status::text) AS status,
-          CASE
-            WHEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american) > 0
-              THEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american)::numeric / 100
-            ELSE 100::numeric / abs(COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american))
-          END AS win_profit_units
-        FROM ai_pick p
-        JOIN game_line gl ON gl.id = p.game_line_id
-        LEFT JOIN wager w ON w.id = p.wager_id
-        LEFT JOIN wager_leg wl ON wl.wager_id = w.id
-          AND wl.game_line_id = p.game_line_id
-          AND wl.selected_team = p.selected_team
-        WHERE p.locked_at IS NOT NULL
-          AND p.wager_id IS NOT NULL
-          AND gl.market_key = 'h2h'
-          AND p.published_for >= ((now() AT TIME ZONE 'America/Chicago')::date - interval '7 days')
-          AND p.published_for < (now() AT TIME ZONE 'America/Chicago')::date
-          AND COALESCE(wl.status::text, w.status::text) IN ('won', 'lost', 'push', 'void')
-      )
-      SELECT
-        count(*) FILTER (WHERE status = 'won')::int AS wins,
-        count(*) FILTER (WHERE status = 'lost')::int AS losses,
-        coalesce(sum(
-          CASE
-            WHEN status = 'won' THEN win_profit_units
-            WHEN status = 'lost' THEN -1::numeric
-            ELSE 0::numeric
-          END
-        ), 0)::text AS net_units
-      FROM settled
-    `
-  );
-  const wins = result.rows[0]?.wins ?? 0;
-  const losses = result.rows[0]?.losses ?? 0;
-  return {
-    wins,
-    losses,
-    winLossPercent: wins + losses > 0 ? wins / (wins + losses) : null,
-    netUnits: Number(result.rows[0]?.net_units ?? 0)
-  };
-};
-
 const selectTodayRedditPick = async () => {
   return query<RedditPickRow>(
     `
@@ -1732,66 +1681,6 @@ const getYesterdayRedditAllPicks = async () => {
   };
 };
 
-const getYesterdayChineAllPicks = async () => {
-  const result = await query<RedditAllPickLegRow>(
-    `
-      SELECT
-        p.id,
-        p.id AS all_pick_id,
-        p.id AS ai_pick_id,
-        p.game_line_id,
-        p.published_for::text AS pick_date,
-        p.selected_team,
-        row_number() OVER (ORDER BY p.confidence DESC NULLS LAST, p.score DESC NULLS LAST, gl.starts_at ASC)::int AS leg_index,
-        COALESCE(wl.status, w.status) AS status,
-        (
-          CASE
-            WHEN COALESCE(wl.status::text, w.status::text) = 'won' THEN
-              CASE
-                WHEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american) > 0
-                  THEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american)::numeric / 100
-                ELSE 100::numeric / abs(COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american))
-              END
-            WHEN COALESCE(wl.status::text, w.status::text) = 'lost' THEN -1::numeric
-            ELSE 0::numeric
-          END
-        )::numeric(8,2)::text AS profit_units,
-        (CASE
-          WHEN COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american) > 0
-            THEN 1 + COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american) / 100.0
-          ELSE 1 + 100.0 / abs(COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american))
-        END)::numeric(8,3) AS decimal_odds,
-        1.00::numeric(5,2) AS units,
-        gl.sport::text AS sport,
-        gl.league,
-        gl.market_key,
-        gl.spread,
-        COALESCE(p.locked_odds_american, wl.odds_american, gl.odds_american) AS odds_american,
-        gl.away_team,
-        gl.home_team,
-        gl.starts_at,
-        p.confidence,
-        p.features->>'edge' AS edge,
-        p.features,
-        p.reasons,
-        p.explanation
-      FROM ai_pick p
-      JOIN game_line gl ON gl.id = p.game_line_id
-      LEFT JOIN wager w ON w.id = p.wager_id
-      LEFT JOIN wager_leg wl ON wl.wager_id = w.id
-        AND wl.game_line_id = p.game_line_id
-        AND wl.selected_team = p.selected_team
-      WHERE p.locked_at IS NOT NULL
-        AND p.wager_id IS NOT NULL
-        AND gl.market_key = 'h2h'
-        AND p.published_for = ((now() AT TIME ZONE 'America/Chicago')::date - interval '1 day')
-        AND COALESCE(wl.status::text, w.status::text) IN ('won', 'lost', 'push', 'void')
-      ORDER BY p.confidence DESC NULLS LAST, p.score DESC NULLS LAST, gl.starts_at ASC
-    `
-  );
-  return result.rows;
-};
-
 export const buildRedditPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
   const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
   const today = new Date().toLocaleDateString("en-US", {
@@ -1858,17 +1747,17 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
     year: "numeric"
   });
 
-  const [record, yesterdayPicksActual, current] = await Promise.all([
-    getRecentChineAllPickRecord(),
-    getYesterdayChineAllPicks(),
+  const [record, previous, current] = await Promise.all([
+    getRedditAllPickRecord(),
+    getYesterdayRedditAllPicks(),
     getOrCreateTodayRedditAllPicks()
   ]);
 
-  const yesterdayPicks = yesterdayPicksActual.length
-    ? yesterdayPicksActual.map((leg) => allPickResultLine(leg))
+  const yesterdayPicks = previous?.legs.length
+    ? previous.legs.map((leg) => allPickResultLine(leg))
     : ["No settled Chine picks yesterday."];
-  const yesterdayUnits = yesterdayPicksActual.length
-    ? yesterdayPicksActual.reduce((sum, leg) => sum + Number(leg.profit_units), 0)
+  const yesterdayUnits = previous?.legs.length
+    ? previous.legs.reduce((sum, leg) => sum + Number(leg.profit_units), 0)
     : null;
   const todayLines = current?.legs.length
     ? current.legs.flatMap((pick, index) => [
