@@ -320,6 +320,24 @@ const isVerificationRequiredResponse = (value: unknown): value is VerificationRe
   );
 
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+const shortDateTime = (value: string) => new Date(value).toLocaleString(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit"
+});
+const openBetLegTiming = (leg: OpenBet["legs"][number]) => {
+  if (
+    leg.liveInPlay
+    && leg.liveAwayScore !== null
+    && leg.liveAwayScore !== undefined
+    && leg.liveHomeScore !== null
+    && leg.liveHomeScore !== undefined
+  ) {
+    return `${leg.awayTeam} ${leg.liveAwayScore} - ${leg.homeTeam} ${leg.liveHomeScore}${leg.livePeriod ? ` - ${leg.livePeriod}` : ""}`;
+  }
+  return `Starts ${shortDateTime(leg.startsAt)}`;
+};
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 const pct = (value: number | null | undefined) => value == null ? "-" : `${(value * 100).toFixed(1)}%`;
 const units = (value: number | null | undefined) => value == null ? "-" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}u`;
@@ -3735,7 +3753,7 @@ function App() {
                     return (
                       <div className="open-bet-leg" key={leg.id}>
                         <span><LegStatusIcon status={leg.status} /> {leg.selectedTeam} {marketText}</span>
-                        <small>{leg.awayTeam} @ {leg.homeTeam}</small>
+                        <small>{leg.awayTeam} @ {leg.homeTeam} • {openBetLegTiming(leg)}</small>
                       </div>
                     );
                   })}

@@ -2548,6 +2548,11 @@ export const registerRoutes = (router: Router) => {
         startsAt: Date;
         awayTeam: string;
         homeTeam: string;
+        liveAwayScore: number | null;
+        liveHomeScore: number | null;
+        livePeriod: string | null;
+        liveGameStatus: string | null;
+        liveInPlay: boolean | null;
       }>(
         `
           SELECT
@@ -2565,10 +2570,38 @@ export const registerRoutes = (router: Router) => {
             gl.sport,
             gl.starts_at AS "startsAt",
             gl.away_team AS "awayTeam",
-            gl.home_team AS "homeTeam"
+            gl.home_team AS "homeTeam",
+            lgs.away_score AS "liveAwayScore",
+            lgs.home_score AS "liveHomeScore",
+            lgs.period AS "livePeriod",
+            lgs.game_status AS "liveGameStatus",
+            lgs.in_play AS "liveInPlay"
           FROM wager w
           JOIN wager_leg wl ON wl.wager_id = w.id
           JOIN game_line gl ON gl.id = wl.game_line_id
+          LEFT JOIN LATERAL (
+            SELECT *
+            FROM live_game_state candidate
+            WHERE candidate.sport = gl.sport
+              AND (
+                candidate.event_key = split_part(gl.provider_event_id, ':', 1)
+                OR (
+                  candidate.away_team = gl.away_team
+                  AND candidate.home_team = gl.home_team
+                  AND abs(extract(epoch from candidate.starts_at - gl.starts_at)) <= 10800
+                )
+              )
+            ORDER BY
+              CASE candidate.provider
+                WHEN 'mlb-stats-api' THEN 1
+                WHEN 'espn-scoreboard' THEN 2
+                WHEN 'parlay-live' THEN 3
+                ELSE 4
+              END,
+              abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC,
+              candidate.fetched_at DESC
+            LIMIT 1
+          ) lgs ON true
           WHERE w.user_id = $1 AND w.status = 'pending'
           ORDER BY w.placed_at DESC, gl.starts_at ASC
         `,
@@ -2592,6 +2625,11 @@ export const registerRoutes = (router: Router) => {
           startsAt: string;
           awayTeam: string;
           homeTeam: string;
+          liveAwayScore: number | null;
+          liveHomeScore: number | null;
+          livePeriod: string | null;
+          liveGameStatus: string | null;
+          liveInPlay: boolean;
         }>;
       }>();
 
@@ -2614,7 +2652,12 @@ export const registerRoutes = (router: Router) => {
           sport: row.sport,
           startsAt: row.startsAt.toISOString(),
           awayTeam: row.awayTeam,
-          homeTeam: row.homeTeam
+          homeTeam: row.homeTeam,
+          liveAwayScore: row.liveAwayScore,
+          liveHomeScore: row.liveHomeScore,
+          livePeriod: row.livePeriod,
+          liveGameStatus: row.liveGameStatus,
+          liveInPlay: Boolean(row.liveInPlay)
         });
         wagers.set(row.wagerId, wager);
       }

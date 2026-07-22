@@ -206,6 +206,11 @@ export type OpenBetLeg = {
   startsAt: string;
   awayTeam: string;
   homeTeam: string;
+  liveAwayScore?: number | null;
+  liveHomeScore?: number | null;
+  livePeriod?: string | null;
+  liveGameStatus?: string | null;
+  liveInPlay?: boolean;
 };
 
 export type OpenBet = {
