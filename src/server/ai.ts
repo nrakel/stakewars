@@ -2455,13 +2455,57 @@ export const generateAiPicks = async ({
     ) ?? 0;
     const existingStraightGameKeys = new Set(existingDailyAiStraightWagers?.rows.map((wager) => gameKeyForPick(wager)) ?? []);
     const existingStraightTeamKeys = new Set(existingDailyAiStraightWagers?.rows.map((wager) => teamKeyForPick(wager)) ?? []);
-    const newStraightCandidateCount = wageringCandidates.filter(
-      (candidate) => !existingStraightGameKeys.has(gameKeyForPick(candidate)) && !existingStraightTeamKeys.has(teamKeyForPick(candidate))
-    ).length;
+    const pendingLockedStraightPicks = placeWagers && aiUser.rowCount
+      ? await client.query<{
+        game_line_id: string;
+        provider_event_id: string | null;
+        starts_at: Date;
+        away_team: string;
+        home_team: string;
+        selected_team: string;
+      }>(
+        `
+          SELECT
+            p.game_line_id,
+            gl.provider_event_id,
+            gl.starts_at,
+            gl.away_team,
+            gl.home_team,
+            p.selected_team
+          FROM ai_pick p
+          JOIN game_line gl ON gl.id = p.game_line_id
+          WHERE p.published_for = $1
+            AND p.locked_at IS NOT NULL
+            AND p.wager_id IS NULL
+            AND p.confidence >= $2
+            AND gl.sport = $3
+            AND gl.market_key = 'h2h'
+            AND gl.starts_at > now()
+        `,
+        [today, aiWagerMinConfidence, sport]
+      )
+      : null;
+    const pendingStraightGameKeys = new Set<string>();
+    for (const pick of pendingLockedStraightPicks?.rows ?? []) {
+      if (!existingStraightGameKeys.has(gameKeyForPick(pick)) && !existingStraightTeamKeys.has(teamKeyForPick(pick))) {
+        pendingStraightGameKeys.add(gameKeyForPick(pick));
+      }
+    }
+    const newStraightWagerSlotKeys = new Set<string>();
+    for (const candidate of wageringCandidates) {
+      if (!existingStraightGameKeys.has(gameKeyForPick(candidate)) && !existingStraightTeamKeys.has(teamKeyForPick(candidate))) {
+        newStraightWagerSlotKeys.add(gameKeyForPick(candidate));
+      }
+    }
+    for (const gameKey of pendingStraightGameKeys) {
+      if (!existingStraightGameKeys.has(gameKey)) {
+        newStraightWagerSlotKeys.add(gameKey);
+      }
+    }
     const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
     const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
-    const dailyStraightStakeCents = aiEntry && newStraightCandidateCount > 0
-      ? Math.floor(remainingDailyStraightBudgetCents / newStraightCandidateCount)
+    const dailyStraightStakeCents = aiEntry && newStraightWagerSlotKeys.size > 0
+      ? Math.floor(remainingDailyStraightBudgetCents / newStraightWagerSlotKeys.size)
       : aiEntry && stakeFractionOfBalance !== undefined
       ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
       : stakeCents;
@@ -2584,6 +2628,7 @@ export const generateAiPicks = async ({
       const shouldLock = now >= lockAt && now < candidate.starts_at;
       const shouldWagerStraight = shouldLock && candidate.confidence >= aiWagerMinConfidence;
       let wagerId: string | null = null;
+      let wagerSkippedReason: string | null = null;
 
       if (
         shouldWagerStraight
@@ -2630,9 +2675,27 @@ export const generateAiPicks = async ({
           wagerId = await placeAiWager(client, aiUser.rows[0].id, candidate, dailyStraightStakeCents);
           if (wagerId) {
             existingStraightTeamKeys.add(teamKeyForPick(candidate));
+            existingStraightGameKeys.add(gameKeyForPick(candidate));
           }
         }
       }
+      if (shouldWagerStraight && !wagerId) {
+        if (!placeWagers) {
+          wagerSkippedReason = "wager placement disabled";
+        } else if (!aiUser.rowCount) {
+          wagerSkippedReason = "system user missing";
+        } else if (existingStraightTeamKeys.has(teamKeyForPick(candidate))) {
+          wagerSkippedReason = "team already wagered today";
+        } else if (dailyStraightStakeCents <= 0) {
+          wagerSkippedReason = "daily straight budget exhausted";
+        } else {
+          wagerSkippedReason = "wager was not placed";
+        }
+      }
+
+      const features = wagerSkippedReason
+        ? { ...candidate.features, aiWagerSkippedReason: wagerSkippedReason }
+        : candidate.features;
 
       const explanation = fallbackAiExplanation({
         selectedTeam: candidate.selected_team,
@@ -2646,7 +2709,7 @@ export const generateAiPicks = async ({
         spread: candidate.spread,
         oddsAmerican: candidate.odds_american,
         startsAt: candidate.starts_at.toISOString(),
-        features: candidate.features
+        features
       });
       const pickResult = await client.query<{ id: string }>(
         `
@@ -2681,7 +2744,7 @@ export const generateAiPicks = async ({
           candidate.score,
           candidate.confidence,
           candidate.reasons,
-          JSON.stringify(candidate.features),
+          JSON.stringify(features),
           shouldLock ? now : null,
           wagerId,
           explanation,
@@ -2709,7 +2772,7 @@ export const generateAiPicks = async ({
         spread: candidate.spread,
         oddsAmerican: candidate.odds_american,
         startsAt: candidate.starts_at.toISOString(),
-        features: candidate.features
+        features
       });
     }
 
