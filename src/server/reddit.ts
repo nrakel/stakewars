@@ -1000,6 +1000,7 @@ const getRecentChineStraightRecord = async () => {
     wins: number;
     losses: number;
     net_units: string;
+    risked_units: string;
   }>(
     `
       WITH settled AS (
@@ -1026,6 +1027,7 @@ const getRecentChineStraightRecord = async () => {
       SELECT
         count(*) FILTER (WHERE status = 'won')::int AS wins,
         count(*) FILTER (WHERE status = 'lost')::int AS losses,
+        count(*) FILTER (WHERE status IN ('won', 'lost'))::text AS risked_units,
         coalesce(sum(
           CASE
             WHEN status = 'won' THEN win_profit_units
@@ -1042,7 +1044,10 @@ const getRecentChineStraightRecord = async () => {
     wins,
     losses,
     winLossPercent: wins + losses > 0 ? wins / (wins + losses) : null,
-    netUnits: Number(result.rows[0]?.net_units ?? 0)
+    netUnits: Number(result.rows[0]?.net_units ?? 0),
+    roi: Number(result.rows[0]?.risked_units ?? 0) > 0
+      ? Number(result.rows[0]?.net_units ?? 0) / Number(result.rows[0]?.risked_units ?? 0)
+      : null
   };
 };
 
@@ -1707,6 +1712,7 @@ const parlayReturnUnits = (units: string | number, legs: Array<Pick<RedditParlay
   Number(units) * legs.reduce((product, leg) => product * Number(leg.decimal_odds), 1);
 
 const formatWinLossPercent = (value: number | null) => value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
+const formatRoiPercent = (value: number | null) => value === null ? "N/A" : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 
 const allPickResultLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "status" | "profit_units">) =>
   `${trackedPickSymbol(pick.status)} ${trackedPickLine(pick)} (${formatSignedUnits(Number(pick.profit_units))})`;
@@ -1842,6 +1848,7 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
     "**Last 7 Days**",
     `🏆 Record: **${record.wins}-${record.losses}**`,
     `📈 Win Rate: **${formatWinLossPercent(record.winLossPercent)}**`,
+    `💹 ROI: **${formatRoiPercent(record.roi)}**`,
     "",
     "### Yesterday",
     "",
