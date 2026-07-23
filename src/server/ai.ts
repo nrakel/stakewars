@@ -2446,9 +2446,24 @@ export const generateAiPicks = async ({
         [aiUser.rows[0].id, today]
       )
       : null;
-    const dailyStartingBankrollCents = aiEntry
-      ? aiEntry.balance_cents + Number(dailyAiStake?.rows[0]?.total_stake_cents ?? 0)
-      : 0;
+    const dailyAiBankroll = placeWagers && aiUser.rowCount && aiEntry
+      ? await client.query<{ starting_balance_cents: number }>(
+        `
+          INSERT INTO ai_daily_bankroll (id, user_id, bankroll_date, starting_balance_cents)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (user_id, bankroll_date) DO UPDATE
+          SET user_id = EXCLUDED.user_id
+          RETURNING starting_balance_cents
+        `,
+        [
+          randomUUID(),
+          aiUser.rows[0].id,
+          today,
+          aiEntry.balance_cents + Number(dailyAiStake?.rows[0]?.total_stake_cents ?? 0)
+        ]
+      )
+      : null;
+    const dailyStartingBankrollCents = dailyAiBankroll?.rows[0]?.starting_balance_cents ?? 0;
     const existingStraightStakeCents = existingDailyAiStraightWagers?.rows.reduce(
       (total, wager) => total + wager.stake_cents,
       0
