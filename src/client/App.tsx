@@ -2153,9 +2153,9 @@ function App() {
 
   const aiPicksContent = (
     <>
-      {dailyChineParlay && dailyChineParlay.legs.length === 7 && (
+      {dailyChineParlay && dailyChineParlay.legs.length > 0 && (
         <>
-          <h3 className="pick-section-title">7-Game Round Robin</h3>
+          <h3 className="pick-section-title">{dailyChineParlay.legs.length}-Game Round Robin</h3>
           {renderDailyChineParlay(dailyChineParlay)}
         </>
       )}
