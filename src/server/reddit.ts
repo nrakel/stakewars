@@ -1713,6 +1713,8 @@ const parlayReturnUnits = (units: string | number, legs: Array<Pick<RedditParlay
 
 const formatWinLossPercent = (value: number | null) => value === null ? "N/A" : `${(value * 100).toFixed(1)}%`;
 const formatRoiPercent = (value: number | null) => value === null ? "N/A" : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+const formatMoneyCents = (cents: number) =>
+  `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const allPickResultLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "status" | "profit_units">) =>
   `${trackedPickSymbol(pick.status)} ${trackedPickLine(pick)} (${formatSignedUnits(Number(pick.profit_units))})`;
@@ -1795,6 +1797,166 @@ export const buildRedditPreview = async (subredditInput?: string): Promise<Reddi
   };
 };
 
+const getMondayAllPicksRecapPrefix = async () => {
+  const isMonday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "long"
+  }).format(new Date()) === "Monday";
+  if (!isMonday) {
+    return [];
+  }
+
+  const result = await query<{
+    registeredPlayers: number;
+    eligiblePlayers: number;
+    eligiblePlayersBeatChine: number;
+    chineLeaderboardCents: number | null;
+    chineEligibleRank: number | null;
+    winnerNames: string | null;
+    currentPrizeCents: number;
+    currentFirstPlaceBonus: string | null;
+  }>(
+    `
+      WITH weeks AS (
+        SELECT
+          (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS current_week,
+          ((date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date - interval '7 days')::date AS previous_week,
+          (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS current_week_start
+      ),
+      wager_activity AS (
+        SELECT
+          w.weekly_entry_id,
+          count(*)::int AS weekly_wagers,
+          coalesce(sum(w.stake_cents), 0)::int AS weekly_stake_cents,
+          COALESCE(sum(CASE
+            WHEN w.kind = 'round_robin' THEN COALESCE(rr.profit_cents, 0)
+            WHEN w.status = 'won' THEN w.potential_payout_cents - w.stake_cents
+            WHEN w.status = 'lost' THEN -w.stake_cents
+            WHEN w.status IN ('push', 'void') THEN 0
+            ELSE 0
+          END), 0)::int AS settled_profit_cents
+        FROM wager w
+        LEFT JOIN (
+          SELECT wager_id, sum(profit_cents)::int AS profit_cents
+          FROM round_robin_way_settlement
+          GROUP BY wager_id
+        ) rr ON rr.wager_id = w.id
+        GROUP BY w.weekly_entry_id
+      ),
+      entries AS (
+        SELECT
+          u.id AS user_id,
+          u.role,
+          COALESCE(NULLIF(u.display_name, ''), CASE WHEN u.role = 'system' THEN 'StakeWars Chine' ELSE u.username END) AS display_name,
+          u.email_verified,
+          e.starting_bankroll_cents,
+          e.starting_bankroll_cents + COALESCE(wa.settled_profit_cents, e.settled_profit_cents) AS leaderboard_cents,
+          COALESCE(wa.settled_profit_cents, e.settled_profit_cents) AS settled_profit_cents,
+          COALESCE(wa.weekly_wagers, 0) AS weekly_wagers,
+          COALESCE(wa.weekly_stake_cents, 0) AS weekly_stake_cents,
+          (e.starting_bankroll_cents * 1.5)::int AS required_stake_cents
+        FROM weekly_entry e
+        JOIN app_user u ON u.id = e.user_id
+        LEFT JOIN wager_activity wa ON wa.weekly_entry_id = e.id
+        JOIN weeks ON weeks.previous_week = e.week_starts_on
+        WHERE u.role IN ('player', 'system')
+      ),
+      chine AS (
+        SELECT leaderboard_cents
+        FROM entries
+        WHERE role = 'system'
+        LIMIT 1
+      ),
+      players AS (
+        SELECT
+          *,
+          email_verified
+            AND weekly_wagers >= 10
+            AND weekly_stake_cents >= required_stake_cents AS met_activity_eligibility,
+          leaderboard_cents > COALESCE((SELECT leaderboard_cents FROM chine), -2147483648) AS beat_chine
+        FROM entries
+        WHERE role = 'player'
+      ),
+      eligible AS (
+        SELECT *
+        FROM players
+        WHERE met_activity_eligibility
+      ),
+      winners AS (
+        SELECT display_name
+        FROM eligible
+        WHERE beat_chine
+        ORDER BY leaderboard_cents DESC, settled_profit_cents DESC
+        LIMIT 3
+      ),
+      current_prize AS (
+        SELECT cash_prize_cents, first_place_bonus
+        FROM weekly_prize wp
+        JOIN weeks ON weeks.current_week = wp.week_starts_on
+      )
+      SELECT
+        (
+          SELECT count(*)::int
+          FROM app_user
+          JOIN weeks ON true
+          WHERE role = 'player'
+            AND created_at < weeks.current_week_start
+        ) AS "registeredPlayers",
+        (SELECT count(*)::int FROM eligible) AS "eligiblePlayers",
+        (SELECT count(*)::int FROM eligible WHERE beat_chine) AS "eligiblePlayersBeatChine",
+        (SELECT leaderboard_cents FROM chine) AS "chineLeaderboardCents",
+        (
+          SELECT rank::int
+          FROM (
+            SELECT
+              role,
+              (row_number() OVER (ORDER BY leaderboard_cents DESC, settled_profit_cents DESC))::int AS rank
+            FROM entries
+            WHERE role = 'system' OR user_id IN (SELECT user_id FROM eligible)
+          ) ranked
+          WHERE role = 'system'
+        ) AS "chineEligibleRank",
+        (SELECT string_agg(display_name, ', ') FROM winners) AS "winnerNames",
+        COALESCE((SELECT cash_prize_cents FROM current_prize), 0) AS "currentPrizeCents",
+        (SELECT first_place_bonus FROM current_prize) AS "currentFirstPlaceBonus"
+    `
+  );
+
+  const recap = result.rows[0];
+  if (!recap) {
+    return [];
+  }
+
+  const winnerLine = recap.winnerNames
+    ? `Last week's winner${recap.winnerNames.includes(",") ? "s" : ""}: ${recap.winnerNames}.`
+    : "Chine wins again! No eligible players were able to beat me last week.";
+  const eligibleLine = recap.eligiblePlayers > 0
+    ? `I finished #${recap.chineEligibleRank ?? "N/A"} among eligible players, and ${recap.eligiblePlayersBeatChine} of ${recap.eligiblePlayers} eligible player${recap.eligiblePlayers === 1 ? "" : "s"} beat me.`
+    : "No players met the full eligibility requirements, but that's to be expected early in the challenge.";
+  const prizeParts = [
+    recap.currentPrizeCents > 0 ? `current cash prize pool is ${formatMoneyCents(recap.currentPrizeCents)}` : null,
+    recap.currentFirstPlaceBonus ? `first-place bonus is ${recap.currentFirstPlaceBonus}` : null
+  ].filter(Boolean);
+  const prizeLine = prizeParts.length
+    ? `Good news for you, the stakes have changed and the prizes have grown: the ${prizeParts.join(" and ")}.`
+    : "Good news for you, the stakes have changed and the prizes can grow from here.";
+
+  return [
+    "### Last Week",
+    "",
+    `Registered players: **${recap.registeredPlayers}**`,
+    "",
+    winnerLine,
+    eligibleLine,
+    prizeLine,
+    "",
+    "Login to check the current prize pool and see if you can beat me.",
+    "",
+    "---",
+    ""
+  ];
+};
+
 export const buildRedditAllPicksPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
   const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
   const today = new Date().toLocaleDateString("en-US", {
@@ -1804,10 +1966,11 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
     year: "numeric"
   });
 
-  const [record, previous, current] = await Promise.all([
+  const [record, previous, current, mondayRecapPrefix] = await Promise.all([
     getRecentChineStraightRecord(),
     getYesterdayRedditAllPicks(),
-    getOrCreateTodayRedditAllPicks()
+    getOrCreateTodayRedditAllPicks(),
+    getMondayAllPicksRecapPrefix()
   ]);
 
   const yesterdayPicks = previous?.legs.length
@@ -1829,6 +1992,7 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
     : ["No Chine all-picks card is posted yet today."];
 
   const body = [
+    ...mondayRecapPrefix,
     "🤖 **I am Chine.**",
     "",
     "Every day I analyze the numbers, ignore the hype, and make my picks.",
