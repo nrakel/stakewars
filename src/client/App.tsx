@@ -111,10 +111,21 @@ type VisitorMetricRow = {
   otherVisitors: number;
 };
 
+type QrCampaignMetricRow = {
+  campaignSlug: string;
+  totalScans: number;
+  uniqueScanners: number;
+  todayScans: number;
+  todayUniqueScanners: number;
+  lastScannedAt: string | null;
+  trackingUrl: string;
+};
+
 type VisitorMetrics = {
   generatedAt: string;
   lastUpdatedAt: string | null;
   rows: VisitorMetricRow[];
+  qrCampaigns: QrCampaignMetricRow[];
 };
 
 type SupportCategory = "account_email" | "rewards_eligibility" | "picks_scoring" | "technical_problem" | "other";
@@ -3910,6 +3921,40 @@ function App() {
               {visitorMetrics?.lastUpdatedAt && (
                 <small className="muted">Last updated {new Date(visitorMetrics.lastUpdatedAt).toLocaleString()}</small>
               )}
+              <div className="user-map-table visitor-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>QR Campaign</th>
+                      <th>Total Scans</th>
+                      <th>Unique Scanners</th>
+                      <th>Today</th>
+                      <th>Tracking URL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(visitorMetrics?.qrCampaigns ?? []).map((campaign) => (
+                      <tr key={campaign.campaignSlug}>
+                        <td>
+                          <strong>{campaign.campaignSlug}</strong>
+                          {campaign.lastScannedAt && <small>Last scan {new Date(campaign.lastScannedAt).toLocaleString()}</small>}
+                        </td>
+                        <td>{campaign.totalScans.toLocaleString()}</td>
+                        <td>{campaign.uniqueScanners.toLocaleString()}</td>
+                        <td>{campaign.todayScans.toLocaleString()} / {campaign.todayUniqueScanners.toLocaleString()} unique</td>
+                        <td>
+                          <input value={campaign.trackingUrl} readOnly />
+                        </td>
+                      </tr>
+                    ))}
+                    {(!visitorMetrics || visitorMetrics.qrCampaigns.length === 0) && (
+                      <tr>
+                        <td colSpan={5}>No QR campaign scans yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
               {visitorMetricsNotice && <p className={visitorMetricsNotice.includes("refreshed") ? "success" : "error"}>{visitorMetricsNotice}</p>}
             </div>
             )}

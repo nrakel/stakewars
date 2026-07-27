@@ -154,6 +154,7 @@ api.use("/push", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeader
 api.use("/support", rateLimit({ windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
 api.use("/tower", rateLimit({ windowMs: 60 * 1000, limit: 120, standardHeaders: true, legacyHeaders: false }));
 api.use("/merch", rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false }));
+api.use("/qr", rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false }));
 api.use("/wagers", rateLimit({ windowMs: 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false }));
 
 registerRoutes(api);

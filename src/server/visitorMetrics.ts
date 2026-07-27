@@ -24,10 +24,21 @@ export type VisitorMetricRow = {
   otherVisitors: number;
 };
 
+export type QrCampaignMetricRow = {
+  campaignSlug: string;
+  totalScans: number;
+  uniqueScanners: number;
+  todayScans: number;
+  todayUniqueScanners: number;
+  lastScannedAt: string | null;
+  trackingUrl: string;
+};
+
 export type VisitorMetricResponse = {
   generatedAt: string;
   lastUpdatedAt: string | null;
   rows: VisitorMetricRow[];
+  qrCampaigns: QrCampaignMetricRow[];
 };
 
 const logDir = "/var/log/nginx";
@@ -187,10 +198,41 @@ export const getVisitorMetrics = async (): Promise<VisitorMetricResponse> => {
     const todayRow = await metricForWhere(client, "Today", "local_date = $1::date", [today]);
     const thirtyDayRow = await metricForWhere(client, "Past 30 Days", "local_date >= $1::date - interval '29 days' AND local_date <= $1::date", [today]);
     const lastUpdated = await client.query<{ lastUpdatedAt: string | null }>("SELECT max(created_at)::text AS \"lastUpdatedAt\" FROM visitor_event");
+    const qrCampaigns = await client.query<{
+      campaignSlug: string;
+      totalScans: string;
+      uniqueScanners: string;
+      todayScans: string;
+      todayUniqueScanners: string;
+      lastScannedAt: string | null;
+    }>(
+      `
+        SELECT
+          campaign_slug AS "campaignSlug",
+          count(*)::text AS "totalScans",
+          count(DISTINCT scanner_key)::text AS "uniqueScanners",
+          count(*) FILTER (WHERE local_date = $1::date)::text AS "todayScans",
+          count(DISTINCT scanner_key) FILTER (WHERE local_date = $1::date)::text AS "todayUniqueScanners",
+          max(scanned_at)::text AS "lastScannedAt"
+        FROM qr_campaign_scan
+        GROUP BY campaign_slug
+        ORDER BY max(scanned_at) DESC NULLS LAST, campaign_slug ASC
+      `,
+      [today]
+    );
     return {
       generatedAt: new Date().toISOString(),
       lastUpdatedAt: lastUpdated.rows[0]?.lastUpdatedAt ?? null,
-      rows: [todayRow, thirtyDayRow]
+      rows: [todayRow, thirtyDayRow],
+      qrCampaigns: qrCampaigns.rows.map((row) => ({
+        campaignSlug: row.campaignSlug,
+        totalScans: Number(row.totalScans),
+        uniqueScanners: Number(row.uniqueScanners),
+        todayScans: Number(row.todayScans),
+        todayUniqueScanners: Number(row.todayUniqueScanners),
+        lastScannedAt: row.lastScannedAt,
+        trackingUrl: `https://stakewars.ai/api/qr/${encodeURIComponent(row.campaignSlug)}`
+      }))
     };
   });
 };

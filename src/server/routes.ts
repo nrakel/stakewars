@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Router } from "express";
 import { z } from "zod";
 import { hashPassword, optionalAuth, passwordSchema, requireAuth, signToken, usernameSchema, verifyPassword } from "./auth.js";
@@ -34,6 +34,8 @@ const registerSchema = z.object({
   displayName: z.string().trim().min(2).max(40).regex(/^[^\x00-\x1F\x7F]+$/u, "Display name cannot contain control characters"),
   referralCode: z.string().trim().regex(/^[a-zA-Z0-9_-]{6,64}$/).optional()
 });
+
+const qrCampaignSlugSchema = z.string().trim().toLowerCase().regex(/^[a-z0-9][a-z0-9_-]{1,63}$/);
 
 const loginSchema = z.object({
   username: usernameSchema,
@@ -154,6 +156,17 @@ const htmlEscape = (value: string) =>
     .replace(/'/g, "&#39;");
 
 const publicAppOrigin = () => (config.referralPublicOrigin || config.publicOrigin).replace(/\/+$/, "");
+const hashValue = (value: string) => createHash("sha256").update(value).digest("hex");
+const centralDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
 
 const yyyyMmDd = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -801,6 +814,36 @@ export const registerRoutes = (router: Router) => {
       res.status(404).json({ error: "Tower is not available." });
     });
   }
+
+  router.get("/qr/:slug", async (req, res, next) => {
+    try {
+      const slug = qrCampaignSlugSchema.parse(req.params.slug);
+      const origin = publicAppOrigin();
+      const destinationUrl = `${origin}/?campaign=${encodeURIComponent(slug)}`;
+      await query(
+        `
+          INSERT INTO qr_campaign_scan (
+            id, campaign_slug, local_date, scanner_key, ip_address,
+            user_agent, referrer, destination_url
+          )
+          VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8)
+        `,
+        [
+          randomUUID(),
+          slug,
+          centralDate(),
+          hashValue(`${req.ip}|${req.header("user-agent") ?? ""}`),
+          req.ip,
+          req.header("user-agent") ?? null,
+          req.header("referer") ?? null,
+          destinationUrl
+        ]
+      );
+      res.redirect(302, destinationUrl);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   router.get("/merch/store", async (_req, res, next) => {
     try {
