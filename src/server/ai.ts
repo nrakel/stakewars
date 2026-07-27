@@ -2520,8 +2520,27 @@ export const generateAiPicks = async ({
     }
     const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
     const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
-    const dailyStraightStakeCents = aiEntry && newStraightWagerSlotKeys.size > 0
-      ? Math.floor(remainingDailyStraightBudgetCents / newStraightWagerSlotKeys.size)
+    const plannedStraightSlots = Math.max(existingStraightGameKeys.size + newStraightWagerSlotKeys.size, 1);
+    const plannedStraightStakeCents = dailyStraightBudgetCents > 0
+      ? Math.max(1, Math.floor(dailyStraightBudgetCents / plannedStraightSlots))
+      : 0;
+    const dailyStraightPlan = placeWagers && aiUser.rowCount && aiEntry && plannedStraightStakeCents > 0
+      ? await client.query<{ straight_wager_stake_cents: number | null; straight_wager_slots: number | null }>(
+        `
+          UPDATE ai_daily_bankroll
+          SET
+            straight_wager_stake_cents = COALESCE(straight_wager_stake_cents, $3),
+            straight_wager_slots = COALESCE(straight_wager_slots, $4)
+          WHERE user_id = $1
+            AND bankroll_date = $2::date
+          RETURNING straight_wager_stake_cents, straight_wager_slots
+        `,
+        [aiUser.rows[0].id, today, plannedStraightStakeCents, plannedStraightSlots]
+      )
+      : null;
+    const anchoredStraightStakeCents = dailyStraightPlan?.rows[0]?.straight_wager_stake_cents ?? plannedStraightStakeCents;
+    const dailyStraightStakeCents = aiEntry && newStraightWagerSlotKeys.size > 0 && anchoredStraightStakeCents > 0
+      ? remainingDailyStraightBudgetCents >= anchoredStraightStakeCents ? anchoredStraightStakeCents : 0
       : aiEntry && stakeFractionOfBalance !== undefined
       ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
       : stakeCents;
@@ -2818,6 +2837,13 @@ export const generateAiPicks = async ({
         wagerId: dailyRoundRobinWagerId,
         shouldLock: shouldLockRoundRobin,
         skippedReason: dailyRoundRobinWagerId ? null : dailyRoundRobinSkippedReason
+      },
+      dailyStraight: {
+        budgetCents: dailyStraightBudgetCents,
+        remainingBudgetCents: remainingDailyStraightBudgetCents,
+        plannedSlots: dailyStraightPlan?.rows[0]?.straight_wager_slots ?? plannedStraightSlots,
+        plannedStakeCents: anchoredStraightStakeCents,
+        stakeCents: dailyStraightStakeCents
       },
       published
     };
