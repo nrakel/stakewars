@@ -2109,7 +2109,7 @@ const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.sele
 const dailyAiWagerMinConfidence = 0.7;
 const dailyAiRoundRobinPicks = 3;
 const dailyAiRoundRobinMinExpectedRoi = 0.08;
-const dailyAiRoundRobinMinOddsAmerican = -180;
+const dailyAiRoundRobinMinOddsAmerican = -230;
 const dailyAiRoundRobinMaxOddsAmerican = 160;
 
 const isTruthyFeature = (value: number | string | boolean | null | undefined) => value === true;
