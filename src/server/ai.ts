@@ -2107,6 +2107,7 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
 const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.selected_team.trim().toLowerCase();
 
 const dailyAiWagerMinConfidence = 0.7;
+const dailyAiRoundRobinEnabled = false;
 const dailyAiRoundRobinPicks = 3;
 const dailyAiRoundRobinMinExpectedRoi = 0.08;
 const dailyAiRoundRobinMinOddsAmerican = -230;
@@ -2588,14 +2589,17 @@ export const generateAiPicks = async ({
 
     const published: PublishedAiPick[] = [];
     let dailyRoundRobinWagerId = existingDailyAiRoundRobin?.rows[0]?.id ?? null;
-    const shouldLockRoundRobin = roundRobinPicks.length === aiRoundRobinPicks
+    const shouldLockRoundRobin = dailyAiRoundRobinEnabled
+      && roundRobinPicks.length === aiRoundRobinPicks
       && dailyRoundRobinWays > 0
       && dailyRoundRobinExpectedRoi !== null
       && dailyRoundRobinExpectedRoi >= dailyAiRoundRobinMinExpectedRoi
       && now >= new Date(Math.min(...roundRobinPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))
       && roundRobinPicks.every((pick) => now < pick.starts_at);
     let dailyRoundRobinSkippedReason: string | null = null;
-    if (roundRobinPicks.length < aiRoundRobinPicks) {
+    if (!dailyAiRoundRobinEnabled) {
+      dailyRoundRobinSkippedReason = "round robin disabled";
+    } else if (roundRobinPicks.length < aiRoundRobinPicks) {
       const rejectionSummary = [...roundRobinCandidateRejectCounts.entries()]
         .map(([reason, count]) => `${reason}: ${count}`)
         .join("; ");
@@ -2798,6 +2802,7 @@ export const generateAiPicks = async ({
       locked: lockedGameKeys.size + published.filter((pick) => pick.locked).length,
       projected: published.filter((pick) => !pick.locked).length,
       dailyRoundRobin: {
+        enabled: dailyAiRoundRobinEnabled,
         requiredPicks: aiRoundRobinPicks,
         eligiblePicks: wageringCandidates.length,
         packageEligiblePicks: roundRobinCandidates.length,
