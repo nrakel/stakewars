@@ -2077,7 +2077,7 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.get("/admin/reddit/status", requireAdmin, async (req, res, next) => {
+  router.get("/admin/reddit/status", requireNateRakelAccount, async (req, res, next) => {
     try {
       res.json({
         configured: true,
@@ -2093,7 +2093,7 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.post("/admin/reddit/preview", requireAdmin, async (req, res, next) => {
+  router.post("/admin/reddit/preview", requireNateRakelAccount, async (req, res, next) => {
     try {
       const input = redditPreviewSchema.parse(req.body);
       const preview = input.postType === "parlay"
@@ -2113,7 +2113,7 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.post("/admin/reddit/lock", requireAdmin, async (req, res, next) => {
+  router.post("/admin/reddit/lock", requireNateRakelAccount, async (req, res, next) => {
     try {
       const input = redditLockSchema.parse(req.body);
       const result = await lockRedditPostTracking({

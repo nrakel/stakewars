@@ -1,16 +1,21 @@
 import "dotenv/config";
 import { defaultMerchStoreUrl, normalizeMerchStoreUrl } from "../shared/merch.js";
 
-const required = (name: string, fallback?: string) => {
+const nodeEnv = process.env.NODE_ENV ?? "development";
+
+const required = (name: string, fallback?: string, options: { forbidProductionFallback?: boolean } = {}) => {
   const value = process.env[name] ?? fallback;
   if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
+  }
+  if (nodeEnv === "production" && options.forbidProductionFallback && fallback && value === fallback) {
+    throw new Error(`Production environment variable must be explicitly configured: ${name}`);
   }
   return value;
 };
 
 export const config = {
-  nodeEnv: process.env.NODE_ENV ?? "development",
+  nodeEnv,
   port: Number(process.env.PORT ?? 3000),
   publicOrigin: process.env.PUBLIC_ORIGIN ?? "http://localhost:3000",
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? process.env.PUBLIC_ORIGINS ?? [
@@ -25,7 +30,7 @@ export const config = {
     .filter(Boolean),
   referralPublicOrigin: process.env.REFERRAL_PUBLIC_ORIGIN ?? process.env.PUBLIC_ORIGIN ?? "http://localhost:3000",
   databaseUrl: required("DATABASE_URL", "postgres://stakewars:stakewars@localhost:5432/stakewars"),
-  jwtSecret: required("JWT_SECRET", "development-only-secret-change-me"),
+  jwtSecret: required("JWT_SECRET", "development-only-secret-change-me", { forbidProductionFallback: true }),
   weeklyBankrollCents: Number(process.env.WEEKLY_BANKROLL_CENTS ?? 1000000),
   aiUsername: process.env.AI_USERNAME ?? "stakewars_ai",
   parlayApiBaseUrl: process.env.PARLAY_API_BASE_URL ?? process.env.ODDS_PROVIDER_URL ?? "https://parlay-api.com/v1",
