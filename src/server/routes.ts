@@ -74,6 +74,8 @@ const placeWagerSchema = z.object({
   stakeCents: z.number().int().positive().max(100_000_000),
   roundRobinMaxLegs: z.number().int().min(2).max(8).optional(),
   acceptLineMoves: z.boolean().default(false),
+  referralBoostDecision: z.enum(["use", "waive"]).optional(),
+  referralBoostCount: z.number().int().min(1).max(2).optional(),
   legs: z.array(
     z.object({
       gameLineId: z.string().uuid(),
@@ -581,6 +583,27 @@ class LineMoveError extends Error {
   }
 }
 
+class ReferralBoostDecisionRequiredError extends Error {
+  body: {
+    error: string;
+    code: "REFERRAL_BOOST_DECISION_REQUIRED";
+    availableBoosts: number;
+    maxUsableBoosts: number;
+    boostAmountCents: number;
+  };
+
+  constructor(availableBoosts: number, maxUsableBoosts: number) {
+    super("Referral boost decision required");
+    this.body = {
+      error: "Referral boost decision required before first weekly wager",
+      code: "REFERRAL_BOOST_DECISION_REQUIRED",
+      availableBoosts,
+      maxUsableBoosts,
+      boostAmountCents: 100_000
+    };
+  }
+}
+
 const wagerMarketLabel = (marketKey: MarketKey) => {
   if (marketKey === "h2h") return "moneyline";
   if (marketKey === "totals") return "total";
@@ -592,6 +615,117 @@ const unavailableLineMessage = (line: WagerLineRow) =>
 
 const sameGameKey = (line: Pick<WagerLineRow, "sport" | "away_team" | "home_team" | "starts_at">) =>
   `${line.sport}:${line.away_team}:${line.home_team}:${line.starts_at.toISOString()}`;
+
+const createQualifiedReferralBoost = async (client: import("pg").PoolClient, referredUserId: string) => {
+  await client.query(
+    `
+      INSERT INTO referral_bankroll_boost (id, referrer_user_id, referred_user_id)
+      SELECT $1, referred.referred_by_user_id, referred.id
+      FROM app_user referred
+      WHERE referred.id = $2
+        AND referred.referred_by_user_id IS NOT NULL
+      ON CONFLICT (referred_user_id) DO NOTHING
+    `,
+    [randomUUID(), referredUserId]
+  );
+};
+
+const applyReferralBoostDecision = async (
+  client: import("pg").PoolClient,
+  userId: string,
+  weeklyEntryId: string,
+  weekStart: string,
+  decision: "use" | "waive" | undefined,
+  requestedCount: number | undefined
+) => {
+  const activity = await client.query<{ wagers: string }>(
+    "SELECT count(*)::text AS wagers FROM wager WHERE weekly_entry_id = $1",
+    [weeklyEntryId]
+  );
+  const weeklyWagers = Number(activity.rows[0]?.wagers ?? 0);
+  if (weeklyWagers > 0) {
+    if (decision === "use") {
+      throw new Error("Referral boosts must be used before your first wager of the week");
+    }
+    return { appliedBoosts: 0 };
+  }
+
+  const waiver = await client.query<{ id: string }>(
+    "SELECT id FROM referral_boost_weekly_waiver WHERE user_id = $1 AND week_starts_on = $2::date LIMIT 1",
+    [userId, weekStart]
+  );
+  if (waiver.rowCount) {
+    if (decision === "use") {
+      throw new Error("Referral boosts were already waived for this week");
+    }
+    return { appliedBoosts: 0 };
+  }
+
+  const available = await client.query<{ id: string; amount_cents: number }>(
+    `
+      SELECT id, amount_cents
+      FROM referral_bankroll_boost
+      WHERE referrer_user_id = $1
+        AND status = 'earned'
+      ORDER BY earned_at ASC
+      FOR UPDATE
+    `,
+    [userId]
+  );
+  const weeklyUsed = await client.query<{ used: string }>(
+    `
+      SELECT count(*)::text AS used
+      FROM referral_bankroll_boost
+      WHERE referrer_user_id = $1
+        AND status = 'used'
+        AND used_week_starts_on = $2::date
+    `,
+    [userId, weekStart]
+  );
+  const remainingWeeklySlots = Math.max(0, 2 - Number(weeklyUsed.rows[0]?.used ?? 0));
+  const maxUsableBoosts = Math.min(available.rows.length, remainingWeeklySlots);
+  if (maxUsableBoosts <= 0) {
+    return { appliedBoosts: 0 };
+  }
+
+  if (!decision) {
+    throw new ReferralBoostDecisionRequiredError(available.rows.length, maxUsableBoosts);
+  }
+
+  if (decision === "waive") {
+    await client.query(
+      `
+        INSERT INTO referral_boost_weekly_waiver (id, user_id, week_starts_on)
+        VALUES ($1, $2, $3::date)
+        ON CONFLICT (user_id, week_starts_on) DO NOTHING
+      `,
+      [randomUUID(), userId, weekStart]
+    );
+    return { appliedBoosts: 0 };
+  }
+
+  const count = requestedCount ?? 1;
+  if (count < 1 || count > maxUsableBoosts) {
+    throw new Error(`Select 1${maxUsableBoosts > 1 ? `-${maxUsableBoosts}` : ""} referral boost${maxUsableBoosts === 1 ? "" : "s"}`);
+  }
+  const selected = available.rows.slice(0, count);
+  const totalBoostCents = selected.reduce((sum, boost) => sum + boost.amount_cents, 0);
+  await client.query(
+    `
+      UPDATE referral_bankroll_boost
+      SET status = 'used',
+          used_week_starts_on = $2::date,
+          used_at = now()
+      WHERE id = ANY($1::uuid[])
+    `,
+    [selected.map((boost) => boost.id), weekStart]
+  );
+  await client.query("UPDATE weekly_entry SET balance_cents = balance_cents + $1 WHERE id = $2", [
+    totalBoostCents,
+    weeklyEntryId
+  ]);
+  return { appliedBoosts: count };
+};
 
 const historyQuerySchema = z.object({
   period: z.enum(["day", "week", "all"]).default("week"),
@@ -1115,7 +1249,12 @@ export const registerRoutes = (router: Router) => {
 
   router.get("/me/referral", requireAuth, async (req, res, next) => {
     try {
-      const result = await query<{ referralCode: string; referredCount: string }>(
+      const result = await query<{
+        referralCode: string;
+        referredCount: string;
+        qualifiedReferralCount: string;
+        availableBoosts: string;
+      }>(
         `
           SELECT
             referral_code AS "referralCode",
@@ -1124,6 +1263,18 @@ export const registerRoutes = (router: Router) => {
               FROM app_user referred
               WHERE referred.referred_by_user_id = app_user.id
             ) AS "referredCount"
+            ,
+            (
+              SELECT count(*)::text
+              FROM referral_bankroll_boost boost
+              WHERE boost.referrer_user_id = app_user.id
+            ) AS "qualifiedReferralCount",
+            (
+              SELECT count(*)::text
+              FROM referral_bankroll_boost boost
+              WHERE boost.referrer_user_id = app_user.id
+                AND boost.status = 'earned'
+            ) AS "availableBoosts"
           FROM app_user
           WHERE id = $1
         `,
@@ -1138,7 +1289,11 @@ export const registerRoutes = (router: Router) => {
       res.json({
         referralCode: row.referralCode,
         referralUrl: `${origin}/?ref=${encodeURIComponent(row.referralCode)}`,
-        referredCount: Number(row.referredCount)
+        referredCount: Number(row.referredCount),
+        qualifiedReferralCount: Number(row.qualifiedReferralCount),
+        availableBoosts: Number(row.availableBoosts),
+        boostAmountCents: 100_000,
+        maxBoostsPerWeek: 2
       });
     } catch (error) {
       next(error);
@@ -2314,6 +2469,13 @@ export const registerRoutes = (router: Router) => {
               coalesce(wa.weekly_stake_cents, 0) AS weekly_stake_cents,
               (e.starting_bankroll_cents * 1.5)::int AS required_stake_cents,
               e.starting_bankroll_cents
+                + (
+                  SELECT COALESCE(sum(boost.amount_cents), 0)::int
+                  FROM referral_bankroll_boost boost
+                  WHERE boost.referrer_user_id = u.id
+                    AND boost.status = 'used'
+                    AND boost.used_week_starts_on = e.week_starts_on
+                )
                 + CASE
                   WHEN sw.week_start = (SELECT week_start FROM current_week)
                   THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
@@ -2323,7 +2485,14 @@ export const registerRoutes = (router: Router) => {
                 WHEN sw.week_start = (SELECT week_start FROM current_week)
                 THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
                 ELSE e.settled_profit_cents
-              END AS settled_profit_cents
+              END AS settled_profit_cents,
+              (
+                SELECT count(*)::int
+                FROM referral_bankroll_boost boost
+                WHERE boost.referrer_user_id = u.id
+                  AND boost.status = 'used'
+                  AND boost.used_week_starts_on = e.week_starts_on
+              ) AS referral_boosts_used
             FROM weekly_entry e
             JOIN app_user u ON u.id = e.user_id
             LEFT JOIN wager_activity wa ON wa.weekly_entry_id = e.id
@@ -2343,6 +2512,7 @@ export const registerRoutes = (router: Router) => {
             CASE WHEN user_id = $3::uuid THEN weekly_wagers ELSE NULL END AS "weeklyWagers",
             CASE WHEN user_id = $3::uuid THEN weekly_stake_cents ELSE NULL END AS "weeklyStakeCents",
             CASE WHEN user_id = $3::uuid THEN required_stake_cents ELSE NULL END AS "requiredStakeCents",
+            referral_boosts_used AS "referralBoostsUsed",
             CASE WHEN user_id = $3::uuid THEN email_verified ELSE NULL END AS "emailVerified",
             CASE
               WHEN role = 'system' THEN false
@@ -2879,12 +3049,26 @@ export const registerRoutes = (router: Router) => {
 
       const wager = await transaction(async (client) => {
         const entry = await ensureWeeklyEntry(client, req.user!.id);
+        const weekStart = currentWeekStart();
+        await applyReferralBoostDecision(
+          client,
+          req.user!.id,
+          entry.id,
+          weekStart,
+          input.referralBoostDecision,
+          input.referralBoostCount
+        );
+        const balanceResult = await client.query<{ balance_cents: number }>(
+          "SELECT balance_cents FROM weekly_entry WHERE id = $1 FOR UPDATE",
+          [entry.id]
+        );
+        const availableBalanceCents = balanceResult.rows[0]?.balance_cents ?? entry.balance_cents;
         const ways = input.kind === "round_robin" ? roundRobinWays(input.legs.length, input.roundRobinMaxLegs, 2) : null;
         const totalStakeCents = input.kind === "round_robin" ? input.stakeCents * (ways ?? 0) : input.stakeCents;
         if (!ways && input.kind === "round_robin") {
           throw new Error("Select a valid round robin size");
         }
-        if (entry.balance_cents < totalStakeCents) {
+        if (availableBalanceCents < totalStakeCents) {
           throw new Error("Insufficient bankroll");
         }
 
@@ -3031,6 +3215,7 @@ export const registerRoutes = (router: Router) => {
           totalStakeCents,
           entry.id
         ]);
+        await createQualifiedReferralBoost(client, req.user!.id);
 
         return { id: wagerResult.rows[0].id, potentialPayoutCents: potentialPayout, roundRobinWays: ways };
       });
@@ -3041,11 +3226,15 @@ export const registerRoutes = (router: Router) => {
         res.status(409).json(error.body);
         return;
       }
+      if (error instanceof ReferralBoostDecisionRequiredError) {
+        res.status(409).json(error.body);
+        return;
+      }
       if ((error as Error).message === "Insufficient bankroll") {
         res.status(400).json({ error: "Insufficient bankroll" });
         return;
       }
-      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("no longer available") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("Only one team pick") || (error as Error).message.includes("round robin")) {
+      if ((error as Error).message.includes("unavailable") || (error as Error).message.includes("no longer available") || (error as Error).message.includes("already started") || (error as Error).message.includes("Selected outcome") || (error as Error).message.includes("conflict") || (error as Error).message.includes("Only one team pick") || (error as Error).message.includes("round robin") || (error as Error).message.includes("Referral boosts") || (error as Error).message.includes("referral boost")) {
         res.status(400).json({ error: (error as Error).message });
         return;
       }

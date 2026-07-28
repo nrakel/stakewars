@@ -133,6 +133,7 @@ export type LeaderboardRow = {
   weeklyWagers: number | null;
   weeklyStakeCents: number | null;
   requiredStakeCents: number | null;
+  referralBoostsUsed: number;
   emailVerified: boolean | null;
   eligible: boolean;
 };

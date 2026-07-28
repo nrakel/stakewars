@@ -55,6 +55,19 @@ type LineMoveErrorBody = {
   lineMoves: LineMoveNotice[];
 };
 
+type ReferralBoostDecisionBody = {
+  error: string;
+  code: "REFERRAL_BOOST_DECISION_REQUIRED";
+  availableBoosts: number;
+  maxUsableBoosts: number;
+  boostAmountCents: number;
+};
+
+type ReferralBoostSubmission = {
+  referralBoostDecision: "use" | "waive";
+  referralBoostCount?: number;
+};
+
 type PushPreferences = {
   gameReminderEnabled: boolean;
   gameStartedEnabled: boolean;
@@ -89,6 +102,10 @@ type ReferralInfo = {
   referralCode: string;
   referralUrl: string;
   referredCount: number;
+  qualifiedReferralCount: number;
+  availableBoosts: number;
+  boostAmountCents: number;
+  maxBoostsPerWeek: number;
 };
 
 type UserDisplayMapRow = {
@@ -421,6 +438,15 @@ const isLineMoveErrorBody = (body: unknown): body is LineMoveErrorBody =>
     && Array.isArray((body as LineMoveErrorBody).lineMoves)
   );
 
+const isReferralBoostDecisionBody = (body: unknown): body is ReferralBoostDecisionBody =>
+  Boolean(
+    body
+    && typeof body === "object"
+    && (body as ReferralBoostDecisionBody).code === "REFERRAL_BOOST_DECISION_REQUIRED"
+    && Number.isInteger((body as ReferralBoostDecisionBody).availableBoosts)
+    && Number.isInteger((body as ReferralBoostDecisionBody).maxUsableBoosts)
+  );
+
 const lineMovePrompt = (moves: LineMoveNotice[]) => {
   if (moves.length === 1) {
     const move = moves[0];
@@ -430,6 +456,25 @@ const lineMovePrompt = (moves: LineMoveNotice[]) => {
     `${move.game} ${move.selectedTeam}: ${linePriceText(move.marketKey, move.oldSpread, move.oldOddsAmerican)} -> ${linePriceText(move.marketKey, move.newSpread, move.newOddsAmerican)}`
   ).join("\n");
   return `The lines for these selections have changed:\n\n${details}\n\nDo you accept the new prices?`;
+};
+
+const referralBoostPrompt = (body: ReferralBoostDecisionBody): ReferralBoostSubmission | null => {
+  const max = Math.max(0, body.maxUsableBoosts);
+  if (max <= 0) return { referralBoostDecision: "waive" };
+  const boostText = `${money(body.boostAmountCents)} bankroll boost`;
+  if (max === 1) {
+    const useBoost = window.confirm(`You have 1 available ${boostText}.\n\nReferral boosts must be used before your first wager of the week. If you continue without using it, you cannot use a boost for this week's contest.\n\nUse your boost now?`);
+    return useBoost ? { referralBoostDecision: "use", referralBoostCount: 1 } : { referralBoostDecision: "waive" };
+  }
+  const response = window.prompt(`You have ${body.availableBoosts} available referral boosts and may use up to ${max} this week.\n\nReferral boosts must be used before your first wager of the week. If you continue without using one, you cannot use a boost for this week's contest.\n\nEnter 0 to continue without a boost, 1 to use one boost, or ${max} to use ${max} boosts.`, String(max));
+  if (response === null) return null;
+  const count = Number(response);
+  if (count === 0) return { referralBoostDecision: "waive" };
+  if (Number.isInteger(count) && count >= 1 && count <= max) {
+    return { referralBoostDecision: "use", referralBoostCount: count };
+  }
+  window.alert(`Enter 0, 1${max > 1 ? `, or ${max}` : ""}.`);
+  return null;
 };
 
 const replacementForSlipLeg = (leg: SlipLeg, freshLines: GameLine[]) => {
@@ -826,6 +871,11 @@ function RulesContent() {
       <section>
         <h2>Reward Eligibility</h2>
         <p>To be eligible for a weekly reward, a player must have a verified email address, place at least 10 wagers during the week, and wager at least 1.5x their starting weekly bankroll. With the current $10,000 starting bankroll, that means at least $15,000 in total weekly virtual wagers.</p>
+      </section>
+      <section>
+        <h2>Referral Boosts</h2>
+        <p>A referral qualifies when a new user registers through your referral link and places at least one valid wager. Each qualified referral earns one $1,000 Bankroll Boost. Players may use up to two boosts per contest week.</p>
+        <p>Referral boosts must be activated before placing your first wager of the contest week. If you have an available boost and continue with your first wager without activating it, you waive referral boosts for that week. Boosts increase current bankroll only and do not change starting bankroll or weekly eligibility requirements.</p>
       </section>
       <section>
         <h2>Baseball Settlement</h2>
@@ -2396,7 +2446,7 @@ function App() {
   const hasConfirmedLineups = (game: GameCard) =>
     Boolean(game.awayLineup?.confirmed && game.homeLineup?.confirmed);
 
-  const placeWager = async (forceAcceptLineMoves = false) => {
+  const placeWager = async (forceAcceptLineMoves = false, referralBoostSubmission?: ReferralBoostSubmission) => {
     setNotice("");
     const shouldAcceptLineMoves = acceptLineMoves || forceAcceptLineMoves;
     try {
@@ -2424,10 +2474,18 @@ function App() {
           return;
         }
 
-        await Promise.all(wagers.map((wager) => api("/wagers", {
-          method: "POST",
-          body: JSON.stringify({ kind: "straight", stakeCents: wager.stakeCents, acceptLineMoves: shouldAcceptLineMoves, legs: [wager.leg] })
-        }, token)));
+        for (const [index, wager] of wagers.entries()) {
+          await api("/wagers", {
+            method: "POST",
+            body: JSON.stringify({
+              kind: "straight",
+              stakeCents: wager.stakeCents,
+              acceptLineMoves: shouldAcceptLineMoves,
+              ...(index === 0 && referralBoostSubmission ? referralBoostSubmission : {}),
+              legs: [wager.leg]
+            })
+          }, token);
+        }
       } else {
         if (includedSlip.length < 2) {
           setNotice(`${kind === "parlay" ? "Parlay" : "Round robin"} wagers need at least two selections.`);
@@ -2465,6 +2523,7 @@ function App() {
             stakeCents: parlayStakeCents,
             roundRobinMaxLegs: kind === "round_robin" ? effectiveRoundRobinMaxLegs : undefined,
             acceptLineMoves: shouldAcceptLineMoves,
+            ...(referralBoostSubmission ?? {}),
             legs: includedSlip
           })
         }, token);
@@ -2484,7 +2543,22 @@ function App() {
       ) {
         const accepted = window.confirm(lineMovePrompt(err.body.lineMoves));
         if (accepted) {
-          await placeWager(true);
+          await placeWager(true, referralBoostSubmission);
+          return;
+        }
+        setNotice("Wager not placed.");
+        await refresh().catch(() => undefined);
+        return;
+      }
+      if (
+        !referralBoostSubmission
+        && err instanceof ApiError
+        && err.status === 409
+        && isReferralBoostDecisionBody(err.body)
+      ) {
+        const decision = referralBoostPrompt(err.body);
+        if (decision) {
+          await placeWager(forceAcceptLineMoves, decision);
           return;
         }
         setNotice("Wager not placed.");
@@ -3725,6 +3799,11 @@ function App() {
                         {`${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`}
                       </small>
                     )}
+                    {row.role !== "system" && row.referralBoostsUsed > 0 && (
+                      <small className="reward-share-badge">
+                        {row.referralBoostsUsed === 1 ? "Boost" : `Boost x${row.referralBoostsUsed}`}
+                      </small>
+                    )}
                     {row.role !== "system" && !row.eligible && (
                       <>
                         <small className="disqualified-badge">Ineligible</small>
@@ -4361,7 +4440,11 @@ function App() {
                     Referral link
                     <input value={referralInfo?.referralUrl ?? ""} readOnly />
                   </label>
-                  <small>{referralInfo ? `${referralInfo.referredCount} referred ${referralInfo.referredCount === 1 ? "account" : "accounts"}` : "Referral details loading."}</small>
+                  <small>
+                    {referralInfo
+                      ? `${referralInfo.referredCount} referred ${referralInfo.referredCount === 1 ? "account" : "accounts"} • ${referralInfo.qualifiedReferralCount} qualified • ${referralInfo.availableBoosts} boost${referralInfo.availableBoosts === 1 ? "" : "s"} available`
+                      : "Referral details loading."}
+                  </small>
                   <div className="notification-actions">
                     <button className="secondary-action" type="button" onClick={copyReferralLink}><ClipboardList size={17} /> Copy link</button>
                     <button className="secondary-action" type="button" onClick={() => void refreshReferral()}><Radio size={17} /> Refresh</button>
