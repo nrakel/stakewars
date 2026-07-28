@@ -12,6 +12,7 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
+import { dailyAiWagerMinConfidence } from "./ai.js";
 import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
 import {
   buildTowerHandForUser,
@@ -2614,6 +2615,8 @@ export const registerRoutes = (router: Router) => {
               AND wl.game_line_id = p.game_line_id
               AND wl.selected_team = p.selected_team
             WHERE p.published_for = (now() AT TIME ZONE 'America/Chicago')::date
+              AND p.confidence >= $1
+              AND (p.locked_at IS NULL OR p.wager_id IS NOT NULL)
             ORDER BY
               p.published_for,
               COALESCE(split_part(split_part(l.provider_event_id, ':', 1), '|', 1), l.sport::text || ':' || l.away_team || ':' || l.home_team || ':' || l.starts_at::text),
@@ -2627,7 +2630,8 @@ export const registerRoutes = (router: Router) => {
           SELECT *
           FROM ranked
           ORDER BY "lockedAt" DESC NULLS LAST, confidence DESC NULLS LAST, score DESC NULLS LAST, "startsAt" ASC
-        `
+        `,
+        [dailyAiWagerMinConfidence]
       );
       const chineParlay = (await query<{
         id: string;

@@ -2106,7 +2106,7 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
 
 const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.selected_team.trim().toLowerCase();
 
-const dailyAiWagerMinConfidence = 0.7;
+export const dailyAiWagerMinConfidence = 0.7;
 const dailyAiRoundRobinEnabled = false;
 const dailyAiRoundRobinPicks = 3;
 const dailyAiRoundRobinMinExpectedRoi = 0.08;
