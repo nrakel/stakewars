@@ -1715,6 +1715,7 @@ const formatWinLossPercent = (value: number | null) => value === null ? "N/A" : 
 const formatRoiPercent = (value: number | null) => value === null ? "N/A" : `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 const formatMoneyCents = (cents: number) =>
   `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const redditPlayCta = "Come play at stakewars.ai";
 
 const allPickResultLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "status" | "profit_units">) =>
   `${trackedPickSymbol(pick.status)} ${trackedPickLine(pick)} (${formatSignedUnits(Number(pick.profit_units))})`;
@@ -1779,7 +1780,9 @@ export const buildRedditPreview = async (subredditInput?: string): Promise<Reddi
       `ODDS ${formatAmericanOdds(pick.odds_american)}`,
       `UNITS ${formatUnits(pick.units)} to return ${formatReturnUnits(Number(pick.units) * Number(pick.decimal_odds))}`,
       "",
-      pickNarrative(pick)
+      pickNarrative(pick),
+      "",
+      redditPlayCta
     ].join("\n")
     : [
       `Record: ${record.wins}-${record.losses} W/L`,
@@ -1787,7 +1790,9 @@ export const buildRedditPreview = async (subredditInput?: string): Promise<Reddi
       "",
       ...previousLines,
       "",
-      "No Chine pick is posted yet today."
+      "No Chine pick is posted yet today.",
+      "",
+      redditPlayCta
     ].join("\n");
 
   return {
@@ -2077,7 +2082,9 @@ export const buildRedditParlayPreview = async (subredditInput?: string): Promise
       "",
       `UNITS ${formatUnits(current.parlay.units)} to return ${formatReturnUnits(parlayReturnUnits(current.parlay.units, current.legs))}`,
       "",
-      parlayNarrative(current.legs)
+      parlayNarrative(current.legs),
+      "",
+      redditPlayCta
     ].join("\n")
     : [
       `3-Team Parlay Record: ${record.wins}-${record.losses} W/L`,
@@ -2085,7 +2092,9 @@ export const buildRedditParlayPreview = async (subredditInput?: string): Promise
       "",
       ...previousLines,
       "",
-      "No 3-team Chine parlay is available yet today."
+      "No 3-team Chine parlay is available yet today.",
+      "",
+      redditPlayCta
     ].join("\n");
 
   return {
