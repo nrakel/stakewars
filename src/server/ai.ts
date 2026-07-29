@@ -2521,7 +2521,11 @@ export const generateAiPicks = async ({
     const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
     const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
     const straightBufferSlots = 1;
-    const plannedStraightSlots = Math.max(existingStraightGameKeys.size + newStraightWagerSlotKeys.size + straightBufferSlots, 1);
+    const plannedStraightSlots = Math.max(
+      existingStraightGameKeys.size + newStraightWagerSlotKeys.size + straightBufferSlots,
+      maxPicks + straightBufferSlots,
+      1
+    );
     const plannedStraightStakeCents = dailyStraightBudgetCents > 0
       ? Math.max(1, Math.floor(dailyStraightBudgetCents / plannedStraightSlots))
       : 0;
@@ -2530,13 +2534,19 @@ export const generateAiPicks = async ({
         `
           UPDATE ai_daily_bankroll
           SET
-            straight_wager_stake_cents = COALESCE(straight_wager_stake_cents, $3),
-            straight_wager_slots = COALESCE(straight_wager_slots, $4)
+            straight_wager_stake_cents = CASE
+              WHEN $5::integer = 0 THEN $3
+              ELSE COALESCE(straight_wager_stake_cents, $3)
+            END,
+            straight_wager_slots = CASE
+              WHEN $5::integer = 0 THEN $4
+              ELSE COALESCE(straight_wager_slots, $4)
+            END
           WHERE user_id = $1
             AND bankroll_date = $2::date
           RETURNING straight_wager_stake_cents, straight_wager_slots
         `,
-        [aiUser.rows[0].id, today, plannedStraightStakeCents, plannedStraightSlots]
+        [aiUser.rows[0].id, today, plannedStraightStakeCents, plannedStraightSlots, existingStraightStakeCents]
       )
       : null;
     const anchoredStraightStakeCents = dailyStraightPlan?.rows[0]?.straight_wager_stake_cents ?? plannedStraightStakeCents;
