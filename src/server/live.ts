@@ -583,15 +583,21 @@ const normalizeEspnSoccerEvent = async (sport: Extract<LiveSport, "EPL" | "WORLD
 };
 
 
-const centralDate = () => {
+const centralDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Chicago",
     year: "numeric",
     month: "2-digit",
     day: "2-digit"
-  }).formatToParts(new Date());
+  }).formatToParts(date);
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return `${values.year}-${values.month}-${values.day}`;
+};
+
+const addDays = (date: string, days: number) => {
+  const copy = new Date(`${date}T00:00:00Z`);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy.toISOString().slice(0, 10);
 };
 
 const normalizeMlbGame = async (game: MlbScheduleGame): Promise<NormalizedLiveMatch | null> => {
@@ -686,8 +692,11 @@ const fetchParlayLiveEvents = async (sport: LiveSport) => {
 
 const fetchMlbStatsLive = async () => {
   const url = new URL("https://statsapi.mlb.com/api/v1/schedule");
+  const today = centralDate();
+  const yesterday = addDays(today, -1);
   url.searchParams.set("sportId", "1");
-  url.searchParams.set("date", centralDate());
+  url.searchParams.set("startDate", yesterday);
+  url.searchParams.set("endDate", today);
   url.searchParams.set("hydrate", "linescore,team,probablePitcher");
 
   const response = await fetch(url);

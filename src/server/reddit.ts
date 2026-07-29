@@ -1625,7 +1625,6 @@ const getPreviousRedditParlay = async () => {
       FROM reddit_parlay_track
       WHERE pick_date < (now() AT TIME ZONE 'America/Chicago')::date
         AND locked_at IS NOT NULL
-        AND status IN ('won', 'lost', 'push', 'void')
       ORDER BY pick_date DESC
       LIMIT 1
     `
