@@ -95,6 +95,20 @@ const formatSignedUnits = (value: number) => {
   return `${sign}${Math.abs(value).toFixed(2)}u`;
 };
 
+const countAllPicksInPostBody = (body: string) => {
+  const picksMarker = "## 🎯 Today's Picks";
+  const closingMarker = "Think I'm wrong?";
+  const picksStart = body.indexOf(picksMarker);
+  if (picksStart === -1) {
+    return 0;
+  }
+  const bodyAfterPicks = body.slice(picksStart + picksMarker.length);
+  const picksEnd = bodyAfterPicks.indexOf(closingMarker);
+  const picksSection = picksEnd === -1 ? bodyAfterPicks : bodyAfterPicks.slice(0, picksEnd);
+  const pickHeadings = picksSection.match(/^\*\*[^*\n][^\n]*\*\*\s*$/gm);
+  return pickHeadings?.length ?? 0;
+};
+
 const formatCstDate = (date: Date) => {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "America/Chicago",
@@ -1507,6 +1521,15 @@ export const lockRedditPostTracking = async ({
     const current = await getOrCreateTodayRedditAllPicks();
     if (!current || !current.legs.length) {
       throw new Error("No Chine all-picks card is available to lock.");
+    }
+    const bodyPickCount = countAllPicksInPostBody(body);
+    if (bodyPickCount === 0) {
+      throw new Error("The Chine all-picks post body does not contain a Today's Picks section to track.");
+    }
+    if (bodyPickCount !== current.legs.length) {
+      throw new Error(
+        `The Chine all-picks post body has ${bodyPickCount} picks, but tracking has ${current.legs.length}. Refresh the preview before locking.`
+      );
     }
     const result = await query<{ id: string; lockedAt: Date }>(
       `
