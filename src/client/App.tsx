@@ -719,7 +719,7 @@ const batterDetail = (game: LiveGameState) => [
 ].filter(Boolean).join(" • ");
 
 const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: ScoreboardSport) => {
-  if (page === "scoreboard") return `${scoreboardSport} ScoreBoard`;
+  if (page === "scoreboard") return `${scoreboardSport} Scores`;
   if (page === "lines") return `${lineSport} Lines`;
   if (page === "open-bets") return "Open Bets";
   if (page === "contact") return "Contact Us";
@@ -3427,7 +3427,7 @@ function App() {
             <button onClick={() => {
               toggleNavGroup("scoreboard");
             }} aria-expanded={expandedNavGroup === "scoreboard"}>
-              <Radio size={18} /> ScoreBoard {expandedNavGroup === "scoreboard" ? <ChevronDown className="nav-chevron" size={16} /> : <ChevronRight className="nav-chevron" size={16} />}
+              <Radio size={18} /> Scores {expandedNavGroup === "scoreboard" ? <ChevronDown className="nav-chevron" size={16} /> : <ChevronRight className="nav-chevron" size={16} />}
             </button>
             <div className="nav-submenu">
               {sportsMenu.map((sport) => {
