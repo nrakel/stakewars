@@ -2855,6 +2855,11 @@ function App() {
     }
   };
 
+  const openSupportChat = () => {
+    setSupportOpen(true);
+    setSupportNotice("");
+  };
+
   const towerPayoutLabel = (band: TowerPayoutBand | null) =>
     band ? `${band.minHeight}${band.maxHeight && band.maxHeight !== band.minHeight ? `-${band.maxHeight}` : band.maxHeight === null ? "+" : ""} floors pays ${band.payout.numerator}:${band.payout.denominator}` : "No band";
 
@@ -3926,6 +3931,19 @@ function App() {
                 <a className="primary" href="mailto:support@stakewars.ai">support@stakewars.ai</a>
               </div>
             </div>
+            <div className="notification-card">
+              <div>
+                <strong>Live Support Chat</strong>
+                <span>{user.emailVerified ? "Open a support chat from this device." : "Verify your email address to use live support chat."}</span>
+              </div>
+              <div className="notification-actions">
+                {user.emailVerified ? (
+                  <button className="primary" type="button" onClick={openSupportChat}>Open Chat</button>
+                ) : (
+                  <button className="secondary-action" type="button" onClick={() => openPage("account")}>Verify Email</button>
+                )}
+              </div>
+            </div>
           </div>
         )}
 
@@ -4647,7 +4665,7 @@ function App() {
             )}
           </div>
         )}
-        <button className="support-fab" type="button" onClick={() => setSupportOpen((current) => !current)}>
+        <button className="support-fab" type="button" onClick={() => supportOpen ? setSupportOpen(false) : openSupportChat()}>
           <Mail size={18} /> Support
         </button>
       </div>
