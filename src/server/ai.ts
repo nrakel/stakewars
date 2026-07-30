@@ -2107,6 +2107,7 @@ const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_
 const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.selected_team.trim().toLowerCase();
 
 export const dailyAiWagerMinConfidence = 0.7;
+export const dailyAiStraightBankrollFraction = 0.6;
 const dailyAiRoundRobinEnabled = false;
 const dailyAiRoundRobinPicks = 3;
 const dailyAiRoundRobinMinExpectedRoi = 0.08;
@@ -2219,7 +2220,7 @@ export const generateAiPicks = async ({
   stakeFractionOfBalance,
   lockWindowMinutes = 60,
   aiWagerMinConfidence = dailyAiWagerMinConfidence,
-  aiStraightBankrollFraction = 0.6,
+  aiStraightBankrollFraction = dailyAiStraightBankrollFraction,
   aiRoundRobinBankrollFraction = 0.25,
   aiRoundRobinPicks = dailyAiRoundRobinPicks
 }: {

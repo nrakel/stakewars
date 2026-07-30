@@ -12,7 +12,7 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
-import { dailyAiWagerMinConfidence } from "./ai.js";
+import { dailyAiStraightBankrollFraction, dailyAiWagerMinConfidence } from "./ai.js";
 import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
 import {
   buildTowerHandForUser,
@@ -2617,6 +2617,25 @@ export const registerRoutes = (router: Router) => {
             WHERE p.published_for = (now() AT TIME ZONE 'America/Chicago')::date
               AND p.confidence >= $1
               AND (p.locked_at IS NULL OR p.wager_id IS NOT NULL)
+              AND (
+                p.locked_at IS NOT NULL
+                OR NOT EXISTS (
+                  SELECT 1
+                  FROM ai_daily_bankroll adb
+                  JOIN app_user au ON au.id = adb.user_id
+                  WHERE au.username = $2
+                    AND au.role = 'system'
+                    AND adb.bankroll_date = (now() AT TIME ZONE 'America/Chicago')::date
+                    AND adb.straight_wager_stake_cents IS NOT NULL
+                    AND floor(adb.starting_balance_cents * $3::numeric) - (
+                      SELECT COALESCE(sum(w2.stake_cents), 0)
+                      FROM wager w2
+                      WHERE w2.user_id = au.id
+                        AND w2.kind = 'straight'
+                        AND (w2.placed_at AT TIME ZONE 'America/Chicago')::date = adb.bankroll_date
+                    ) < adb.straight_wager_stake_cents
+                )
+              )
             ORDER BY
               p.published_for,
               COALESCE(split_part(split_part(l.provider_event_id, ':', 1), '|', 1), l.sport::text || ':' || l.away_team || ':' || l.home_team || ':' || l.starts_at::text),
@@ -2631,7 +2650,7 @@ export const registerRoutes = (router: Router) => {
           FROM ranked
           ORDER BY "lockedAt" DESC NULLS LAST, confidence DESC NULLS LAST, score DESC NULLS LAST, "startsAt" ASC
         `,
-        [dailyAiWagerMinConfidence]
+        [dailyAiWagerMinConfidence, config.aiUsername, dailyAiStraightBankrollFraction]
       );
       const chineParlay = (await query<{
         id: string;
