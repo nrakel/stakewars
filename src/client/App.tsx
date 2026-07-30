@@ -3925,7 +3925,7 @@ function App() {
             <div className="notification-card">
               <div>
                 <strong>Email Support</strong>
-                <span>Support is currently email only. Responses will occur within 1 business day.</span>
+                <span>Responses will occur within 1 business day.</span>
               </div>
               <div className="notification-actions">
                 <a className="primary" href="mailto:support@stakewars.ai">support@stakewars.ai</a>
