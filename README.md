@@ -131,6 +131,9 @@ STAKEWARS_PARLAY_MIN_REMAINING_CREDITS=100000
 STAKEWARS_PARLAY_DAILY_CREDIT_CAP=30000
 STAKEWARS_NFL_PARLAY_DAILY_CREDIT_CAP=30000
 STAKEWARS_NCAAF_PARLAY_DAILY_CREDIT_CAP=30000
+STAKEWARS_NBA_PARLAY_DAILY_CREDIT_CAP=30000
+STAKEWARS_NCAAB_PARLAY_DAILY_CREDIT_CAP=30000
+STAKEWARS_NHL_PARLAY_DAILY_CREDIT_CAP=30000
 STAKEWARS_NFL_HOLIDAY_DATES=
 ```
 
@@ -157,6 +160,16 @@ npm run refresh:odds-ncaaf
 ```
 
 The NCAAF wrapper polls every 10 minutes on Thursdays and Saturdays from 6 AM through 10 PM Central, and hourly on Sunday through Wednesday plus Friday from 6 AM through 10 PM Central. It uses the same football bookmaker fallback list, bypasses the generic 24-hour import gate for early-week movement, and honors the minimum remaining credit guard plus `STAKEWARS_NCAAF_PARLAY_DAILY_CREDIT_CAP`.
+
+NBA, NCAA basketball, and NHL use an MLB-style schedule-aware wrapper:
+
+```bash
+STAKEWARS_SCHEDULED_ODDS_SPORT=NBA npm run refresh:odds-scheduled-sport
+STAKEWARS_SCHEDULED_ODDS_SPORT=NCAAMB npm run refresh:odds-scheduled-sport
+STAKEWARS_SCHEDULED_ODDS_SPORT=NHL npm run refresh:odds-scheduled-sport
+```
+
+These wrappers refresh only on days with games, skip before 8 AM Central, stop after the final same-day game starts, and honor the shared minimum remaining credit guard plus each sport's daily cap.
 
 ## Current scope
 
