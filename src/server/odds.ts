@@ -48,11 +48,10 @@ const sports: Array<{ local: LocalSport; parlay: string; league: string }> = [
   { local: "NBA", parlay: "basketball_nba", league: "NBA" },
   { local: "NCAAMB", parlay: "basketball_ncaab", league: "NCAA Men's Basketball" },
   { local: "NCAAF", parlay: "americanfootball_ncaaf", league: "NCAA Football" },
-  { local: "EPL", parlay: "soccer_epl", league: "English Premier League" },
-  { local: "WORLDCUP", parlay: "soccer_fifa_world_cup", league: "FIFA World Cup" }
+  { local: "EPL", parlay: "soccer_epl", league: "English Premier League" }
 ];
 
-const soccerSports = new Set<LocalSport>(["EPL", "WORLDCUP"]);
+const soccerSports = new Set<LocalSport>(["EPL"]);
 const oddsSourceSports = new Set<LocalSport>(["MLB"]);
 
 const soccerBookmakerFallbacks = () => unique([

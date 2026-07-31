@@ -1008,8 +1008,7 @@ export const settleSoccerWagers = async (
   endDate = yyyyMmDd(new Date())
 ) => {
   const finals = [
-    ...await fetchSoccerFinals("EPL", startDate, endDate),
-    ...await fetchSoccerFinals("WORLDCUP", startDate, endDate)
+    ...await fetchSoccerFinals("EPL", startDate, endDate)
   ];
-  return settleWagersForFinals({ startDate, endDate, sports: ["EPL", "WORLDCUP"], finals });
+  return settleWagersForFinals({ startDate, endDate, sports: ["EPL"], finals });
 };

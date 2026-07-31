@@ -12,7 +12,7 @@ type AdminSection = "traffic" | "support" | "prizes" | "model" | "reddit" | "use
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 const MAX_CHECKED_LEGS = 8;
-const sportsMenu: ScoreboardSport[] = ["MLB", "NFL", "NBA", "NHL", "NCAAMB", "NCAAF", "EPL", "WORLDCUP"];
+const sportsMenu: ScoreboardSport[] = ["MLB", "NFL", "NBA", "NHL", "NCAAMB", "NCAAF", "EPL"];
 const TOWER_FEATURE_ENABLED = false;
 
 type InstallPromptEvent = Event & {
@@ -1507,13 +1507,12 @@ function App() {
 
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
-    const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult, liveWorldCupResult] = await Promise.all([
+    const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
       api<LeaderboardResponse>(leaderboardPath, {}, authToken),
       api<{ picks: DailyAiPick[]; parlay: DailyChineParlay | null }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
-      api<{ games: LiveGameState[] }>("/live/epl"),
-      api<{ games: LiveGameState[] }>("/live/worldcup")
+      api<{ games: LiveGameState[] }>("/live/epl")
     ]);
     setLines(lineResult.lines);
     setSlip((current) => {
@@ -1555,7 +1554,7 @@ function App() {
     }
     setAiPicks(aiResult.picks);
     setDailyChineParlay(aiResult.parlay);
-    setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveWorldCupResult.games]);
+    setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
     if (authToken) {
       const [me, openBetResult, pushPreferenceResult, referralResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
@@ -3720,7 +3719,7 @@ function App() {
               <Radio size={20} />
               <h2>{scoreboardSport} live box scores</h2>
             </div>
-            {scoreboardSport === "MLB" || scoreboardSport === "WORLDCUP" || scoreboardSport === "EPL" ? (
+            {scoreboardSport === "MLB" || scoreboardSport === "EPL" ? (
               <div className="live-list scoreboard-grid">
                 {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => (
                   <article className="live-game" key={game.matchId}>

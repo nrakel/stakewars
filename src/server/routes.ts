@@ -2202,7 +2202,7 @@ export const registerRoutes = (router: Router) => {
             ORDER BY abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC
             LIMIT 1
           ) mgc ON true
-          WHERE gl.is_active = true AND gl.starts_at > now()
+          WHERE gl.is_active = true AND gl.starts_at > now() AND gl.sport <> 'WORLDCUP'
           ORDER BY gl.starts_at ASC
           LIMIT 100
         `

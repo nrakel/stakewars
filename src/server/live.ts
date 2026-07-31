@@ -993,7 +993,7 @@ const refreshLiveSport = async (sport: LiveSport) => {
   };
 };
 
-export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL", "WORLDCUP"]) => {
+export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) => {
   const results = [];
   for (const sport of sports) {
     results.push(await refreshLiveSport(sport));
