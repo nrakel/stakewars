@@ -869,7 +869,7 @@ function RulesContent() {
       </section>
       <section>
         <h2>Contest Window</h2>
-        <p>The leaderboard resets every Monday morning. Open wagers may reduce available bankroll for betting, but leaderboard balance reflects settled results.</p>
+        <p>The leaderboard resets every Monday morning. Open wagers may reduce available bankroll for betting, but leaderboard balance reflects settled results. Weekly bankroll can only be used on games scheduled inside the current contest week.</p>
       </section>
       <section>
         <h2>Wager Types</h2>

@@ -16,6 +16,7 @@ type MarketKey = "spreads" | "h2h" | "totals";
 
 type RefreshOddsOptions = {
   sports?: LocalSport[];
+  ignoreUpcomingWindow?: boolean;
 };
 
 type ParlayMarket = {
@@ -549,7 +550,7 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
       continue;
     }
 
-    const isInWindow = oddsSourceSports.has(sport.local) || await hasUpcomingEventWithin24Hours(sport.parlay);
+    const isInWindow = options.ignoreUpcomingWindow || oddsSourceSports.has(sport.local) || await hasUpcomingEventWithin24Hours(sport.parlay);
     if (!isInWindow) {
       await query("UPDATE game_line SET is_active = false WHERE source = 'parlay-api' AND sport = $1", [sport.local]);
       summary.sports.push({ sport: sport.local, events: 0, imported: 0, skippedReason: "no games within 24 hours" });

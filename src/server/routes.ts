@@ -179,6 +179,11 @@ const addDays = (date: string, days: number) => {
   return yyyyMmDd(copy);
 };
 
+const isInContestWeek = (startsAt: Date, weekStart: string) => {
+  const startsOn = centralDate(startsAt);
+  return startsOn >= weekStart && startsOn < addDays(weekStart, 7);
+};
+
 const normalizeMlbTeamName = (team: string) =>
   team
     .toLowerCase()
@@ -3152,6 +3157,9 @@ export const registerRoutes = (router: Router) => {
           }
           if (currentLine.starts_at.getTime() <= Date.now()) {
             throw new Error(`${currentLine.away_team} @ ${currentLine.home_team} has already started`);
+          }
+          if (!isInContestWeek(currentLine.starts_at, weekStart)) {
+            throw new Error(`${currentLine.away_team} @ ${currentLine.home_team} is outside the current contest week`);
           }
 
           const expectedSpread = leg.expectedSpread ?? requestedLine.spread;

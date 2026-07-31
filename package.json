@@ -15,6 +15,8 @@
     "refresh:odds:prod": "node dist/scripts/refresh-odds.js",
     "refresh:odds-mlb": "tsx scripts/refresh-mlb-odds.ts",
     "refresh:odds-mlb:prod": "node dist/scripts/refresh-mlb-odds.js",
+    "refresh:odds-nfl": "tsx scripts/refresh-nfl-odds.ts",
+    "refresh:odds-nfl:prod": "node dist/scripts/refresh-nfl-odds.js",
     "refresh:mlb-context": "tsx scripts/refresh-mlb-context.ts",
     "refresh:mlb-context:prod": "node dist/scripts/refresh-mlb-context.js",
     "refresh:mlb-boxscore-analytics": "tsx scripts/refresh-mlb-boxscore-analytics.ts",
