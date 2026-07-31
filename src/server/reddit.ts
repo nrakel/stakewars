@@ -1961,8 +1961,8 @@ const getMondayAllPicksRecapPrefix = async () => {
           COALESCE(NULLIF(u.display_name, ''), CASE WHEN u.role = 'system' THEN 'StakeWars Chine' ELSE u.username END) AS display_name,
           u.email_verified,
           e.starting_bankroll_cents,
-          e.starting_bankroll_cents + COALESCE(wa.settled_profit_cents, e.settled_profit_cents) AS leaderboard_cents,
-          COALESCE(wa.settled_profit_cents, e.settled_profit_cents) AS settled_profit_cents,
+          e.starting_bankroll_cents + e.settled_profit_cents AS leaderboard_cents,
+          e.settled_profit_cents AS settled_profit_cents,
           COALESCE(wa.weekly_wagers, 0) AS weekly_wagers,
           COALESCE(wa.weekly_stake_cents, 0) AS weekly_stake_cents,
           (e.starting_bankroll_cents * 1.5)::int AS required_stake_cents

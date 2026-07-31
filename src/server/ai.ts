@@ -2524,7 +2524,6 @@ export const generateAiPicks = async ({
     const straightBufferSlots = 1;
     const plannedStraightSlots = Math.max(
       existingStraightGameKeys.size + newStraightWagerSlotKeys.size + straightBufferSlots,
-      maxPicks + straightBufferSlots,
       1
     );
     const plannedStraightStakeCents = dailyStraightBudgetCents > 0

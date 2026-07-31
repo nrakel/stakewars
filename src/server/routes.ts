@@ -2452,7 +2452,7 @@ export const registerRoutes = (router: Router) => {
             SELECT e.starting_bankroll_cents
               + CASE
                 WHEN sw.week_start = (SELECT week_start FROM current_week)
-                THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
+                THEN e.settled_profit_cents
                 ELSE e.settled_profit_cents
               END AS leaderboard_cents
             FROM weekly_entry e
@@ -2481,12 +2481,12 @@ export const registerRoutes = (router: Router) => {
                 )
                 + CASE
                   WHEN sw.week_start = (SELECT week_start FROM current_week)
-                  THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
+                  THEN e.settled_profit_cents
                   ELSE e.settled_profit_cents
                 END AS leaderboard_cents,
               CASE
                 WHEN sw.week_start = (SELECT week_start FROM current_week)
-                THEN COALESCE(wa.settled_profit_cents, e.settled_profit_cents)
+                THEN e.settled_profit_cents
                 ELSE e.settled_profit_cents
               END AS settled_profit_cents,
               (
