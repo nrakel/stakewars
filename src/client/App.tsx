@@ -96,6 +96,8 @@ type RedditLockResult = {
   lockedAt: string;
   postType: "single" | "parlay" | "all";
   legs: number;
+  title?: string;
+  body?: string;
 };
 
 type ReferralInfo = {
@@ -3331,12 +3333,13 @@ function App() {
         method: "POST",
         body: JSON.stringify({ postType, title, body })
       }, token);
+      const lockedResult = { ...result, title, body };
       if (isParlay) {
-        setRedditParlayLock(result);
+        setRedditParlayLock(lockedResult);
       } else if (isAll) {
-        setRedditAllLock(result);
+        setRedditAllLock(lockedResult);
       } else {
-        setRedditSingleLock(result);
+        setRedditSingleLock(lockedResult);
       }
       const lockTime = new Date(result.lockedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
       setRedditNotice(isParlay
@@ -3350,6 +3353,13 @@ function App() {
       setRedditLockingType(null);
     }
   };
+
+  const renderLockedRedditPreview = (lock: RedditLockResult) => (
+    <div className="reddit-locked-preview">
+      {lock.title && <strong>{lock.title}</strong>}
+      {lock.body && <pre>{lock.body}</pre>}
+    </div>
+  );
 
   const pushPreferenceRows: Array<{ key: keyof PushPreferences; label: string; description: string }> = [
     {
@@ -4261,10 +4271,13 @@ function App() {
                     </button>
                   </div>
                   {redditSingleLock && (
-                    <div className="reddit-lock-status">
-                      <Lock size={16} />
-                      <span>Single saved at {new Date(redditSingleLock.lockedAt).toLocaleString()}. Safe to post.</span>
-                    </div>
+                    <>
+                      <div className="reddit-lock-status">
+                        <Lock size={16} />
+                        <span>Single saved at {new Date(redditSingleLock.lockedAt).toLocaleString()}. Safe to post.</span>
+                      </div>
+                      {renderLockedRedditPreview(redditSingleLock)}
+                    </>
                   )}
                   <button className="secondary-action" onClick={generateRedditParlayPreview}>Generate 3-team parlay</button>
                   <label>
@@ -4288,10 +4301,13 @@ function App() {
                     </button>
                   </div>
                   {redditParlayLock && (
-                    <div className="reddit-lock-status">
-                      <Lock size={16} />
-                      <span>Parlay saved at {new Date(redditParlayLock.lockedAt).toLocaleString()}. Safe to post.</span>
-                    </div>
+                    <>
+                      <div className="reddit-lock-status">
+                        <Lock size={16} />
+                        <span>Parlay saved at {new Date(redditParlayLock.lockedAt).toLocaleString()}. Safe to post.</span>
+                      </div>
+                      {renderLockedRedditPreview(redditParlayLock)}
+                    </>
                   )}
                   <button className="secondary-action" onClick={generateRedditAllPreview}>Generate all picks</button>
                   <label>
@@ -4315,10 +4331,13 @@ function App() {
                     </button>
                   </div>
                   {redditAllLock && (
-                    <div className="reddit-lock-status">
-                      <Lock size={16} />
-                      <span>All picks saved at {new Date(redditAllLock.lockedAt).toLocaleString()}. Safe to post.</span>
-                    </div>
+                    <>
+                      <div className="reddit-lock-status">
+                        <Lock size={16} />
+                        <span>All picks saved at {new Date(redditAllLock.lockedAt).toLocaleString()}. Safe to post.</span>
+                      </div>
+                      {renderLockedRedditPreview(redditAllLock)}
+                    </>
                   )}
                 </div>
                 {redditNotice && <p className={redditNotice.includes("generated") || redditNotice.includes("copied") || redditNotice.includes("locked") ? "success" : "error"}>{redditNotice}</p>}

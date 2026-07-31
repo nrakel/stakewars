@@ -968,6 +968,29 @@ textarea {
   flex: 0 0 auto;
 }
 
+.reddit-locked-preview {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #edf0ed;
+  border-radius: 8px;
+  background: #fbfcfa;
+  padding: 10px;
+}
+
+.reddit-locked-preview strong {
+  color: #14201c;
+}
+
+.reddit-locked-preview pre {
+  margin: 0;
+  color: #43524c;
+  font: 0.82rem/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .notification-actions {
   display: flex;
   gap: 10px;
