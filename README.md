@@ -130,6 +130,7 @@ PARLAY_FOOTBALL_BOOKMAKERS=
 STAKEWARS_PARLAY_MIN_REMAINING_CREDITS=100000
 STAKEWARS_PARLAY_DAILY_CREDIT_CAP=30000
 STAKEWARS_NFL_PARLAY_DAILY_CREDIT_CAP=30000
+STAKEWARS_NCAAF_PARLAY_DAILY_CREDIT_CAP=30000
 STAKEWARS_NFL_HOLIDAY_DATES=
 ```
 
@@ -148,6 +149,14 @@ npm run refresh:odds-nfl
 ```
 
 The NFL wrapper polls on the requested Central-time cadence: Tuesday, Wednesday, Friday, and Saturday hourly from 8 AM through 7 PM; Thursday and Monday hourly from 8 AM until noon, then every 10 minutes; Sunday every 5 minutes starting at 6 AM. Dates listed in `STAKEWARS_NFL_HOLIDAY_DATES` as comma-separated `YYYY-MM-DD` values use the Thursday/Monday cadence. The wrapper bypasses the generic 24-hour import gate so early-week NFL lines can move, but still honors the minimum remaining credit guard and daily cap. On same-day game days, it stops after the final NFL kickoff for that Central date.
+
+NCAA football odds can be refreshed with:
+
+```bash
+npm run refresh:odds-ncaaf
+```
+
+The NCAAF wrapper polls every 10 minutes on Thursdays and Saturdays from 6 AM through 10 PM Central, and hourly on Sunday through Wednesday plus Friday from 6 AM through 10 PM Central. It uses the same football bookmaker fallback list, bypasses the generic 24-hour import gate for early-week movement, and honors the minimum remaining credit guard plus `STAKEWARS_NCAAF_PARLAY_DAILY_CREDIT_CAP`.
 
 ## Current scope
 
