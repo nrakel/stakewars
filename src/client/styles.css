@@ -1363,6 +1363,7 @@ textarea {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
+  column-gap: 12px;
 }
 
 .game-card-top {
@@ -1448,26 +1449,29 @@ textarea {
 
 .game-card-markets {
   align-items: start;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
 }
 
 .market-side {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
   gap: 8px;
-  flex-wrap: wrap;
+  min-width: 0;
+  width: 100%;
 }
 
 .market-side.home {
   grid-column: 3;
-  justify-content: flex-end;
 }
 
 .market-side.neutral {
   grid-column: 2;
-  justify-content: center;
 }
 
 .market-button {
-  min-width: 112px;
+  width: 100%;
+  min-width: 0;
   min-height: 44px;
   border-radius: 6px;
   font-weight: 800;
