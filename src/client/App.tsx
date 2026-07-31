@@ -3808,7 +3808,7 @@ function App() {
             </div>
             <ol className="leaderboard leaderboard-page-list">
               {leaderboard.map((row) => (
-                <li key={`${row.rank}-${row.displayName}`}>
+                <li key={`${row.rank}-${row.displayName}`} className={row.role === "system" ? "chine-leaderboard-row" : undefined}>
                   <span>
                     {row.rank}. {row.displayName}
                     {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && row.eligible && (

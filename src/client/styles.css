@@ -676,6 +676,19 @@ textarea {
   border-bottom: 1px solid #edf0ed;
 }
 
+.leaderboard-page-list li.chine-leaderboard-row {
+  padding: 10px 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #f8faf6;
+  font-weight: 900;
+}
+
+.leaderboard-page-list li.chine-leaderboard-row span,
+.leaderboard-page-list li.chine-leaderboard-row strong {
+  color: #14201c;
+}
+
 .leaderboard-page-list li span {
   display: flex;
   align-items: center;
