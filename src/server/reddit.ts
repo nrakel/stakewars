@@ -1823,6 +1823,43 @@ const formatMoneyCents = (cents: number) =>
   `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const redditPlayCta = "Come play at stakewars.ai";
 
+const singleWinChineLine = (previous: Pick<RedditRecordPickRow, "status" | "profit_units"> | null) => {
+  if (!previous || previous.status !== "won") {
+    return [];
+  }
+  return [
+    "",
+    `Chine saw it. Chine took it. Chine cashed it for ${formatSignedUnits(Number(previous.profit_units))}.`,
+    "The model does not need applause, but it does accept challengers."
+  ];
+};
+
+const parlayWinChineLine = (previous: { parlay: Pick<RedditParlayRow, "status" | "profit_units">; legs: RedditParlayLegRow[] } | null) => {
+  if (!previous || previous.parlay.status !== "won") {
+    return [];
+  }
+  return [
+    "",
+    `Three legs. Three answers. Chine stacked them and cashed ${formatSignedUnits(Number(previous.parlay.profit_units))}.`,
+    "That is not confidence talking. That is the scoreboard catching up."
+  ];
+};
+
+const allPicksChineLine = (previous: { legs: RedditAllPickLegRow[] } | null, yesterdayUnits: number | null) => {
+  if (!previous?.legs.length || yesterdayUnits === null || yesterdayUnits <= 0) {
+    return [];
+  }
+  const settledLegs = previous.legs.filter((leg) => leg.status === "won" || leg.status === "lost");
+  const swept = settledLegs.length > 0 && settledLegs.every((leg) => leg.status === "won");
+  return [
+    "",
+    swept
+      ? "Yesterday was a clean sweep. Chine did not guess. Chine calculated."
+      : "Yesterday finished in the green because the machine kept finding answers.",
+    "If you think that was easy, build a better card."
+  ];
+};
+
 const allPickResultLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "market_key" | "spread" | "sport" | "odds_american" | "starts_at" | "status" | "profit_units">) =>
   `${trackedPickSymbol(pick.status)} ${trackedPickLine(pick)} (${formatSignedUnits(Number(pick.profit_units))})`;
 
@@ -1875,6 +1912,7 @@ export const buildRedditPreview = async (subredditInput?: string): Promise<Reddi
       `Net Units: ${formatSignedUnits(record.netUnits)}`,
       "",
       ...previousLines,
+      ...singleWinChineLine(previous),
       "",
       formatCstDate(pick.starts_at),
       `Event: ${eventName(pick)}`,
@@ -1895,6 +1933,7 @@ export const buildRedditPreview = async (subredditInput?: string): Promise<Reddi
       `Net Units: ${formatSignedUnits(record.netUnits)}`,
       "",
       ...previousLines,
+      ...singleWinChineLine(previous),
       "",
       "No Chine pick is posted yet today.",
       "",
@@ -2130,6 +2169,7 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
     ...yesterdayPicks,
     "",
     `**Daily Result:** **${yesterdayUnits === null ? "N/A" : formatSignedUnits(yesterdayUnits)}**`,
+    ...allPicksChineLine(previous, yesterdayUnits),
     "",
     "---",
     "",
@@ -2179,6 +2219,7 @@ export const buildRedditParlayPreview = async (subredditInput?: string): Promise
       `Net Units: ${formatSignedUnits(record.netUnits)}`,
       "",
       ...previousLines,
+      ...parlayWinChineLine(previous),
       "",
       `Date: ${today} CST`,
       "3-Team Parlay",
@@ -2197,6 +2238,7 @@ export const buildRedditParlayPreview = async (subredditInput?: string): Promise
       `Net Units: ${formatSignedUnits(record.netUnits)}`,
       "",
       ...previousLines,
+      ...parlayWinChineLine(previous),
       "",
       "No 3-team Chine parlay is available yet today.",
       "",
