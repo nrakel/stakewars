@@ -43,6 +43,10 @@ export const config = {
     .split(",")
     .map((book) => book.trim())
     .filter(Boolean),
+  parlayFootballBookmakers: (process.env.PARLAY_FOOTBALL_BOOKMAKERS ?? "")
+    .split(",")
+    .map((book) => book.trim())
+    .filter(Boolean),
   adminUsernames: (process.env.ADMIN_USERNAMES ?? "nathanielrakel@gmail.com")
     .split(",")
     .map((username) => username.trim().toLowerCase())

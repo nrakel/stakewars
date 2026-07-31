@@ -74,7 +74,7 @@ const isRegularSeasonWindow = (sport: LocalSport, date = new Date()) => {
     case "MLB":
       return monthDay >= 320 && monthDay <= 930;
     case "NFL":
-      return monthDay >= 901 || monthDay <= 110;
+      return monthDay >= 801 || monthDay <= 110;
     case "NBA":
       return monthDay >= 1015 || monthDay <= 415;
     case "NHL":
@@ -113,6 +113,20 @@ const mlbBookmakerFallbacks = () => unique([
   "betmgm",
   "caesars",
   "draftkings"
+].filter(Boolean));
+
+const footballBookmakerFallbacks = () => unique([
+  ...config.parlayBookmakers,
+  ...config.parlayFootballBookmakers,
+  "bovada",
+  "fanduel",
+  "draftkings",
+  "betmgm",
+  "pinnacle",
+  "caesars",
+  "betrivers",
+  "hardrock",
+  "novig"
 ].filter(Boolean));
 
 const hasCompleteMarket = (
@@ -441,6 +455,23 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
     };
   }
 
+  if (sport === "NFL" || sport === "NCAAF") {
+    const bookmakerPriority = footballBookmakerFallbacks();
+    const eventGroups: ParlayEvent[][] = [];
+    const bookmakerFetches: Array<{ bookmakers: string[]; events: number }> = [];
+    for (const bookmaker of bookmakerPriority) {
+      const events = await fetchSportOdds(sportKey, markets, [bookmaker]);
+      eventGroups.push(events);
+      bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
+    }
+
+    return {
+      events: mergeEvents(eventGroups),
+      bookmakerPriority,
+      bookmakerFetches
+    };
+  }
+
   if (sport !== "MLB") {
     const events = await fetchSportOdds(sportKey, markets, config.parlayBookmakers);
     return {
@@ -525,8 +556,9 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
       continue;
     }
 
-    const includeMoneyline = sport.local === "MLB" || soccerSports.has(sport.local);
-    const includeTotals = sport.local === "MLB";
+    const isFootball = sport.local === "NFL" || sport.local === "NCAAF";
+    const includeMoneyline = sport.local === "MLB" || soccerSports.has(sport.local) || isFootball;
+    const includeTotals = sport.local === "MLB" || isFootball;
     const requestedMarkets: MarketKey[] = ["spreads"];
     if (includeMoneyline) requestedMarkets.push("h2h");
     if (includeTotals) requestedMarkets.push("totals");

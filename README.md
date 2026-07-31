@@ -125,6 +125,8 @@ Hourly odds refresh uses Parlay API. Configure:
 PARLAY_API_BASE_URL=https://parlay-api.com/v1
 PARLAY_API_KEY=your-parlay-api-key
 PARLAY_BOOKMAKERS=bovada
+PARLAY_MLB_BOOKMAKERS=
+PARLAY_FOOTBALL_BOOKMAKERS=
 ```
 
 Run a manual import:
@@ -133,7 +135,7 @@ Run a manual import:
 npm run refresh:odds
 ```
 
-The importer pulls spread markets for MLB, NHL, NFL, NBA, NCAA men's basketball, and NCAA football. MLB also pulls moneylines. `PARLAY_BOOKMAKERS` is sent to Parlay API as the bookmaker filter and is also used as the local preference order.
+The importer pulls spread markets for MLB, NHL, NFL, NBA, NCAA men's basketball, and NCAA football. MLB, NFL, and NCAA football also pull moneylines and totals. MLB and football use multi-book fallback priority, starting with `PARLAY_BOOKMAKERS`, then the sport-specific override (`PARLAY_MLB_BOOKMAKERS` or `PARLAY_FOOTBALL_BOOKMAKERS`), then the built-in fallback books. NFL import is allowed during preseason and regular season, but non-MLB/non-soccer sports still require an upcoming event inside the 24-hour import window to control API usage.
 
 ## Current scope
 
