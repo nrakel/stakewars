@@ -9,7 +9,7 @@ import { getLiveMlbStates, getLiveStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendPushToUsers, sendTestPush, updatePushPreferences } from "./push.js";
 import { sendMail } from "./mail.js";
 import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } from "./mlbContext.js";
-import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, lockRedditPostTracking } from "./reddit.js";
+import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, getTodayRedditLockStatus, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
 import { dailyAiStraightBankrollFraction, dailyAiWagerMinConfidence } from "./ai.js";
@@ -2079,6 +2079,7 @@ export const registerRoutes = (router: Router) => {
 
   router.get("/admin/reddit/status", requireNateRakelAccount, async (req, res, next) => {
     try {
+      const locks = await getTodayRedditLockStatus();
       res.json({
         configured: true,
         mode: "manual",
@@ -2086,7 +2087,8 @@ export const registerRoutes = (router: Router) => {
         redditUsername: null,
         connectedAt: null,
         scopes: [],
-        defaultSubreddits: config.redditDefaultSubreddits
+        defaultSubreddits: config.redditDefaultSubreddits,
+        locks
       });
     } catch (error) {
       next(error);

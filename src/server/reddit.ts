@@ -35,6 +35,9 @@ type RedditPickRow = {
   features: Record<string, unknown> | null;
   reasons: string[];
   explanation: string | null;
+  locked_at?: Date | null;
+  locked_title?: string | null;
+  locked_body?: string | null;
 };
 
 type RedditCandidatePickRow = Omit<RedditPickRow, "id" | "status">;
@@ -50,6 +53,8 @@ type RedditParlayRow = {
   status: TrackedStatus;
   profit_units: string;
   locked_at?: Date | null;
+  locked_title?: string | null;
+  locked_body?: string | null;
 };
 
 type RedditParlayLegRow = RedditPickRow & {
@@ -64,6 +69,8 @@ type RedditAllPickRow = {
   id: string;
   pick_date: string;
   locked_at?: Date | null;
+  locked_title?: string | null;
+  locked_body?: string | null;
 };
 
 type RedditAllPickLegRow = RedditPickRow & {
@@ -1077,6 +1084,9 @@ const selectTodayRedditPick = async () => {
         rpt.status,
         rpt.decimal_odds,
         rpt.units,
+        rpt.locked_at,
+        rpt.locked_title,
+        rpt.locked_body,
         gl.sport::text AS sport,
         gl.league,
         gl.market_key,
@@ -1102,7 +1112,7 @@ const selectTodayRedditPick = async () => {
 const selectTodayRedditParlay = async () => {
   const parlay = await query<RedditParlayRow>(
     `
-      SELECT id, pick_date::text, units, status, profit_units, locked_at
+      SELECT id, pick_date::text, units, status, profit_units, locked_at, locked_title, locked_body
       FROM reddit_parlay_track
       WHERE pick_date = (now() AT TIME ZONE 'America/Chicago')::date
       LIMIT 1
@@ -1194,7 +1204,7 @@ const selectRedditAllPickLegs = async (allPickId: string) => {
 const selectTodayRedditAllPicks = async () => {
   const allPick = await query<RedditAllPickRow>(
     `
-      SELECT id, pick_date::text, locked_at
+      SELECT id, pick_date::text, locked_at, locked_title, locked_body
       FROM reddit_all_pick_track
       WHERE pick_date = (now() AT TIME ZONE 'America/Chicago')::date
       LIMIT 1
@@ -1207,6 +1217,74 @@ const selectTodayRedditAllPicks = async () => {
   return {
     allPick: allPick.rows[0],
     legs: legs.rows
+  };
+};
+
+const redditLockPayload = ({
+  postType,
+  id,
+  lockedAt,
+  legs,
+  title,
+  body
+}: {
+  postType: "single" | "parlay" | "all";
+  id: string;
+  lockedAt: Date | null | undefined;
+  legs: number;
+  title?: string | null;
+  body?: string | null;
+}) => {
+  if (!lockedAt) {
+    return null;
+  }
+  return {
+    postType,
+    id,
+    lockedAt,
+    legs,
+    title: title ?? "",
+    body: body ?? ""
+  };
+};
+
+export const getTodayRedditLockStatus = async () => {
+  const [single, parlay, all] = await Promise.all([
+    selectTodayRedditPick(),
+    selectTodayRedditParlay(),
+    selectTodayRedditAllPicks()
+  ]);
+  return {
+    single: single.rows[0]
+      ? redditLockPayload({
+        postType: "single",
+        id: single.rows[0].id,
+        lockedAt: single.rows[0].locked_at,
+        legs: 1,
+        title: single.rows[0].locked_title,
+        body: single.rows[0].locked_body
+      })
+      : null,
+    parlay: parlay
+      ? redditLockPayload({
+        postType: "parlay",
+        id: parlay.parlay.id,
+        lockedAt: parlay.parlay.locked_at,
+        legs: parlay.legs.length,
+        title: parlay.parlay.locked_title,
+        body: parlay.parlay.locked_body
+      })
+      : null,
+    all: all
+      ? redditLockPayload({
+        postType: "all",
+        id: all.allPick.id,
+        lockedAt: all.allPick.locked_at,
+        legs: all.legs.length,
+        title: all.allPick.locked_title,
+        body: all.allPick.locked_body
+      })
+      : null
   };
 };
 
@@ -1531,7 +1609,7 @@ export const lockRedditPostTracking = async ({
         `The Chine all-picks post body has ${bodyPickCount} picks, but tracking has ${current.legs.length}. Refresh the preview before locking.`
       );
     }
-    const result = await query<{ id: string; lockedAt: Date }>(
+    const result = await query<{ id: string; lockedAt: Date; title: string | null; body: string | null }>(
       `
         UPDATE reddit_all_pick_track
         SET locked_at = COALESCE(locked_at, now()),
@@ -1539,7 +1617,7 @@ export const lockRedditPostTracking = async ({
             locked_title = $3,
             locked_body = $4
         WHERE id = $1
-        RETURNING id, locked_at AS "lockedAt"
+        RETURNING id, locked_at AS "lockedAt", locked_title AS title, locked_body AS body
       `,
       [current.allPick.id, userId, title, body]
     );
@@ -1547,7 +1625,9 @@ export const lockRedditPostTracking = async ({
       postType,
       id: result.rows[0].id,
       lockedAt: result.rows[0].lockedAt,
-      legs: current.legs.length
+      legs: current.legs.length,
+      title: result.rows[0].title ?? "",
+      body: result.rows[0].body ?? ""
     };
   }
 
@@ -1556,7 +1636,7 @@ export const lockRedditPostTracking = async ({
     if (!current || current.legs.length !== 3) {
       throw new Error("No complete 3-team Chine parlay is available to lock.");
     }
-    const result = await query<{ id: string; lockedAt: Date }>(
+    const result = await query<{ id: string; lockedAt: Date; title: string | null; body: string | null }>(
       `
         UPDATE reddit_parlay_track
         SET locked_at = COALESCE(locked_at, now()),
@@ -1564,7 +1644,7 @@ export const lockRedditPostTracking = async ({
             locked_title = $3,
             locked_body = $4
         WHERE id = $1
-        RETURNING id, locked_at AS "lockedAt"
+        RETURNING id, locked_at AS "lockedAt", locked_title AS title, locked_body AS body
       `,
       [current.parlay.id, userId, title, body]
     );
@@ -1572,7 +1652,9 @@ export const lockRedditPostTracking = async ({
       postType,
       id: result.rows[0].id,
       lockedAt: result.rows[0].lockedAt,
-      legs: current.legs.length
+      legs: current.legs.length,
+      title: result.rows[0].title ?? "",
+      body: result.rows[0].body ?? ""
     };
   }
 
@@ -1580,7 +1662,7 @@ export const lockRedditPostTracking = async ({
   if (!current) {
     throw new Error("No Chine single pick is available to lock.");
   }
-  const result = await query<{ id: string; lockedAt: Date }>(
+  const result = await query<{ id: string; lockedAt: Date; title: string | null; body: string | null }>(
     `
       UPDATE reddit_pick_track
       SET locked_at = COALESCE(locked_at, now()),
@@ -1588,7 +1670,7 @@ export const lockRedditPostTracking = async ({
           locked_title = $3,
           locked_body = $4
       WHERE id = $1
-      RETURNING id, locked_at AS "lockedAt"
+      RETURNING id, locked_at AS "lockedAt", locked_title AS title, locked_body AS body
     `,
     [current.id, userId, title, body]
   );
@@ -1596,7 +1678,9 @@ export const lockRedditPostTracking = async ({
     postType,
     id: result.rows[0].id,
     lockedAt: result.rows[0].lockedAt,
-    legs: 1
+    legs: 1,
+    title: result.rows[0].title ?? "",
+    body: result.rows[0].body ?? ""
   };
 };
 

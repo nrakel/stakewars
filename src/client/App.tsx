@@ -83,6 +83,11 @@ type RedditStatus = {
   connectedAt: string | null;
   scopes: string[];
   defaultSubreddits: string[];
+  locks?: {
+    single: RedditLockResult | null;
+    parlay: RedditLockResult | null;
+    all: RedditLockResult | null;
+  };
 };
 
 type RedditPreview = {
@@ -1895,6 +1900,16 @@ function App() {
 
   const canManageReddit = Boolean(user && (user.role === "admin" || isNateRakelAccount));
 
+  const applyRedditStatus = (status: RedditStatus) => {
+    setRedditStatus(status);
+    setRedditSingleLock(status.locks?.single ?? null);
+    setRedditParlayLock(status.locks?.parlay ?? null);
+    setRedditAllLock(status.locks?.all ?? null);
+    if (!redditSubreddit && status.defaultSubreddits[0]) {
+      setRedditSubreddit(status.defaultSubreddits[0]);
+    }
+  };
+
   useEffect(() => {
     refresh().catch((error) => {
       if (error instanceof ApiError && error.status === 401) {
@@ -1920,12 +1935,7 @@ function App() {
       return;
     }
     api<RedditStatus>("/admin/reddit/status", {}, token)
-      .then((status) => {
-        setRedditStatus(status);
-        if (!redditSubreddit && status.defaultSubreddits[0]) {
-          setRedditSubreddit(status.defaultSubreddits[0]);
-        }
-      })
+      .then(applyRedditStatus)
       .catch(() => setRedditStatus(null));
   }, [token, canManageReddit]);
 
@@ -2753,10 +2763,7 @@ function App() {
   const refreshRedditStatus = async () => {
     if (!token || !canManageReddit) return;
     const status = await api<RedditStatus>("/admin/reddit/status", {}, token);
-    setRedditStatus(status);
-    if (!redditSubreddit && status.defaultSubreddits[0]) {
-      setRedditSubreddit(status.defaultSubreddits[0]);
-    }
+    applyRedditStatus(status);
   };
 
   const refreshUserDisplayMap = async () => {
