@@ -1600,6 +1600,16 @@ export const lockRedditPostTracking = async ({
     if (!current || !current.legs.length) {
       throw new Error("No Chine all-picks card is available to lock.");
     }
+    if (current.allPick.locked_at && current.allPick.locked_title && current.allPick.locked_body) {
+      return {
+        postType,
+        id: current.allPick.id,
+        lockedAt: current.allPick.locked_at,
+        legs: current.legs.length,
+        title: current.allPick.locked_title,
+        body: current.allPick.locked_body
+      };
+    }
     const bodyPickCount = countAllPicksInPostBody(body);
     if (bodyPickCount === 0) {
       throw new Error("The Chine all-picks post body does not contain a Today's Picks section to track.");
