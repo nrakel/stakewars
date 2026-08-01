@@ -12,6 +12,7 @@ export type RedditPostPreview = {
 const cleanSubreddit = (subreddit: string) => subreddit.trim().replace(/^r\//i, "");
 
 type TrackedStatus = "pending" | "won" | "lost" | "push" | "void";
+type RedditPostType = "single" | "parlay" | "all";
 
 type RedditPickRow = {
   id: string;
@@ -81,6 +82,27 @@ type RedditAllPickLegRow = RedditPickRow & {
   profit_units: string;
 };
 
+type RedditPostSnapshotRow = {
+  id: string;
+  post_date: string;
+  post_type: RedditPostType;
+  locked_at: Date;
+  title: string;
+  body: string;
+  units: string;
+  status: TrackedStatus;
+  profit_units: string;
+  settled_at?: Date | null;
+};
+
+type RedditPostPickSnapshotRow = RedditPickRow & {
+  id: string;
+  reddit_post_id: string;
+  leg_index: number;
+  status: TrackedStatus;
+  profit_units: string;
+};
+
 const americanToDecimal = (odds: number) => odds > 0 ? 1 + odds / 100 : 1 + 100 / Math.abs(odds);
 
 const redditSingleMinAmericanOdds = -200;
@@ -114,6 +136,397 @@ const countAllPicksInPostBody = (body: string) => {
   const picksSection = picksEnd === -1 ? bodyAfterPicks : bodyAfterPicks.slice(0, picksEnd);
   const pickHeadings = picksSection.match(/^\*\*[^*\n][^\n]*\*\*\s*$/gm);
   return pickHeadings?.length ?? 0;
+};
+
+const selectRedditPostSnapshot = async (postType: RedditPostType, postDateSql = "(now() AT TIME ZONE 'America/Chicago')::date") => {
+  const post = await query<RedditPostSnapshotRow>(
+    `
+      SELECT
+        id,
+        post_date::text,
+        post_type AS "post_type",
+        locked_at,
+        title,
+        body,
+        units,
+        status,
+        profit_units,
+        settled_at
+      FROM reddit_post_snapshot
+      WHERE post_type = $1
+        AND post_date = ${postDateSql}
+      LIMIT 1
+    `,
+    [postType]
+  );
+  if (!post.rows[0]) {
+    return null;
+  }
+  const picks = await query<RedditPostPickSnapshotRow>(
+    `
+      SELECT
+        rpps.id,
+        rpps.reddit_post_id,
+        rpps.leg_index,
+        rps.post_date::text AS pick_date,
+        rpps.source_ai_pick_id AS ai_pick_id,
+        rpps.source_game_line_id AS game_line_id,
+        rpps.selected_team,
+        rpps.status,
+        rpps.profit_units,
+        rpps.decimal_odds,
+        rpps.units,
+        rpps.sport::text AS sport,
+        rpps.league,
+        rpps.market_key,
+        rpps.spread,
+        rpps.odds_american,
+        rpps.away_team,
+        rpps.home_team,
+        rpps.starts_at,
+        rpps.confidence,
+        rpps.edge,
+        NULL::jsonb AS features,
+        ARRAY[]::text[] AS reasons,
+        rpps.explanation
+      FROM reddit_post_pick_snapshot rpps
+      JOIN reddit_post_snapshot rps ON rps.id = rpps.reddit_post_id
+      WHERE rpps.reddit_post_id = $1
+      ORDER BY rpps.leg_index ASC
+    `,
+    [post.rows[0].id]
+  );
+  return {
+    post: post.rows[0],
+    picks: picks.rows
+  };
+};
+
+const selectPreviousRedditPostSnapshot = async (postType: RedditPostType) => {
+  await settleRedditPostSnapshots();
+  const post = await query<RedditPostSnapshotRow>(
+    `
+      SELECT
+        id,
+        post_date::text,
+        post_type AS "post_type",
+        locked_at,
+        title,
+        body,
+        units,
+        status,
+        profit_units,
+        settled_at
+      FROM reddit_post_snapshot
+      WHERE post_type = $1
+        AND post_date < (now() AT TIME ZONE 'America/Chicago')::date
+      ORDER BY post_date DESC
+      LIMIT 1
+    `,
+    [postType]
+  );
+  if (!post.rows[0]) {
+    return null;
+  }
+  const picks = await query<RedditPostPickSnapshotRow>(
+    `
+      SELECT
+        rpps.id,
+        rpps.reddit_post_id,
+        rpps.leg_index,
+        rps.post_date::text AS pick_date,
+        rpps.source_ai_pick_id AS ai_pick_id,
+        rpps.source_game_line_id AS game_line_id,
+        rpps.selected_team,
+        rpps.status,
+        rpps.profit_units,
+        rpps.decimal_odds,
+        rpps.units,
+        rpps.sport::text AS sport,
+        rpps.league,
+        rpps.market_key,
+        rpps.spread,
+        rpps.odds_american,
+        rpps.away_team,
+        rpps.home_team,
+        rpps.starts_at,
+        rpps.confidence,
+        rpps.edge,
+        NULL::jsonb AS features,
+        ARRAY[]::text[] AS reasons,
+        rpps.explanation
+      FROM reddit_post_pick_snapshot rpps
+      JOIN reddit_post_snapshot rps ON rps.id = rpps.reddit_post_id
+      WHERE rpps.reddit_post_id = $1
+      ORDER BY rpps.leg_index ASC
+    `,
+    [post.rows[0].id]
+  );
+  return {
+    post: post.rows[0],
+    picks: picks.rows
+  };
+};
+
+const settleRedditPostSnapshots = async () => {
+  const rows = await query<RedditPostPickSnapshotRow & {
+    result_id: string | null;
+    result_starts_on: string | null;
+    result_away_team: string | null;
+    result_home_team: string | null;
+    away_score: number | null;
+    home_score: number | null;
+    result_metadata: Record<string, unknown> | null;
+  }>(
+    `
+      SELECT
+        rpps.id,
+        rpps.reddit_post_id,
+        rpps.leg_index,
+        rps.post_date::text AS pick_date,
+        rpps.source_ai_pick_id AS ai_pick_id,
+        rpps.source_game_line_id AS game_line_id,
+        rpps.selected_team,
+        rpps.status,
+        rpps.profit_units,
+        rpps.decimal_odds,
+        rpps.units,
+        rpps.sport::text AS sport,
+        rpps.league,
+        rpps.market_key,
+        rpps.spread,
+        rpps.odds_american,
+        rpps.away_team,
+        rpps.home_team,
+        rpps.starts_at,
+        rpps.confidence,
+        rpps.edge,
+        NULL::jsonb AS features,
+        ARRAY[]::text[] AS reasons,
+        rpps.explanation,
+        COALESCE(gr.id::text, lgs.match_id) AS result_id,
+        COALESCE(gr.starts_on::text, lgs.starts_at::date::text) AS result_starts_on,
+        COALESCE(gr.away_team, lgs.away_team) AS result_away_team,
+        COALESCE(gr.home_team, lgs.home_team) AS result_home_team,
+        COALESCE(gr.away_score, lgs.away_score) AS away_score,
+        COALESCE(gr.home_score, lgs.home_score) AS home_score,
+        COALESCE(gr.result_metadata, '{}'::jsonb) AS result_metadata
+      FROM reddit_post_pick_snapshot rpps
+      JOIN reddit_post_snapshot rps ON rps.id = rpps.reddit_post_id
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM game_result candidate
+        WHERE candidate.sport = rpps.sport
+          AND candidate.away_team = rpps.away_team
+          AND candidate.home_team = rpps.home_team
+          AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - rpps.starts_at)) <= 10800
+        ORDER BY abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - rpps.starts_at)) ASC,
+                 candidate.fetched_at DESC
+        LIMIT 1
+      ) gr ON true
+      LEFT JOIN LATERAL (
+        SELECT *
+        FROM live_game_state candidate
+        WHERE candidate.sport = rpps.sport
+          AND candidate.away_team = rpps.away_team
+          AND candidate.home_team = rpps.home_team
+          AND candidate.away_score IS NOT NULL
+          AND candidate.home_score IS NOT NULL
+          AND lower(candidate.game_status) IN ('final', 'final/ot', 'final/aet', 'full time')
+          AND abs(extract(epoch from candidate.starts_at - rpps.starts_at)) <= 10800
+        ORDER BY abs(extract(epoch from candidate.starts_at - rpps.starts_at)) ASC,
+                 candidate.updated_at DESC
+        LIMIT 1
+      ) lgs ON gr.id IS NULL
+      WHERE rpps.status = 'pending'
+    `
+  );
+
+  for (const row of rows.rows) {
+    if (!row.result_id || row.away_score === null || row.home_score === null || !row.result_starts_on || !row.result_away_team || !row.result_home_team) {
+      continue;
+    }
+    const finalGame: FinalGame = {
+      startsOn: row.result_starts_on,
+      awayTeam: row.result_away_team,
+      homeTeam: row.result_home_team,
+      awayScore: row.away_score,
+      homeScore: row.home_score,
+      noAction: Boolean(row.result_metadata?.noAction)
+    };
+    const status = outcomeForSelection({
+      selectedTeam: row.selected_team,
+      awayTeam: row.away_team,
+      homeTeam: row.home_team,
+      marketKey: row.market_key,
+      spread: Number(row.spread),
+      game: finalGame
+    });
+    const profitUnits = status === "won"
+      ? Number(row.units) * (Number(row.decimal_odds) - 1)
+      : status === "lost"
+        ? -Number(row.units)
+        : 0;
+    await query(
+      `
+        UPDATE reddit_post_pick_snapshot
+        SET status = $2,
+            profit_units = $3,
+            settled_at = now()
+        WHERE id = $1 AND status = 'pending'
+      `,
+      [row.id, status, profitUnits.toFixed(2)]
+    );
+  }
+
+  const posts = await query<{
+    id: string;
+    post_type: RedditPostType;
+    units: string;
+    picks: Array<{ status: TrackedStatus; profit_units: string; decimal_odds: string }>;
+  }>(
+    `
+      SELECT
+        rps.id,
+        rps.post_type,
+        rps.units,
+        json_agg(json_build_object(
+          'status', rpps.status,
+          'profit_units', rpps.profit_units,
+          'decimal_odds', rpps.decimal_odds
+        ) ORDER BY rpps.leg_index) AS picks
+      FROM reddit_post_snapshot rps
+      JOIN reddit_post_pick_snapshot rpps ON rpps.reddit_post_id = rps.id
+      WHERE rps.status = 'pending'
+      GROUP BY rps.id, rps.post_type, rps.units
+      HAVING count(*) FILTER (WHERE rpps.status = 'pending') = 0
+    `
+  );
+
+  for (const post of posts.rows) {
+    const hasLoss = post.picks.some((pick) => pick.status === "lost");
+    const winningPicks = post.picks.filter((pick) => pick.status === "won");
+    const status: TrackedStatus = hasLoss ? "lost" : winningPicks.length ? "won" : "push";
+    const profitUnits = post.post_type === "parlay"
+      ? status === "won"
+        ? Number(post.units) * (winningPicks.reduce((product, pick) => product * Number(pick.decimal_odds), 1) - 1)
+        : status === "lost"
+          ? -Number(post.units)
+          : 0
+      : post.picks.reduce((sum, pick) => sum + Number(pick.profit_units), 0);
+    await query(
+      `
+        UPDATE reddit_post_snapshot
+        SET status = $2,
+            profit_units = $3,
+            settled_at = now()
+        WHERE id = $1 AND status = 'pending'
+      `,
+      [post.id, status, profitUnits.toFixed(2)]
+    );
+  }
+};
+
+const createRedditPostSnapshot = async ({
+  userId,
+  postType,
+  title,
+  body,
+  units,
+  picks
+}: {
+  userId: string;
+  postType: RedditPostType;
+  title: string;
+  body: string;
+  units: number;
+  picks: Array<Pick<RedditPickRow, "ai_pick_id" | "game_line_id" | "selected_team" | "sport" | "league" | "market_key" | "spread" | "odds_american" | "decimal_odds" | "units" | "away_team" | "home_team" | "starts_at" | "confidence" | "edge" | "explanation">>;
+}) => {
+  const existing = await selectRedditPostSnapshot(postType);
+  if (existing) {
+    return existing;
+  }
+  await transaction(async (client) => {
+    const postResult = await client.query<RedditPostSnapshotRow>(
+      `
+        INSERT INTO reddit_post_snapshot (
+          id, post_date, post_type, locked_by_user_id, title, body, units
+        )
+        VALUES ($1, (now() AT TIME ZONE 'America/Chicago')::date, $2, $3, $4, $5, $6)
+        ON CONFLICT (post_date, post_type) DO NOTHING
+        RETURNING
+          id,
+          post_date::text,
+          post_type AS "post_type",
+          locked_at,
+          title,
+          body,
+          units,
+          status,
+          profit_units,
+          settled_at
+      `,
+      [randomUUID(), postType, userId, title, body, units.toFixed(2)]
+    );
+    const post = postResult.rows[0];
+    if (!post) {
+      return;
+    }
+    for (const [index, pick] of picks.entries()) {
+      await client.query(
+        `
+          INSERT INTO reddit_post_pick_snapshot (
+            id,
+            reddit_post_id,
+            leg_index,
+            selected_team,
+            sport,
+            league,
+            market_key,
+            spread,
+            odds_american,
+            decimal_odds,
+            units,
+            away_team,
+            home_team,
+            starts_at,
+            confidence,
+            edge,
+            explanation,
+            source_ai_pick_id,
+            source_game_line_id
+          )
+          VALUES ($1, $2, $3, $4, $5::sport_key, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        `,
+        [
+          randomUUID(),
+          post.id,
+          index + 1,
+          pick.selected_team,
+          pick.sport,
+          pick.league,
+          pick.market_key,
+          pick.spread,
+          pick.odds_american,
+          Number(pick.decimal_odds).toFixed(3),
+          Number(pick.units).toFixed(2),
+          pick.away_team,
+          pick.home_team,
+          pick.starts_at,
+          pick.confidence,
+          pick.edge,
+          pick.explanation,
+          pick.ai_pick_id,
+          pick.game_line_id
+        ]
+      );
+    }
+  });
+  const selected = await selectRedditPostSnapshot(postType);
+  if (!selected) {
+    throw new Error("Unable to load locked Reddit post snapshot.");
+  }
+  return selected;
 };
 
 const formatCstDate = (date: Date) => {
@@ -674,7 +1087,7 @@ const settleTrackedRedditPicks = async () => {
 };
 
 const getRedditRecord = async () => {
-  await settleTrackedRedditPicks();
+  await settleRedditPostSnapshots();
   const result = await query<{
     wins: number;
     losses: number;
@@ -685,8 +1098,8 @@ const getRedditRecord = async () => {
         count(*) FILTER (WHERE status = 'won')::int AS wins,
         count(*) FILTER (WHERE status = 'lost')::int AS losses,
         coalesce(sum(profit_units), 0)::text AS net_units
-      FROM reddit_pick_track
-      WHERE locked_at IS NOT NULL
+      FROM reddit_post_snapshot
+      WHERE post_type = 'single'
         AND status IN ('won', 'lost', 'push', 'void')
     `
   );
@@ -849,7 +1262,7 @@ const settleTrackedRedditParlays = async () => {
 };
 
 const getRedditParlayRecord = async () => {
-  await settleTrackedRedditParlays();
+  await settleRedditPostSnapshots();
   const result = await query<{
     wins: number;
     losses: number;
@@ -860,8 +1273,8 @@ const getRedditParlayRecord = async () => {
         count(*) FILTER (WHERE status = 'won')::int AS wins,
         count(*) FILTER (WHERE status = 'lost')::int AS losses,
         coalesce(sum(profit_units), 0)::text AS net_units
-      FROM reddit_parlay_track
-      WHERE locked_at IS NOT NULL
+      FROM reddit_post_snapshot
+      WHERE post_type = 'parlay'
         AND status IN ('won', 'lost', 'push', 'void')
     `
   );
@@ -988,7 +1401,7 @@ const settleTrackedRedditAllPicks = async () => {
 };
 
 const getRedditAllPickRecord = async () => {
-  await settleTrackedRedditAllPicks();
+  await settleRedditPostSnapshots();
   const result = await query<{
     wins: number;
     losses: number;
@@ -999,10 +1412,10 @@ const getRedditAllPickRecord = async () => {
         count(*) FILTER (WHERE rapl.status = 'won')::int AS wins,
         count(*) FILTER (WHERE rapl.status = 'lost')::int AS losses,
         coalesce(sum(rapl.profit_units), 0)::text AS net_units
-      FROM reddit_all_pick_leg_track rapl
-      JOIN reddit_all_pick_track rapt ON rapt.id = rapl.all_pick_id
-      WHERE rapt.locked_at IS NOT NULL
-        AND rapt.pick_date >= ((now() AT TIME ZONE 'America/Chicago')::date - interval '7 days')
+      FROM reddit_post_pick_snapshot rapl
+      JOIN reddit_post_snapshot rapt ON rapt.id = rapl.reddit_post_id
+      WHERE rapt.post_type = 'all'
+        AND rapt.post_date >= ((now() AT TIME ZONE 'America/Chicago')::date - interval '7 days')
         AND rapl.status IN ('won', 'lost', 'push', 'void')
     `
   );
@@ -1249,40 +1662,40 @@ const redditLockPayload = ({
 };
 
 export const getTodayRedditLockStatus = async () => {
-  const [single, parlay, all] = await Promise.all([
-    selectTodayRedditPick(),
-    selectTodayRedditParlay(),
-    selectTodayRedditAllPicks()
+  const [singleSnapshot, parlaySnapshot, allSnapshot] = await Promise.all([
+    selectRedditPostSnapshot("single"),
+    selectRedditPostSnapshot("parlay"),
+    selectRedditPostSnapshot("all")
   ]);
   return {
-    single: single.rows[0]
+    single: singleSnapshot
       ? redditLockPayload({
         postType: "single",
-        id: single.rows[0].id,
-        lockedAt: single.rows[0].locked_at,
-        legs: 1,
-        title: single.rows[0].locked_title,
-        body: single.rows[0].locked_body
+        id: singleSnapshot.post.id,
+        lockedAt: singleSnapshot.post.locked_at,
+        legs: singleSnapshot.picks.length,
+        title: singleSnapshot.post.title,
+        body: singleSnapshot.post.body
       })
       : null,
-    parlay: parlay
+    parlay: parlaySnapshot
       ? redditLockPayload({
         postType: "parlay",
-        id: parlay.parlay.id,
-        lockedAt: parlay.parlay.locked_at,
-        legs: parlay.legs.length,
-        title: parlay.parlay.locked_title,
-        body: parlay.parlay.locked_body
+        id: parlaySnapshot.post.id,
+        lockedAt: parlaySnapshot.post.locked_at,
+        legs: parlaySnapshot.picks.length,
+        title: parlaySnapshot.post.title,
+        body: parlaySnapshot.post.body
       })
       : null,
-    all: all
+    all: allSnapshot
       ? redditLockPayload({
         postType: "all",
-        id: all.allPick.id,
-        lockedAt: all.allPick.locked_at,
-        legs: all.legs.length,
-        title: all.allPick.locked_title,
-        body: all.allPick.locked_body
+        id: allSnapshot.post.id,
+        lockedAt: allSnapshot.post.locked_at,
+        legs: allSnapshot.picks.length,
+        title: allSnapshot.post.title,
+        body: allSnapshot.post.body
       })
       : null
   };
@@ -1596,19 +2009,20 @@ export const lockRedditPostTracking = async ({
   body: string;
 }) => {
   if (postType === "all") {
+    const lockedSnapshot = await selectRedditPostSnapshot("all");
+    if (lockedSnapshot) {
+      return {
+        postType,
+        id: lockedSnapshot.post.id,
+        lockedAt: lockedSnapshot.post.locked_at,
+        legs: lockedSnapshot.picks.length,
+        title: lockedSnapshot.post.title,
+        body: lockedSnapshot.post.body
+      };
+    }
     const current = await getOrCreateTodayRedditAllPicks();
     if (!current || !current.legs.length) {
       throw new Error("No Chine all-picks card is available to lock.");
-    }
-    if (current.allPick.locked_at && current.allPick.locked_title && current.allPick.locked_body) {
-      return {
-        postType,
-        id: current.allPick.id,
-        lockedAt: current.allPick.locked_at,
-        legs: current.legs.length,
-        title: current.allPick.locked_title,
-        body: current.allPick.locked_body
-      };
     }
     const bodyPickCount = countAllPicksInPostBody(body);
     if (bodyPickCount === 0) {
@@ -1619,174 +2033,110 @@ export const lockRedditPostTracking = async ({
         `The Chine all-picks post body has ${bodyPickCount} picks, but tracking has ${current.legs.length}. Refresh the preview before locking.`
       );
     }
-    const result = await query<{ id: string; lockedAt: Date; title: string | null; body: string | null }>(
-      `
-        UPDATE reddit_all_pick_track
-        SET locked_at = COALESCE(locked_at, now()),
-            locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
-            locked_title = $3,
-            locked_body = $4
-        WHERE id = $1
-        RETURNING id, locked_at AS "lockedAt", locked_title AS title, locked_body AS body
-      `,
-      [current.allPick.id, userId, title, body]
-    );
+    const snapshot = await createRedditPostSnapshot({
+      userId,
+      postType: "all",
+      title,
+      body,
+      units: 1,
+      picks: current.legs
+    });
     return {
       postType,
-      id: result.rows[0].id,
-      lockedAt: result.rows[0].lockedAt,
-      legs: current.legs.length,
-      title: result.rows[0].title ?? "",
-      body: result.rows[0].body ?? ""
+      id: snapshot.post.id,
+      lockedAt: snapshot.post.locked_at,
+      legs: snapshot.picks.length,
+      title: snapshot.post.title,
+      body: snapshot.post.body
     };
   }
 
   if (postType === "parlay") {
+    const lockedSnapshot = await selectRedditPostSnapshot("parlay");
+    if (lockedSnapshot) {
+      return {
+        postType,
+        id: lockedSnapshot.post.id,
+        lockedAt: lockedSnapshot.post.locked_at,
+        legs: lockedSnapshot.picks.length,
+        title: lockedSnapshot.post.title,
+        body: lockedSnapshot.post.body
+      };
+    }
     const current = await getOrCreateTodayRedditParlay();
     if (!current || current.legs.length !== 3) {
       throw new Error("No complete 3-team Chine parlay is available to lock.");
     }
-    const result = await query<{ id: string; lockedAt: Date; title: string | null; body: string | null }>(
-      `
-        UPDATE reddit_parlay_track
-        SET locked_at = COALESCE(locked_at, now()),
-            locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
-            locked_title = $3,
-            locked_body = $4
-        WHERE id = $1
-        RETURNING id, locked_at AS "lockedAt", locked_title AS title, locked_body AS body
-      `,
-      [current.parlay.id, userId, title, body]
-    );
+    const snapshot = await createRedditPostSnapshot({
+      userId,
+      postType: "parlay",
+      title,
+      body,
+      units: Number(current.parlay.units),
+      picks: current.legs
+    });
     return {
       postType,
-      id: result.rows[0].id,
-      lockedAt: result.rows[0].lockedAt,
-      legs: current.legs.length,
-      title: result.rows[0].title ?? "",
-      body: result.rows[0].body ?? ""
+      id: snapshot.post.id,
+      lockedAt: snapshot.post.locked_at,
+      legs: snapshot.picks.length,
+      title: snapshot.post.title,
+      body: snapshot.post.body
     };
   }
 
+  const lockedSnapshot = await selectRedditPostSnapshot("single");
+  if (lockedSnapshot) {
+    return {
+      postType,
+      id: lockedSnapshot.post.id,
+      lockedAt: lockedSnapshot.post.locked_at,
+      legs: lockedSnapshot.picks.length,
+      title: lockedSnapshot.post.title,
+      body: lockedSnapshot.post.body
+    };
+  }
   const current = await getOrCreateTodayRedditPick();
   if (!current) {
     throw new Error("No Chine single pick is available to lock.");
   }
-  const result = await query<{ id: string; lockedAt: Date; title: string | null; body: string | null }>(
-    `
-      UPDATE reddit_pick_track
-      SET locked_at = COALESCE(locked_at, now()),
-          locked_by_user_id = COALESCE(locked_by_user_id, $2::uuid),
-          locked_title = $3,
-          locked_body = $4
-      WHERE id = $1
-      RETURNING id, locked_at AS "lockedAt", locked_title AS title, locked_body AS body
-    `,
-    [current.id, userId, title, body]
-  );
+  const snapshot = await createRedditPostSnapshot({
+    userId,
+    postType: "single",
+    title,
+    body,
+    units: Number(current.units),
+    picks: [current]
+  });
   return {
     postType,
-    id: result.rows[0].id,
-    lockedAt: result.rows[0].lockedAt,
-    legs: 1,
-    title: result.rows[0].title ?? "",
-    body: result.rows[0].body ?? ""
+    id: snapshot.post.id,
+    lockedAt: snapshot.post.locked_at,
+    legs: snapshot.picks.length,
+    title: snapshot.post.title,
+    body: snapshot.post.body
   };
 };
 
 const getPreviousRedditPick = async () => {
-  await settleTrackedRedditPicks();
-  const result = await query<RedditRecordPickRow>(
-    `
-      SELECT
-        rpt.id,
-        rpt.ai_pick_id,
-        rpt.game_line_id,
-        rpt.pick_date::text,
-        rpt.selected_team,
-        rpt.status,
-        rpt.profit_units,
-        rpt.decimal_odds,
-        rpt.units,
-        gl.sport::text AS sport,
-        gl.league,
-        gl.market_key,
-        gl.spread,
-        COALESCE(rpt.odds_american, gl.odds_american) AS odds_american,
-        gl.away_team,
-        gl.home_team,
-        gl.starts_at,
-        p.confidence,
-        p.features->>'edge' AS edge,
-        p.features,
-        p.reasons,
-        p.explanation
-      FROM reddit_pick_track rpt
-      JOIN ai_pick p ON p.id = rpt.ai_pick_id
-      JOIN game_line gl ON gl.id = rpt.game_line_id
-      WHERE rpt.pick_date < (now() AT TIME ZONE 'America/Chicago')::date
-        AND rpt.locked_at IS NOT NULL
-        AND rpt.status IN ('won', 'lost', 'push', 'void')
-      ORDER BY rpt.pick_date DESC
-      LIMIT 1
-    `
-  );
-  return result.rows[0] ?? null;
+  const snapshot = await selectPreviousRedditPostSnapshot("single");
+  return snapshot?.picks[0] ?? null;
 };
 
 const getPreviousRedditParlay = async () => {
-  await settleTrackedRedditParlays();
-  const parlay = await query<RedditParlayRow>(
-    `
-      SELECT id, pick_date::text, units, status, profit_units
-      FROM reddit_parlay_track
-      WHERE pick_date < (now() AT TIME ZONE 'America/Chicago')::date
-        AND locked_at IS NOT NULL
-      ORDER BY pick_date DESC
-      LIMIT 1
-    `
-  );
-  if (!parlay.rows[0]) {
+  const snapshot = await selectPreviousRedditPostSnapshot("parlay");
+  if (!snapshot) {
     return null;
   }
-  const legs = await query<RedditParlayLegRow>(
-    `
-      SELECT
-        rplt.id,
-        rplt.parlay_id,
-        rplt.ai_pick_id,
-        rplt.game_line_id,
-        rpt.pick_date::text,
-        rplt.selected_team,
-        rplt.leg_index,
-        rplt.status,
-        rplt.decimal_odds,
-        rpt.units,
-        gl.sport::text AS sport,
-        gl.league,
-        gl.market_key,
-        gl.spread,
-        rplt.odds_american,
-        gl.away_team,
-        gl.home_team,
-        gl.starts_at,
-        p.confidence,
-        p.features->>'edge' AS edge,
-        p.features,
-        p.reasons,
-        p.explanation
-      FROM reddit_parlay_leg_track rplt
-      JOIN reddit_parlay_track rpt ON rpt.id = rplt.parlay_id
-      JOIN ai_pick p ON p.id = rplt.ai_pick_id
-      JOIN game_line gl ON gl.id = rplt.game_line_id
-      WHERE rplt.parlay_id = $1
-      ORDER BY rplt.leg_index ASC
-    `,
-    [parlay.rows[0].id]
-  );
   return {
-    parlay: parlay.rows[0],
-    legs: legs.rows
+    parlay: {
+      id: snapshot.post.id,
+      pick_date: snapshot.post.post_date,
+      units: snapshot.post.units,
+      status: snapshot.post.status,
+      profit_units: snapshot.post.profit_units
+    },
+    legs: snapshot.picks.map((pick) => ({ ...pick, parlay_id: snapshot.post.id }))
   };
 };
 
@@ -1874,28 +2224,33 @@ const allPickResultLine = (pick: Pick<RedditAllPickLegRow, "selected_team" | "ma
   `${trackedPickSymbol(pick.status)} ${trackedPickLine(pick)} (${formatSignedUnits(Number(pick.profit_units))})`;
 
 const getYesterdayRedditAllPicks = async () => {
-  await settleTrackedRedditAllPicks();
-  const allPick = await query<RedditAllPickRow>(
-    `
-      SELECT id, pick_date::text, locked_at
-      FROM reddit_all_pick_track
-      WHERE pick_date = ((now() AT TIME ZONE 'America/Chicago')::date - interval '1 day')
-        AND locked_at IS NOT NULL
-      LIMIT 1
-    `
-  );
-  if (!allPick.rows[0]) {
+  await settleRedditPostSnapshots();
+  const snapshot = await selectRedditPostSnapshot("all", "((now() AT TIME ZONE 'America/Chicago')::date - interval '1 day')");
+  if (!snapshot) {
     return null;
   }
-  const legs = await selectRedditAllPickLegs(allPick.rows[0].id);
   return {
-    allPick: allPick.rows[0],
-    legs: legs.rows
+    allPick: {
+      id: snapshot.post.id,
+      pick_date: snapshot.post.post_date,
+      locked_at: snapshot.post.locked_at,
+      locked_title: snapshot.post.title,
+      locked_body: snapshot.post.body
+    },
+    legs: snapshot.picks.map((pick) => ({ ...pick, all_pick_id: snapshot.post.id }))
   };
 };
 
 export const buildRedditPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
   const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
+  const lockedSnapshot = await selectRedditPostSnapshot("single");
+  if (lockedSnapshot) {
+    return {
+      subreddit,
+      title: lockedSnapshot.post.title,
+      body: lockedSnapshot.post.body
+    };
+  }
   const today = new Date().toLocaleDateString("en-US", {
     timeZone: "America/Chicago",
     month: "short",
@@ -2119,6 +2474,14 @@ const getMondayAllPicksRecapPrefix = async () => {
 
 export const buildRedditAllPicksPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
   const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
+  const lockedSnapshot = await selectRedditPostSnapshot("all");
+  if (lockedSnapshot) {
+    return {
+      subreddit,
+      title: lockedSnapshot.post.title,
+      body: lockedSnapshot.post.body
+    };
+  }
   const today = new Date().toLocaleDateString("en-US", {
     timeZone: "America/Chicago",
     month: "short",
@@ -2203,6 +2566,14 @@ export const buildRedditAllPicksPreview = async (subredditInput?: string): Promi
 
 export const buildRedditParlayPreview = async (subredditInput?: string): Promise<RedditPostPreview> => {
   const subreddit = cleanSubreddit(subredditInput || config.redditDefaultSubreddits[0] || "sportsbook");
+  const lockedSnapshot = await selectRedditPostSnapshot("parlay");
+  if (lockedSnapshot) {
+    return {
+      subreddit,
+      title: lockedSnapshot.post.title,
+      body: lockedSnapshot.post.body
+    };
+  }
   const today = new Date().toLocaleDateString("en-US", {
     timeZone: "America/Chicago",
     month: "short",
