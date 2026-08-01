@@ -1899,11 +1899,28 @@ function App() {
 
   const canManageReddit = Boolean(user && (user.role === "admin" || isNateRakelAccount));
 
+  const hydrateRedditLockFields = (lock: RedditLockResult | null | undefined) => {
+    if (!lock?.title || !lock.body) return;
+    if (lock.postType === "parlay") {
+      setRedditParlayTitle(lock.title);
+      setRedditParlayBody(lock.body);
+    } else if (lock.postType === "all") {
+      setRedditAllTitle(lock.title);
+      setRedditAllBody(lock.body);
+    } else {
+      setRedditTitle(lock.title);
+      setRedditBody(lock.body);
+    }
+  };
+
   const applyRedditStatus = (status: RedditStatus) => {
     setRedditStatus(status);
     setRedditSingleLock(status.locks?.single ?? null);
     setRedditParlayLock(status.locks?.parlay ?? null);
     setRedditAllLock(status.locks?.all ?? null);
+    hydrateRedditLockFields(status.locks?.single);
+    hydrateRedditLockFields(status.locks?.parlay);
+    hydrateRedditLockFields(status.locks?.all);
     if (!redditSubreddit && status.defaultSubreddits[0]) {
       setRedditSubreddit(status.defaultSubreddits[0]);
     }
@@ -3339,7 +3356,7 @@ function App() {
         method: "POST",
         body: JSON.stringify({ postType, title, body })
       }, token);
-      const lockedResult = { ...result, title, body };
+      const lockedResult = { ...result, title: result.title ?? title, body: result.body ?? body };
       if (isParlay) {
         setRedditParlayLock(lockedResult);
       } else if (isAll) {
@@ -3347,6 +3364,7 @@ function App() {
       } else {
         setRedditSingleLock(lockedResult);
       }
+      hydrateRedditLockFields(lockedResult);
       const lockTime = new Date(result.lockedAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit" });
       setRedditNotice(isParlay
         ? `3-team parlay tracking locked at ${lockTime}. Safe to post.`
