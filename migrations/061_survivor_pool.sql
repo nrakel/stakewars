@@ -64,5 +64,5 @@ CREATE INDEX IF NOT EXISTS survivor_pick_user_idx
   ON survivor_pick (user_id, week_start DESC);
 
 INSERT INTO survivor_pool (id, name, season, starts_on)
-SELECT gen_random_uuid(), 'StakeWars NFL Survivor', 2026, '2026-08-03'::date
+SELECT gen_random_uuid(), 'StakeWars NFL Survivor', 2026, '2026-09-07'::date
 WHERE NOT EXISTS (SELECT 1 FROM survivor_pool WHERE status = 'active');

@@ -194,7 +194,10 @@ const isInContestWeek = (startsAt: Date, weekStart: string) => {
   return startsOn >= weekStart && startsOn < addDays(weekStart, 7);
 };
 
-const currentSurvivorWeekStart = () => currentWeekStart();
+const currentSurvivorWeekStart = (pool: { startsOn: string }) => {
+  const weekStart = currentWeekStart();
+  return weekStart < pool.startsOn ? pool.startsOn : weekStart;
+};
 
 const getActiveSurvivorPool = async () => {
   const result = await query<{
@@ -1352,7 +1355,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active Survivor pool is available." });
         return;
       }
-      const weekStart = currentSurvivorWeekStart();
+      const weekStart = currentSurvivorWeekStart(pool);
       const weekEnd = addDays(weekStart, 7);
 
       const entryResult = await query<{
@@ -1600,7 +1603,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active Survivor pool is available." });
         return;
       }
-      const weekStart = currentSurvivorWeekStart();
+      const weekStart = currentSurvivorWeekStart(pool);
       const result = await transaction(async (client) => {
         const entryResult = await client.query<{ id: string; status: "active" | "eliminated" | "winner" }>(
           "SELECT id, status FROM survivor_entry WHERE pool_id = $1 AND user_id = $2 FOR UPDATE",
@@ -1705,7 +1708,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active Survivor pool is available." });
         return;
       }
-      const weekStart = currentSurvivorWeekStart();
+      const weekStart = currentSurvivorWeekStart(pool);
       const standingsResult = await query<{
         entryId: string;
         userId: string;
@@ -1806,7 +1809,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active Survivor pool is available." });
         return;
       }
-      const weekStart = currentSurvivorWeekStart();
+      const weekStart = currentSurvivorWeekStart(pool);
       const weekEnd = addDays(weekStart, 7);
       const pendingResult = await query<{
         id: string;
