@@ -2,13 +2,13 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, WagerKind } from "../shared/types";
+import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "ai-picks" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
-type AdminSection = "traffic" | "support" | "prizes" | "model" | "reddit" | "users";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
+type AdminSection = "traffic" | "support" | "survivor" | "prizes" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 const MAX_CHECKED_LEGS = 8;
@@ -151,6 +151,8 @@ type VisitorMetrics = {
   rows: VisitorMetricRow[];
   qrCampaigns: QrCampaignMetricRow[];
 };
+
+type AdminSurvivorState = Pick<SurvivorState, "pool" | "currentWeekStart" | "standings">;
 
 type SupportCategory = "account_email" | "rewards_eligibility" | "picks_scoring" | "technical_problem" | "other";
 
@@ -361,6 +363,38 @@ const shortDateTime = (value: string) => new Date(value).toLocaleString(undefine
   hour: "numeric",
   minute: "2-digit"
 });
+const lineDateTime = (value: string) => {
+  const date = new Date(value);
+  const dateLabel = date.toLocaleDateString("en-US", { month: "numeric", day: "2-digit" });
+  const timeLabel = date.toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
+  return `${dateLabel} • ${timeLabel}`;
+};
+const centralDate = (date = new Date()) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
+const addDays = (date: string, days: number) => {
+  const copy = new Date(`${date}T00:00:00Z`);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy.toISOString().slice(0, 10);
+};
+const currentContestWeekStart = () => {
+  const today = centralDate();
+  const date = new Date(`${today}T00:00:00Z`);
+  const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+  return addDays(today, -daysSinceMonday);
+};
+const isInCurrentContestWeek = (value: string) => {
+  const startsOn = centralDate(new Date(value));
+  const weekStart = currentContestWeekStart();
+  return startsOn >= weekStart && startsOn < addDays(weekStart, 7);
+};
 const openBetLegTiming = (leg: OpenBet["legs"][number]) => {
   if (
     leg.liveInPlay
@@ -678,6 +712,41 @@ const roundRobinPayoutCents = (stakePerWayCents: number, odds: number[], maxLegs
   return total;
 };
 
+const roundRobinCurrentMaxPayoutCents = (bet: OpenBet) => {
+  const stakePerWay = bet.roundRobinStakePerWayCents ?? bet.stakeCents;
+  const minLegs = bet.roundRobinMinLegs ?? 2;
+  const maxLegs = Math.min(bet.roundRobinMaxLegs ?? bet.legs.length, bet.legs.length);
+  let total = 0;
+
+  const visit = (start: number, size: number, selected: OpenBet["legs"]) => {
+    if (selected.length === size) {
+      if (selected.some((leg) => leg.status === "lost")) {
+        return;
+      }
+      const winningOdds = selected
+        .filter((leg) => leg.status === "won" || leg.status === "pending")
+        .map((leg) => leg.oddsAmerican);
+      total += winningOdds.length > 0 ? estimatePayoutCents(stakePerWay, winningOdds) : stakePerWay;
+      return;
+    }
+
+    for (let index = start; index <= bet.legs.length - (size - selected.length); index += 1) {
+      visit(index + 1, size, [...selected, bet.legs[index]]);
+    }
+  };
+
+  for (let size = minLegs; size <= maxLegs; size += 1) {
+    visit(0, size, []);
+  }
+
+  return total;
+};
+
+const partiallySettledRoundRobin = (bet: OpenBet) =>
+  bet.kind === "round_robin"
+  && bet.legs.some((leg) => leg.status !== "pending")
+  && bet.legs.some((leg) => leg.status === "pending");
+
 const urlBase64ToUint8Array = (base64String: string) => {
   const padding = "=".repeat((4 - base64String.length % 4) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -732,6 +801,7 @@ const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: S
   if (page === "contact") return "Contact Us";
   if (page === "install") return "Install App";
   if (page === "ai-picks") return "Daily Chine Picks";
+  if (page === "survivor") return "NFL Survivor";
   if (page === "tower") return "Tower";
   if (page === "admin") return "Admin";
   return page.charAt(0).toUpperCase() + page.slice(1);
@@ -883,6 +953,11 @@ function RulesContent() {
         <h2>Referral Boosts</h2>
         <p>A referral qualifies when a new user registers through your referral link and places at least one valid wager. Each qualified referral earns one $1,000 Bankroll Boost. Players may use up to two boosts per contest week.</p>
         <p>Referral boosts must be activated before placing your first wager of the contest week. If you have an available boost and continue with your first wager without activating it, you waive referral boosts for that week. Boosts increase current bankroll only and do not change starting bankroll or weekly eligibility requirements.</p>
+      </section>
+      <section>
+        <h2>NFL Survivor</h2>
+        <p>NFL Survivor is independent from the weekly StakeWars bankroll contest. Each active player may pick one NFL team per week. If that team wins, the player advances. If that team loses, ties, or the player misses the weekly pick, the player is eliminated.</p>
+        <p>A team can only be used once per Survivor pool. Picks may be changed until that selected team's kickoff, then they lock. Other players' current-week picks stay hidden until kickoff.</p>
       </section>
       <section>
         <h2>Baseball Settlement</h2>
@@ -1408,6 +1483,9 @@ function App() {
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
   const [aiPicks, setAiPicks] = useState<DailyAiPick[]>([]);
   const [dailyChineParlay, setDailyChineParlay] = useState<DailyChineParlay | null>(null);
+  const [survivorState, setSurvivorState] = useState<SurvivorState | null>(null);
+  const [survivorNotice, setSurvivorNotice] = useState("");
+  const [survivorPending, setSurvivorPending] = useState(false);
   const [towerState, setTowerState] = useState<TowerState | null>(null);
   const [towerValueWager, setTowerValueWager] = useState("5");
   const [towerHeightWager, setTowerHeightWager] = useState("5");
@@ -1478,6 +1556,8 @@ function App() {
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
   const [visitorMetrics, setVisitorMetrics] = useState<VisitorMetrics | null>(null);
   const [visitorMetricsNotice, setVisitorMetricsNotice] = useState("");
+  const [adminSurvivorState, setAdminSurvivorState] = useState<AdminSurvivorState | null>(null);
+  const [adminSurvivorNotice, setAdminSurvivorNotice] = useState("");
   const [adminPrizes, setAdminPrizes] = useState<WeeklyPrize[]>([]);
   const [adminPrizeWeekStart, setAdminPrizeWeekStart] = useState("");
   const [adminPrizeCash, setAdminPrizeCash] = useState("10.00");
@@ -1556,11 +1636,12 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
-        api<ReferralInfo>("/me/referral", {}, authToken)
+        api<ReferralInfo>("/me/referral", {}, authToken),
+        api<SurvivorState>("/survivor", {}, authToken).catch(() => null)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1574,6 +1655,7 @@ function App() {
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
       setReferralInfo(referralResult);
+      setSurvivorState(survivorResult);
       if (TOWER_FEATURE_ENABLED) {
         api<TowerState>("/tower/state", {}, authToken)
           .then((result) => setTowerState(result))
@@ -1961,6 +2043,8 @@ function App() {
       setUserDisplayMapNotice("");
       setVisitorMetrics(null);
       setVisitorMetricsNotice("");
+      setAdminSurvivorState(null);
+      setAdminSurvivorNotice("");
       setAdminSupportConversations([]);
       setAdminPrizes([]);
       setChineModelAudit(null);
@@ -1970,13 +2054,15 @@ function App() {
     Promise.all([
       api<{ users: UserDisplayMapRow[] }>("/admin/user-display-map", {}, token),
       api<VisitorMetrics>("/admin/visitors", {}, token),
+      api<AdminSurvivorState>("/admin/survivor", {}, token).catch(() => null),
       api<{ conversations: SupportConversation[] }>("/admin/support/conversations?status=open", {}, token),
       api<AdminPrizesResponse>("/admin/prizes", {}, token),
       api<ChineModelAudit>("/admin/chine-model-audit", {}, token)
     ])
-      .then(([usersResult, visitorsResult, supportResult, prizesResult, auditResult]) => {
+      .then(([usersResult, visitorsResult, survivorResult, supportResult, prizesResult, auditResult]) => {
         setUserDisplayMap(usersResult.users);
         setVisitorMetrics(visitorsResult);
+        setAdminSurvivorState(survivorResult);
         setAdminSupportConversations(supportResult.conversations);
         setAdminPrizes(prizesResult.prizes);
         setChineModelAudit(auditResult);
@@ -2144,6 +2230,10 @@ function App() {
   const sportsWithLines = useMemo(() => new Set(games.map((game) => game.sport as ScoreboardSport)), [games]);
   const firstAvailableSport = sportsMenu.find((sport) => sportsWithLines.has(sport));
   const selectedSportGames = useMemo(() => games.filter((game) => game.sport === lineSport), [games, lineSport]);
+  const hasFutureWeekLines = useMemo(
+    () => selectedSportGames.some((game) => !isInCurrentContestWeek(game.startsAt)),
+    [selectedSportGames]
+  );
   const savedEmail = user?.email ?? "";
   const typedEmail = email.trim();
   const emailNeedsSave = typedEmail !== savedEmail;
@@ -2806,6 +2896,94 @@ function App() {
     }
   };
 
+  const refreshSurvivor = async () => {
+    if (!token) return;
+    setSurvivorNotice("");
+    try {
+      const result = await api<SurvivorState>("/survivor", {}, token);
+      setSurvivorState(result);
+      setSurvivorNotice("Survivor refreshed.");
+    } catch (err) {
+      setSurvivorNotice((err as Error).message);
+    }
+  };
+
+  const joinSurvivor = async () => {
+    if (!token) return;
+    setSurvivorPending(true);
+    setSurvivorNotice("");
+    try {
+      await api<{ ok: boolean }>("/survivor/entry", { method: "POST" }, token);
+      const result = await api<SurvivorState>("/survivor", {}, token);
+      setSurvivorState(result);
+      setSurvivorNotice("You joined NFL Survivor.");
+    } catch (err) {
+      setSurvivorNotice((err as Error).message);
+    } finally {
+      setSurvivorPending(false);
+    }
+  };
+
+  const selectSurvivorPick = async (gameLineId: string | null, selectedTeam: string) => {
+    if (!token || !gameLineId) return;
+    setSurvivorPending(true);
+    setSurvivorNotice("");
+    try {
+      await api<{ pick: { id: string } }>("/survivor/picks", {
+        method: "POST",
+        body: JSON.stringify({ gameLineId, selectedTeam })
+      }, token);
+      const result = await api<SurvivorState>("/survivor", {}, token);
+      setSurvivorState(result);
+      setSurvivorNotice(`${selectedTeam} saved as your Survivor pick.`);
+    } catch (err) {
+      setSurvivorNotice((err as Error).message);
+    } finally {
+      setSurvivorPending(false);
+    }
+  };
+
+  const refreshAdminSurvivor = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminSurvivorNotice("");
+    try {
+      const result = await api<AdminSurvivorState>("/admin/survivor", {}, token);
+      setAdminSurvivorState(result);
+      setAdminSurvivorNotice("Survivor admin refreshed.");
+    } catch (err) {
+      setAdminSurvivorNotice((err as Error).message);
+    }
+  };
+
+  const settleAdminSurvivor = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminSurvivorNotice("");
+    try {
+      const result = await api<{ settled: number; missed: number }>("/admin/survivor/settle", { method: "POST" }, token);
+      await refreshAdminSurvivor();
+      await refreshSurvivor().catch(() => undefined);
+      setAdminSurvivorNotice(`Settled ${result.settled} pick(s). Eliminated ${result.missed} missed pick(s).`);
+    } catch (err) {
+      setAdminSurvivorNotice((err as Error).message);
+    }
+  };
+
+  const overrideAdminSurvivorPick = async (pickId: string, status: "won" | "lost" | "tie" | "void") => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminSurvivorNotice("");
+    try {
+      await api<{ pick: { id: string; status: string } }>(`/admin/survivor/picks/${pickId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, note: "Manual Survivor admin override" })
+      }, token);
+      await refreshAdminSurvivor();
+      await refreshSurvivor().catch(() => undefined);
+      setAdminSurvivorNotice(`Pick marked ${status}.`);
+    } catch (err) {
+      setAdminSurvivorNotice((err as Error).message);
+    }
+  };
+
   const refreshChineModelAudit = async () => {
     if (!token || !isNateRakelAccount) return;
     setChineModelAuditNotice("");
@@ -2910,6 +3088,154 @@ function App() {
     if (result === "push") return `returns ${money(wagerCents)} • net $0.00`;
     if (result === "void") return `refunded ${money(wagerCents)} • net $0.00`;
     return "pending";
+  };
+
+  const survivorStatusLabel = (status: string) => {
+    switch (status) {
+      case "won": return "Won";
+      case "lost": return "Lost";
+      case "tie": return "Tie - eliminated";
+      case "void": return "Void";
+      case "eliminated": return "Eliminated";
+      case "winner": return "Winner";
+      default: return status.charAt(0).toUpperCase() + status.slice(1);
+    }
+  };
+
+  const SurvivorPage = () => {
+    const entry = survivorState?.entry ?? null;
+    const usedTeams = new Set(entry?.usedTeams ?? []);
+    const currentPick = entry?.currentPick ?? null;
+    const currentPickLocked = Boolean(currentPick?.locked);
+    const activeEntry = entry?.status === "active";
+
+    return (
+      <div className="survivor-page">
+        <div className="panel page-panel survivor-hero">
+          <div className="panel-title">
+            <Trophy size={20} />
+            <h2>NFL Survivor</h2>
+          </div>
+          <p className="muted">Pick one NFL team each week. Win and advance. Lose, tie, or miss a pick and you are eliminated. You cannot use the same team twice.</p>
+          {!survivorState ? (
+            <div className="notification-actions">
+              <button className="secondary-action" onClick={refreshSurvivor}>Load Survivor</button>
+            </div>
+          ) : !entry ? (
+            <div className="notification-card">
+              <div>
+                <strong>Join the pool</strong>
+                <span>Email verification is required so Survivor entries stay tied to real accounts.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="primary" disabled={survivorPending || !user?.emailVerified} onClick={joinSurvivor}>Join Survivor</button>
+              </div>
+              {!user?.emailVerified && <p className="error">Verify your email on the Account page before joining.</p>}
+            </div>
+          ) : (
+            <div className="survivor-status-grid">
+              <div className="metric-card">
+                <span>Status</span>
+                <strong>{survivorStatusLabel(entry.status)}</strong>
+              </div>
+              <div className="metric-card">
+                <span>This week</span>
+                <strong>{weekRangeLabel(survivorState.currentWeekStart)}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Current pick</span>
+                <strong>{currentPick ? currentPick.selectedTeam : "No pick"}</strong>
+                {currentPick && <small>{currentPickLocked ? "Locked" : "Editable until kickoff"} • {shortDateTime(currentPick.startsAt)}</small>}
+              </div>
+            </div>
+          )}
+          {survivorNotice && <p className={survivorNotice.includes("saved") || survivorNotice.includes("joined") || survivorNotice.includes("refreshed") ? "success" : "error"}>{survivorNotice}</p>}
+        </div>
+
+        {survivorState && entry && (
+          <>
+            <div className="panel page-panel survivor-games">
+              <div className="panel-title">
+                <ClipboardList size={20} />
+                <h2>Pick This Week</h2>
+              </div>
+              {!activeEntry && <p className="error">This Survivor entry is no longer active.</p>}
+              {currentPickLocked && <p className="muted">Your pick is locked because kickoff has passed.</p>}
+              <div className="survivor-game-list">
+                {survivorState.games.map((game) => {
+                  const started = new Date(game.startsAt).getTime() <= currentTime;
+                  const awayUsed = usedTeams.has(game.awayTeam) && currentPick?.selectedTeam !== game.awayTeam;
+                  const homeUsed = usedTeams.has(game.homeTeam) && currentPick?.selectedTeam !== game.homeTeam;
+                  return (
+                    <div key={game.eventKey} className="survivor-game-card">
+                      <div>
+                        <strong>{game.awayTeam} @ {game.homeTeam}</strong>
+                        <span>{shortDateTime(game.startsAt)}</span>
+                      </div>
+                      <div className="survivor-pick-buttons">
+                        <button
+                          className={currentPick?.selectedTeam === game.awayTeam ? "selected" : ""}
+                          disabled={survivorPending || !activeEntry || started || awayUsed || !game.awayLineId}
+                          onClick={() => selectSurvivorPick(game.awayLineId, game.awayTeam)}
+                        >
+                          {game.awayTeam}{awayUsed ? " (used)" : ""}
+                        </button>
+                        <button
+                          className={currentPick?.selectedTeam === game.homeTeam ? "selected" : ""}
+                          disabled={survivorPending || !activeEntry || started || homeUsed || !game.homeLineId}
+                          onClick={() => selectSurvivorPick(game.homeLineId, game.homeTeam)}
+                        >
+                          {game.homeTeam}{homeUsed ? " (used)" : ""}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {survivorState.games.length === 0 && <p className="muted">No NFL games are available for the current contest week yet.</p>}
+              </div>
+            </div>
+
+            <div className="panel page-panel survivor-standings">
+              <div className="panel-title">
+                <ShieldCheck size={20} />
+                <h2>Survivor Standings</h2>
+              </div>
+              <div className="user-map-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Player</th>
+                      <th>Status</th>
+                      <th>Picks</th>
+                      <th>This Week</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {survivorState.standings.map((standing) => (
+                      <tr key={standing.userId}>
+                        <td>{standing.displayName}</td>
+                        <td>{survivorStatusLabel(standing.status)}</td>
+                        <td>{standing.picksMade}</td>
+                        <td>
+                          {standing.currentPick
+                            ? `${standing.currentPick.displayTeam ?? "Hidden until kickoff"} (${survivorStatusLabel(standing.currentPick.status)})`
+                            : "No pick"}
+                        </td>
+                      </tr>
+                    ))}
+                    {survivorState.standings.length === 0 && (
+                      <tr>
+                        <td colSpan={4}>No Survivor entries yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
   };
 
   const TowerCardView = ({ card }: { card: TowerPublicCard }) => (
@@ -3479,6 +3805,7 @@ function App() {
             </div>
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
+          <button className={activePage === "survivor" ? "active" : ""} onClick={() => openPage("survivor")}><Trophy size={18} /> NFL Survivor</button>
           {TOWER_FEATURE_ENABLED && isNateRakelAccount && (
             <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
           )}
@@ -3524,14 +3851,19 @@ function App() {
                 <BarChart3 size={20} />
                 <h2>{lineSport} available lines</h2>
               </div>
+              {hasFutureWeekLines && (
+                <p className="line-week-notice">Lines for future weeks will become available during the appropriate contest week.</p>
+              )}
               <div className="line-list">
                 {selectedSportGames.length === 0 ? <p className="muted">No valid {lineSport} lines are currently available.</p> : selectedSportGames.map((game) => {
                   const started = gameHasStarted(game.startsAt);
+                  const futureWeek = !isInCurrentContestWeek(game.startsAt);
+                  const cardDisabled = started || futureWeek;
                   const confidenceLabel = aiConfidenceLabel(game);
                   return (
-                  <article className={`game-card ${started ? "started" : ""}`} key={game.eventKey}>
+                  <article className={`game-card ${started ? "started" : ""} ${futureWeek ? "future-week" : ""}`} key={game.eventKey}>
                     <div className="game-card-top">
-                      <span>{game.sport} • {new Date(game.startsAt).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}</span>
+                      <span>{game.sport} • {lineDateTime(game.startsAt)}</span>
                       {confidenceLabel && (
                         <span className="ai-confidence-pill">
                           <img src="/icons/icon-192.png" alt="" />
@@ -3539,6 +3871,7 @@ function App() {
                         </span>
                       )}
                       {started && <span className="game-started-pill">Started</span>}
+                      {!started && futureWeek && <span className="game-started-pill future-week-pill">Future week</span>}
                     </div>
                     <div className="game-card-matchup">
                       <div>
@@ -3553,13 +3886,13 @@ function App() {
                     </div>
                     <div className="game-card-markets">
                       <div className="market-side away">
-                        {orderedMarkets(game, "away").map((market) => renderMarketButton(market, market.awayLine, "away", started))}
+                        {orderedMarkets(game, "away").map((market) => renderMarketButton(market, market.awayLine, "away", cardDisabled))}
                       </div>
                       <div className="market-side neutral">
-                        {neutralMarkets(game, started)}
+                        {neutralMarkets(game, cardDisabled)}
                       </div>
                       <div className="market-side home">
-                        {orderedMarkets(game, "home").map((market) => renderMarketButton(market, market.homeLine, "home", started))}
+                        {orderedMarkets(game, "home").map((market) => renderMarketButton(market, market.homeLine, "home", cardDisabled))}
                       </div>
                     </div>
                     {hasConfirmedLineups(game) && (
@@ -3730,6 +4063,7 @@ function App() {
         )}
 
         {activePage === "tower" && TOWER_FEATURE_ENABLED && isNateRakelAccount && TowerPage()}
+        {activePage === "survivor" && SurvivorPage()}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">
@@ -3873,7 +4207,15 @@ function App() {
                 <article className="open-bet" key={bet.id}>
                   <div className="open-bet-head">
                     <strong>{bet.kind.replace("_", " ")}</strong>
-                    <span>{money(bet.stakeCents)} to win {money(Math.max(0, bet.potentialPayoutCents - bet.stakeCents))}</span>
+                    {partiallySettledRoundRobin(bet) ? (
+                      <span className="open-bet-round-robin-summary">
+                        <span>Wager: {money(bet.stakeCents)} / {money(bet.roundRobinStakePerWayCents ?? bet.stakeCents)} per way</span>
+                        <span>Max Win: {money(bet.potentialPayoutCents)}</span>
+                        <span>Current Max Win: {money(roundRobinCurrentMaxPayoutCents(bet))}</span>
+                      </span>
+                    ) : (
+                      <span>{money(bet.stakeCents)} to win {money(Math.max(0, bet.potentialPayoutCents - bet.stakeCents))}</span>
+                    )}
                   </div>
                   {bet.legs.map((leg) => {
                     const marketText = leg.marketKey === "h2h"
@@ -4001,6 +4343,7 @@ function App() {
               {([
                 ["traffic", "Traffic"],
                 ["support", "Support Chat"],
+                ["survivor", "Survivor"],
                 ["prizes", "Prizes"],
                 ["model", "Chine Model"],
                 ["reddit", "Reddit"],
@@ -4227,6 +4570,64 @@ function App() {
                 </div>
               </div>
               {supportNotice && <p className={supportNotice.includes("closed") || supportNotice.includes("opened") ? "success" : "error"}>{supportNotice}</p>}
+            </div>
+            )}
+            {adminSection === "survivor" && (
+            <div className="notification-card survivor-admin-card">
+              <div>
+                <strong>NFL Survivor</strong>
+                <span>View entries, settle completed NFL picks, and apply manual overrides when needed.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshAdminSurvivor}>Refresh Survivor</button>
+                <button className="primary" onClick={settleAdminSurvivor}>Settle available picks</button>
+              </div>
+              <div className="user-map-table visitor-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Player</th>
+                      <th>Status</th>
+                      <th>Picks</th>
+                      <th>This Week</th>
+                      <th>Kickoff</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(adminSurvivorState?.standings ?? []).map((standing) => (
+                      <tr key={standing.userId}>
+                        <td>{standing.displayName}</td>
+                        <td>{survivorStatusLabel(standing.status)}</td>
+                        <td>{standing.picksMade}</td>
+                        <td>
+                          {standing.currentPick
+                            ? `${standing.currentPick.selectedTeam} (${survivorStatusLabel(standing.currentPick.status)})`
+                            : "No pick"}
+                        </td>
+                        <td>{standing.currentPick ? shortDateTime(standing.currentPick.startsAt) : "-"}</td>
+                        <td>
+                          {standing.currentPick ? (
+                            <div className="survivor-admin-actions">
+                              <button onClick={() => overrideAdminSurvivorPick(standing.currentPick!.id, "won")}>Won</button>
+                              <button onClick={() => overrideAdminSurvivorPick(standing.currentPick!.id, "lost")}>Lost</button>
+                              <button onClick={() => overrideAdminSurvivorPick(standing.currentPick!.id, "tie")}>Tie</button>
+                              <button onClick={() => overrideAdminSurvivorPick(standing.currentPick!.id, "void")}>Void</button>
+                            </div>
+                          ) : "-"}
+                        </td>
+                      </tr>
+                    ))}
+                    {(!adminSurvivorState || adminSurvivorState.standings.length === 0) && (
+                      <tr>
+                        <td colSpan={6}>No Survivor entries yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {adminSurvivorState && <small className="muted">{adminSurvivorState.pool.name} • {weekRangeLabel(adminSurvivorState.currentWeekStart)}</small>}
+              {adminSurvivorNotice && <p className={adminSurvivorNotice.includes("refreshed") || adminSurvivorNotice.includes("Settled") || adminSurvivorNotice.includes("marked") ? "success" : "error"}>{adminSurvivorNotice}</p>}
             </div>
             )}
             {adminSection === "model" && (

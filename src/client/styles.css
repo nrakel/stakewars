@@ -930,6 +930,94 @@ textarea {
   border-bottom: 0;
 }
 
+.survivor-page {
+  display: grid;
+  gap: 16px;
+}
+
+.survivor-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card {
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcfa;
+  display: grid;
+  gap: 4px;
+}
+
+.metric-card span,
+.metric-card small {
+  color: #65736d;
+  font-size: 0.82rem;
+}
+
+.metric-card strong {
+  font-size: 1rem;
+}
+
+.survivor-game-list {
+  display: grid;
+  gap: 10px;
+}
+
+.survivor-game-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 1.2fr);
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.survivor-game-card span {
+  display: block;
+  color: #65736d;
+  font-size: 0.86rem;
+  margin-top: 3px;
+}
+
+.survivor-pick-buttons,
+.survivor-admin-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.survivor-pick-buttons button,
+.survivor-admin-actions button {
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: #fbfcfa;
+  color: #14201c;
+  font-weight: 800;
+}
+
+.survivor-pick-buttons button.selected {
+  border-color: #ff6900;
+  background: #ff6900;
+  color: #141414;
+}
+
+.survivor-pick-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 760px) {
+  .survivor-status-grid,
+  .survivor-game-card {
+    grid-template-columns: 1fr;
+  }
+}
+
 .link-button {
   appearance: none;
   border: 0;
@@ -1342,6 +1430,17 @@ textarea {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.line-week-notice {
+  margin: 12px 0 0;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  color: #9a3412;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
 .game-card {
   display: grid;
   gap: 8px;
@@ -1355,6 +1454,11 @@ textarea {
 .game-card.started {
   background: #f7f8f6;
   border-color: #9ca3af;
+}
+
+.game-card.future-week {
+  background: #fbfbf8;
+  border-color: #d1d5db;
 }
 
 .game-card-top,
@@ -1405,6 +1509,11 @@ textarea {
   padding: 3px 8px;
   font-size: 0.72rem;
   text-transform: uppercase;
+}
+
+.future-week-pill {
+  background: #ffedd5;
+  color: #9a3412;
 }
 
 .game-card-matchup {
@@ -2057,6 +2166,17 @@ textarea {
 
 .open-bet-head span,
 .open-bet-leg small {
+  color: #65736d;
+  font-size: 0.86rem;
+}
+
+.open-bet-head .open-bet-round-robin-summary {
+  display: grid;
+  gap: 3px;
+  text-transform: none;
+}
+
+.open-bet-round-robin-summary span {
   color: #65736d;
   font-size: 0.86rem;
 }

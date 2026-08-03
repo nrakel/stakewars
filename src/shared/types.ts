@@ -219,6 +219,9 @@ export type OpenBet = {
   kind: WagerKind;
   stakeCents: number;
   potentialPayoutCents: number;
+  roundRobinStakePerWayCents?: number | null;
+  roundRobinMinLegs?: number | null;
+  roundRobinMaxLegs?: number | null;
   placedAt: string;
   legs: OpenBetLeg[];
 };
@@ -238,4 +241,61 @@ export type SettledBet = {
   profitCents: number;
   placedAt: string;
   legs: SettledBetLeg[];
+};
+
+export type SurvivorStatus = "active" | "eliminated" | "winner";
+export type SurvivorPickStatus = "pending" | "won" | "lost" | "tie" | "no_pick" | "void";
+
+export type SurvivorGame = {
+  eventKey: string;
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+  awayLineId: string | null;
+  homeLineId: string | null;
+};
+
+export type SurvivorPick = {
+  id: string;
+  weekStart: string;
+  selectedTeam: string;
+  awayTeam: string;
+  homeTeam: string;
+  startsAt: string;
+  status: SurvivorPickStatus;
+  locked: boolean;
+  visible: boolean;
+  displayTeam: string | null;
+  ownerName?: string;
+};
+
+export type SurvivorEntry = {
+  id: string;
+  status: SurvivorStatus;
+  eliminatedWeekStart: string | null;
+  usedTeams: string[];
+  currentPick: SurvivorPick | null;
+};
+
+export type SurvivorStanding = {
+  userId: string;
+  displayName: string;
+  status: SurvivorStatus;
+  eliminatedWeekStart: string | null;
+  picksMade: number;
+  currentPick: SurvivorPick | null;
+};
+
+export type SurvivorState = {
+  pool: {
+    id: string;
+    name: string;
+    season: number;
+    status: "active" | "completed" | "archived";
+    startsOn: string;
+  };
+  currentWeekStart: string;
+  entry: SurvivorEntry | null;
+  games: SurvivorGame[];
+  standings: SurvivorStanding[];
 };

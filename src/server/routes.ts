@@ -124,6 +124,16 @@ const weeklyPrizeSchema = z.object({
   firstPlaceBonus: z.string().trim().max(240).nullable().optional()
 });
 
+const survivorPickSchema = z.object({
+  gameLineId: z.string().uuid(),
+  selectedTeam: z.string().trim().min(1).max(120)
+});
+
+const survivorAdminPickSchema = z.object({
+  status: z.enum(["won", "lost", "tie", "void"]),
+  note: z.string().trim().max(500).optional()
+});
+
 type WagerLineRow = {
   id: string;
   sport: SportKey;
@@ -182,6 +192,86 @@ const addDays = (date: string, days: number) => {
 const isInContestWeek = (startsAt: Date, weekStart: string) => {
   const startsOn = centralDate(startsAt);
   return startsOn >= weekStart && startsOn < addDays(weekStart, 7);
+};
+
+const currentSurvivorWeekStart = () => currentWeekStart();
+
+const getActiveSurvivorPool = async () => {
+  const result = await query<{
+    id: string;
+    name: string;
+    season: number;
+    status: "active" | "completed" | "archived";
+    startsOn: string;
+  }>(
+    `
+      SELECT id, name, season, status, starts_on::text AS "startsOn"
+      FROM survivor_pool
+      WHERE status = 'active'
+      ORDER BY starts_on DESC
+      LIMIT 1
+    `
+  );
+  return result.rows[0] ?? null;
+};
+
+const survivorVisiblePickTeam = (startsAt: Date, selectedTeam: string, isCurrentUser: boolean, isAdmin = false) =>
+  isCurrentUser || isAdmin || startsAt.getTime() <= Date.now() ? selectedTeam : null;
+
+const survivorPickStatusForResult = (selectedTeam: string, result: { away_team: string; home_team: string; away_score: number; home_score: number }) => {
+  if (result.away_score === result.home_score) return "tie" as const;
+  const winner = result.away_score > result.home_score ? result.away_team : result.home_team;
+  return selectedTeam === winner ? "won" as const : "lost" as const;
+};
+
+const settleSurvivorPickById = async (
+  pickId: string,
+  status: "won" | "lost" | "tie" | "void",
+  adminUserId?: string,
+  note?: string
+) => {
+  return transaction(async (client) => {
+    const pick = await client.query<{
+      id: string;
+      entry_id: string;
+      status: "pending" | "won" | "lost" | "tie" | "no_pick" | "void";
+    }>(
+      "SELECT id, entry_id, status FROM survivor_pick WHERE id = $1 FOR UPDATE",
+      [pickId]
+    );
+    const row = pick.rows[0];
+    if (!row) return null;
+
+    await client.query(
+      `
+        UPDATE survivor_pick
+        SET status = $2,
+            settled_at = now(),
+            admin_overridden_by = COALESCE($3, admin_overridden_by),
+            admin_note = COALESCE($4, admin_note),
+            updated_at = now()
+        WHERE id = $1
+      `,
+      [pickId, status, adminUserId ?? null, note ?? null]
+    );
+
+    if (status === "lost" || status === "tie") {
+      await client.query(
+        `
+          UPDATE survivor_entry
+          SET status = 'eliminated',
+              eliminated_week_start = COALESCE(eliminated_week_start, (
+                SELECT week_start FROM survivor_pick WHERE id = $1
+              )),
+              updated_at = now()
+          WHERE id = $2
+        `,
+        [pickId, row.entry_id]
+      );
+    }
+
+    return { id: pickId, status };
+  });
 };
 
 const normalizeMlbTeamName = (team: string) =>
@@ -586,6 +676,17 @@ class LineMoveError extends Error {
       code: "LINE_MOVED",
       lineMoves
     };
+  }
+}
+
+class WagerValidationError extends Error {
+  statusCode: number;
+  code: string;
+
+  constructor(message: string, code = "INVALID_WAGER", statusCode = 400) {
+    super(message);
+    this.statusCode = statusCode;
+    this.code = code;
   }
 }
 
@@ -1239,6 +1340,563 @@ export const registerRoutes = (router: Router) => {
       }
       await sendVerificationLink(user.id, user.email);
       res.json({ sent: true, email: user.email });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/survivor", requireAuth, async (req, res, next) => {
+    try {
+      const pool = await getActiveSurvivorPool();
+      if (!pool) {
+        res.status(404).json({ error: "No active Survivor pool is available." });
+        return;
+      }
+      const weekStart = currentSurvivorWeekStart();
+      const weekEnd = addDays(weekStart, 7);
+
+      const entryResult = await query<{
+        id: string;
+        status: "active" | "eliminated" | "winner";
+        eliminatedWeekStart: string | null;
+      }>(
+        `
+          SELECT id, status, eliminated_week_start::text AS "eliminatedWeekStart"
+          FROM survivor_entry
+          WHERE pool_id = $1 AND user_id = $2
+          LIMIT 1
+        `,
+        [pool.id, req.user!.id]
+      );
+      const entry = entryResult.rows[0] ?? null;
+
+      const usedTeamsResult = entry
+        ? await query<{ selectedTeam: string }>(
+          `
+            SELECT selected_team AS "selectedTeam"
+            FROM survivor_pick
+            WHERE entry_id = $1 AND status <> 'void'
+            ORDER BY week_start ASC
+          `,
+          [entry.id]
+        )
+        : { rows: [] as Array<{ selectedTeam: string }> };
+
+      const currentPickResult = entry
+        ? await query<{
+          id: string;
+          weekStart: string;
+          selectedTeam: string;
+          awayTeam: string;
+          homeTeam: string;
+          startsAt: Date;
+          status: "pending" | "won" | "lost" | "tie" | "no_pick" | "void";
+        }>(
+          `
+            SELECT id, week_start::text AS "weekStart", selected_team AS "selectedTeam",
+                   away_team AS "awayTeam", home_team AS "homeTeam", starts_at AS "startsAt", status
+            FROM survivor_pick
+            WHERE entry_id = $1 AND week_start = $2::date
+            LIMIT 1
+          `,
+          [entry.id, weekStart]
+        )
+        : { rows: [] as Array<{
+          id: string;
+          weekStart: string;
+          selectedTeam: string;
+          awayTeam: string;
+          homeTeam: string;
+          startsAt: Date;
+          status: "pending" | "won" | "lost" | "tie" | "no_pick" | "void";
+        }> };
+
+      const lineResult = await query<{
+        id: string;
+        providerEventId: string | null;
+        startsAt: Date;
+        awayTeam: string;
+        homeTeam: string;
+        favoriteTeam: string;
+      }>(
+        `
+          SELECT DISTINCT ON (
+            COALESCE(split_part(provider_event_id, ':', 1), sport::text || ':' || away_team || ':' || home_team || ':' || starts_at::text),
+            favorite_team
+          )
+            id,
+            provider_event_id AS "providerEventId",
+            starts_at AS "startsAt",
+            away_team AS "awayTeam",
+            home_team AS "homeTeam",
+            favorite_team AS "favoriteTeam"
+          FROM game_line
+          WHERE sport = 'NFL'
+            AND market_key = 'h2h'
+            AND is_active = true
+            AND (starts_at AT TIME ZONE 'America/Chicago')::date >= $1::date
+            AND (starts_at AT TIME ZONE 'America/Chicago')::date < $2::date
+          ORDER BY
+            COALESCE(split_part(provider_event_id, ':', 1), sport::text || ':' || away_team || ':' || home_team || ':' || starts_at::text),
+            favorite_team,
+            fetched_at DESC
+        `,
+        [weekStart, weekEnd]
+      );
+      const games = new Map<string, {
+        eventKey: string;
+        startsAt: string;
+        awayTeam: string;
+        homeTeam: string;
+        awayLineId: string | null;
+        homeLineId: string | null;
+      }>();
+      for (const line of lineResult.rows) {
+        const eventKey = gameEventKey({
+          providerEventId: line.providerEventId,
+          sport: "NFL",
+          startsAt: line.startsAt,
+          awayTeam: line.awayTeam,
+          homeTeam: line.homeTeam
+        });
+        const game = games.get(eventKey) ?? {
+          eventKey,
+          startsAt: line.startsAt.toISOString(),
+          awayTeam: line.awayTeam,
+          homeTeam: line.homeTeam,
+          awayLineId: null,
+          homeLineId: null
+        };
+        if (line.favoriteTeam === line.awayTeam) game.awayLineId = line.id;
+        if (line.favoriteTeam === line.homeTeam) game.homeLineId = line.id;
+        games.set(eventKey, game);
+      }
+
+      const standingsResult = await query<{
+        userId: string;
+        displayName: string | null;
+        username: string;
+        status: "active" | "eliminated" | "winner";
+        eliminatedWeekStart: string | null;
+        picksMade: number;
+        pickId: string | null;
+        pickWeekStart: string | null;
+        selectedTeam: string | null;
+        awayTeam: string | null;
+        homeTeam: string | null;
+        startsAt: Date | null;
+        pickStatus: "pending" | "won" | "lost" | "tie" | "no_pick" | "void" | null;
+      }>(
+        `
+          SELECT
+            u.id AS "userId",
+            u.display_name AS "displayName",
+            u.username,
+            e.status,
+            e.eliminated_week_start::text AS "eliminatedWeekStart",
+            count(p_all.id)::int AS "picksMade",
+            p.id AS "pickId",
+            p.week_start::text AS "pickWeekStart",
+            p.selected_team AS "selectedTeam",
+            p.away_team AS "awayTeam",
+            p.home_team AS "homeTeam",
+            p.starts_at AS "startsAt",
+            p.status AS "pickStatus"
+          FROM survivor_entry e
+          JOIN app_user u ON u.id = e.user_id
+          LEFT JOIN survivor_pick p_all ON p_all.entry_id = e.id AND p_all.status <> 'void'
+          LEFT JOIN survivor_pick p ON p.entry_id = e.id AND p.week_start = $2::date
+          WHERE e.pool_id = $1
+          GROUP BY u.id, u.display_name, u.username, e.status, e.eliminated_week_start,
+                   p.id, p.week_start, p.selected_team, p.away_team, p.home_team, p.starts_at, p.status
+          ORDER BY
+            CASE e.status WHEN 'active' THEN 1 WHEN 'winner' THEN 2 ELSE 3 END,
+            count(p_all.id) DESC,
+            lower(COALESCE(NULLIF(u.display_name, ''), u.username))
+        `,
+        [pool.id, weekStart]
+      );
+
+      const currentPick = currentPickResult.rows[0] ?? null;
+      res.json({
+        pool,
+        currentWeekStart: weekStart,
+        entry: entry ? {
+          ...entry,
+          usedTeams: usedTeamsResult.rows.map((row) => row.selectedTeam),
+          currentPick: currentPick ? {
+            id: currentPick.id,
+            weekStart: currentPick.weekStart,
+            selectedTeam: currentPick.selectedTeam,
+            awayTeam: currentPick.awayTeam,
+            homeTeam: currentPick.homeTeam,
+            startsAt: currentPick.startsAt.toISOString(),
+            status: currentPick.status,
+            locked: currentPick.startsAt.getTime() <= Date.now(),
+            visible: true,
+            displayTeam: currentPick.selectedTeam
+          } : null
+        } : null,
+        games: [...games.values()].sort((left, right) => left.startsAt.localeCompare(right.startsAt)),
+        standings: standingsResult.rows.map((row) => ({
+          userId: row.userId,
+          displayName: row.displayName || row.username,
+          status: row.status,
+          eliminatedWeekStart: row.eliminatedWeekStart,
+          picksMade: row.picksMade,
+          currentPick: row.pickId && row.startsAt && row.selectedTeam && row.awayTeam && row.homeTeam && row.pickWeekStart ? {
+            id: row.pickId,
+            weekStart: row.pickWeekStart,
+            selectedTeam: row.selectedTeam,
+            awayTeam: row.awayTeam,
+            homeTeam: row.homeTeam,
+            startsAt: row.startsAt.toISOString(),
+            status: row.pickStatus ?? "pending",
+            locked: row.startsAt.getTime() <= Date.now(),
+            visible: row.startsAt.getTime() <= Date.now() || row.userId === req.user!.id,
+            displayTeam: survivorVisiblePickTeam(row.startsAt, row.selectedTeam, row.userId === req.user!.id)
+          } : null
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/survivor/entry", requireAuth, async (req, res, next) => {
+    try {
+      if (!req.user!.emailVerified) {
+        res.status(403).json({ error: "Verify your email address before joining Survivor." });
+        return;
+      }
+      const pool = await getActiveSurvivorPool();
+      if (!pool) {
+        res.status(404).json({ error: "No active Survivor pool is available." });
+        return;
+      }
+      await query(
+        `
+          INSERT INTO survivor_entry (id, pool_id, user_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (pool_id, user_id) DO NOTHING
+        `,
+        [randomUUID(), pool.id, req.user!.id]
+      );
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/survivor/picks", requireAuth, async (req, res, next) => {
+    try {
+      if (!req.user!.emailVerified) {
+        res.status(403).json({ error: "Verify your email address before making a Survivor pick." });
+        return;
+      }
+      const input = survivorPickSchema.parse(req.body);
+      const pool = await getActiveSurvivorPool();
+      if (!pool) {
+        res.status(404).json({ error: "No active Survivor pool is available." });
+        return;
+      }
+      const weekStart = currentSurvivorWeekStart();
+      const result = await transaction(async (client) => {
+        const entryResult = await client.query<{ id: string; status: "active" | "eliminated" | "winner" }>(
+          "SELECT id, status FROM survivor_entry WHERE pool_id = $1 AND user_id = $2 FOR UPDATE",
+          [pool.id, req.user!.id]
+        );
+        const entry = entryResult.rows[0];
+        if (!entry) throw new WagerValidationError("Join Survivor before making a pick.");
+        if (entry.status !== "active") throw new WagerValidationError("You have been eliminated from this Survivor pool.");
+
+        const lineResult = await client.query<{
+          id: string;
+          starts_at: Date;
+          away_team: string;
+          home_team: string;
+          favorite_team: string;
+          is_active: boolean;
+        }>(
+          `
+            SELECT id, starts_at, away_team, home_team, favorite_team, is_active
+            FROM game_line
+            WHERE id = $1
+              AND sport = 'NFL'
+              AND market_key = 'h2h'
+            FOR SHARE
+          `,
+          [input.gameLineId]
+        );
+        const line = lineResult.rows[0];
+        if (!line || !line.is_active || line.favorite_team !== input.selectedTeam) {
+          throw new WagerValidationError("Selected Survivor team is not available.");
+        }
+        if (line.starts_at.getTime() <= Date.now()) {
+          throw new WagerValidationError("This Survivor game has already started.");
+        }
+        if (!isInContestWeek(line.starts_at, weekStart)) {
+          throw new WagerValidationError("Survivor picks must be for the current contest week.");
+        }
+
+        const existingPick = await client.query<{ id: string; starts_at: Date; selected_team: string }>(
+          "SELECT id, starts_at, selected_team FROM survivor_pick WHERE entry_id = $1 AND week_start = $2::date FOR UPDATE",
+          [entry.id, weekStart]
+        );
+        const existing = existingPick.rows[0];
+        if (existing && existing.starts_at.getTime() <= Date.now()) {
+          throw new WagerValidationError("Your Survivor pick is locked because that game has started.");
+        }
+
+        const reused = await client.query(
+          `
+            SELECT 1
+            FROM survivor_pick
+            WHERE entry_id = $1
+              AND selected_team = $2
+              AND week_start <> $3::date
+              AND status <> 'void'
+            LIMIT 1
+          `,
+          [entry.id, input.selectedTeam, weekStart]
+        );
+        if (reused.rowCount) {
+          throw new WagerValidationError("You have already used that team in this Survivor pool.");
+        }
+
+        const pickId = existing?.id ?? randomUUID();
+        const saved = await client.query<{ id: string }>(
+          `
+            INSERT INTO survivor_pick (
+              id, pool_id, entry_id, user_id, week_start, game_line_id, selected_team,
+              away_team, home_team, starts_at
+            )
+            VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9, $10)
+            ON CONFLICT (entry_id, week_start) DO UPDATE
+            SET game_line_id = EXCLUDED.game_line_id,
+                selected_team = EXCLUDED.selected_team,
+                away_team = EXCLUDED.away_team,
+                home_team = EXCLUDED.home_team,
+                starts_at = EXCLUDED.starts_at,
+                status = 'pending',
+                locked_at = NULL,
+                settled_at = NULL,
+                updated_at = now()
+            RETURNING id
+          `,
+          [pickId, pool.id, entry.id, req.user!.id, weekStart, line.id, input.selectedTeam, line.away_team, line.home_team, line.starts_at]
+        );
+        return saved.rows[0];
+      });
+      res.status(201).json({ pick: result });
+    } catch (error) {
+      if (error instanceof WagerValidationError) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.get("/admin/survivor", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const pool = await getActiveSurvivorPool();
+      if (!pool) {
+        res.status(404).json({ error: "No active Survivor pool is available." });
+        return;
+      }
+      const weekStart = currentSurvivorWeekStart();
+      const standingsResult = await query<{
+        entryId: string;
+        userId: string;
+        displayName: string | null;
+        username: string;
+        status: "active" | "eliminated" | "winner";
+        eliminatedWeekStart: string | null;
+        picksMade: number;
+        pickId: string | null;
+        pickWeekStart: string | null;
+        selectedTeam: string | null;
+        awayTeam: string | null;
+        homeTeam: string | null;
+        startsAt: Date | null;
+        pickStatus: "pending" | "won" | "lost" | "tie" | "no_pick" | "void" | null;
+      }>(
+        `
+          SELECT
+            e.id AS "entryId",
+            u.id AS "userId",
+            u.display_name AS "displayName",
+            u.username,
+            e.status,
+            e.eliminated_week_start::text AS "eliminatedWeekStart",
+            count(p_all.id)::int AS "picksMade",
+            p.id AS "pickId",
+            p.week_start::text AS "pickWeekStart",
+            p.selected_team AS "selectedTeam",
+            p.away_team AS "awayTeam",
+            p.home_team AS "homeTeam",
+            p.starts_at AS "startsAt",
+            p.status AS "pickStatus"
+          FROM survivor_entry e
+          JOIN app_user u ON u.id = e.user_id
+          LEFT JOIN survivor_pick p_all ON p_all.entry_id = e.id AND p_all.status <> 'void'
+          LEFT JOIN survivor_pick p ON p.entry_id = e.id AND p.week_start = $2::date
+          WHERE e.pool_id = $1
+          GROUP BY e.id, u.id, u.display_name, u.username, e.status, e.eliminated_week_start,
+                   p.id, p.week_start, p.selected_team, p.away_team, p.home_team, p.starts_at, p.status
+          ORDER BY
+            CASE e.status WHEN 'active' THEN 1 WHEN 'winner' THEN 2 ELSE 3 END,
+            count(p_all.id) DESC,
+            lower(COALESCE(NULLIF(u.display_name, ''), u.username))
+        `,
+        [pool.id, weekStart]
+      );
+      await logAdminAction(req, "admin.survivor.view", { rowCount: standingsResult.rowCount });
+      res.json({
+        pool,
+        currentWeekStart: weekStart,
+        standings: standingsResult.rows.map((row) => ({
+          entryId: row.entryId,
+          userId: row.userId,
+          displayName: row.displayName || row.username,
+          status: row.status,
+          eliminatedWeekStart: row.eliminatedWeekStart,
+          picksMade: row.picksMade,
+          currentPick: row.pickId && row.startsAt && row.selectedTeam && row.awayTeam && row.homeTeam && row.pickWeekStart ? {
+            id: row.pickId,
+            weekStart: row.pickWeekStart,
+            selectedTeam: row.selectedTeam,
+            awayTeam: row.awayTeam,
+            homeTeam: row.homeTeam,
+            startsAt: row.startsAt.toISOString(),
+            status: row.pickStatus ?? "pending",
+            locked: row.startsAt.getTime() <= Date.now(),
+            visible: true,
+            displayTeam: row.selectedTeam,
+            ownerName: row.displayName || row.username
+          } : null
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.patch("/admin/survivor/picks/:id", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const pickId = String(req.params.id);
+      const input = survivorAdminPickSchema.parse(req.body);
+      const result = await settleSurvivorPickById(pickId, input.status, req.user!.id, input.note);
+      if (!result) {
+        res.status(404).json({ error: "Survivor pick not found." });
+        return;
+      }
+      await logAdminAction(req, "admin.survivor_pick.override", { pickId, status: input.status });
+      res.json({ pick: result });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/survivor/settle", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const pool = await getActiveSurvivorPool();
+      if (!pool) {
+        res.status(404).json({ error: "No active Survivor pool is available." });
+        return;
+      }
+      const weekStart = currentSurvivorWeekStart();
+      const weekEnd = addDays(weekStart, 7);
+      const pendingResult = await query<{
+        id: string;
+        selectedTeam: string;
+        awayTeam: string;
+        homeTeam: string;
+        startsAt: Date;
+        awayScore: number | null;
+        homeScore: number | null;
+      }>(
+        `
+          SELECT
+            p.id,
+            p.selected_team AS "selectedTeam",
+            p.away_team AS "awayTeam",
+            p.home_team AS "homeTeam",
+            p.starts_at AS "startsAt",
+            gr.away_score AS "awayScore",
+            gr.home_score AS "homeScore"
+          FROM survivor_pick p
+          LEFT JOIN LATERAL (
+            SELECT *
+            FROM game_result candidate
+            WHERE candidate.sport = 'NFL'
+              AND candidate.away_team = p.away_team
+              AND candidate.home_team = p.home_team
+              AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - p.starts_at)) <= 43200
+            ORDER BY abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - p.starts_at)) ASC,
+                     candidate.fetched_at DESC
+            LIMIT 1
+          ) gr ON true
+          WHERE p.pool_id = $1
+            AND p.week_start = $2::date
+            AND p.status = 'pending'
+            AND p.starts_at <= now()
+          ORDER BY p.starts_at ASC
+        `,
+        [pool.id, weekStart]
+      );
+
+      let settled = 0;
+      for (const pick of pendingResult.rows) {
+        if (pick.awayScore == null || pick.homeScore == null) continue;
+        const status = survivorPickStatusForResult(pick.selectedTeam, {
+          away_team: pick.awayTeam,
+          home_team: pick.homeTeam,
+          away_score: pick.awayScore,
+          home_score: pick.homeScore
+        });
+        await settleSurvivorPickById(pick.id, status);
+        settled += 1;
+      }
+
+      const firstKickoffResult = await query(
+        `
+          SELECT 1
+          FROM game_line
+          WHERE sport = 'NFL'
+            AND market_key = 'h2h'
+            AND (starts_at AT TIME ZONE 'America/Chicago')::date >= $1::date
+            AND (starts_at AT TIME ZONE 'America/Chicago')::date < $2::date
+            AND starts_at <= now()
+          LIMIT 1
+        `,
+        [weekStart, weekEnd]
+      );
+      let missed = 0;
+      if (firstKickoffResult.rowCount) {
+        const missedResult = await query(
+          `
+            UPDATE survivor_entry e
+            SET status = 'eliminated',
+                eliminated_week_start = $2::date,
+                updated_at = now()
+            WHERE e.pool_id = $1
+              AND e.status = 'active'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM survivor_pick p
+                WHERE p.entry_id = e.id
+                  AND p.week_start = $2::date
+              )
+          `,
+          [pool.id, weekStart]
+        );
+        missed = missedResult.rowCount ?? 0;
+      }
+
+      await logAdminAction(req, "admin.survivor.settle", { settled, missed });
+      res.json({ settled, missed });
     } catch (error) {
       next(error);
     }
@@ -2780,6 +3438,9 @@ export const registerRoutes = (router: Router) => {
         kind: "straight" | "parlay" | "round_robin";
         stakeCents: number;
         potentialPayoutCents: number;
+        roundRobinStakePerWayCents: number | null;
+        roundRobinMinLegs: number | null;
+        roundRobinMaxLegs: number | null;
         placedAt: Date;
         legId: string;
         selectedTeam: string;
@@ -2803,6 +3464,9 @@ export const registerRoutes = (router: Router) => {
             w.kind,
             w.stake_cents AS "stakeCents",
             w.potential_payout_cents AS "potentialPayoutCents",
+            w.round_robin_stake_per_way_cents AS "roundRobinStakePerWayCents",
+            w.round_robin_min_legs AS "roundRobinMinLegs",
+            w.round_robin_max_legs AS "roundRobinMaxLegs",
             w.placed_at AS "placedAt",
             wl.id AS "legId",
             wl.selected_team AS "selectedTeam",
@@ -2856,6 +3520,9 @@ export const registerRoutes = (router: Router) => {
         kind: "straight" | "parlay" | "round_robin";
         stakeCents: number;
         potentialPayoutCents: number;
+        roundRobinStakePerWayCents: number | null;
+        roundRobinMinLegs: number | null;
+        roundRobinMaxLegs: number | null;
         placedAt: string;
         legs: Array<{
           id: string;
@@ -2882,6 +3549,9 @@ export const registerRoutes = (router: Router) => {
           kind: row.kind,
           stakeCents: row.stakeCents,
           potentialPayoutCents: row.potentialPayoutCents,
+          roundRobinStakePerWayCents: row.roundRobinStakePerWayCents,
+          roundRobinMinLegs: row.roundRobinMinLegs,
+          roundRobinMaxLegs: row.roundRobinMaxLegs,
           placedAt: row.placedAt.toISOString(),
           legs: []
         };
@@ -3096,10 +3766,10 @@ export const registerRoutes = (router: Router) => {
         const ways = input.kind === "round_robin" ? roundRobinWays(input.legs.length, input.roundRobinMaxLegs, 2) : null;
         const totalStakeCents = input.kind === "round_robin" ? input.stakeCents * (ways ?? 0) : input.stakeCents;
         if (!ways && input.kind === "round_robin") {
-          throw new Error("Select a valid round robin size");
+          throw new WagerValidationError("Select a valid round robin size");
         }
         if (availableBalanceCents < totalStakeCents) {
-          throw new Error("Insufficient bankroll");
+          throw new WagerValidationError("Insufficient bankroll", "INSUFFICIENT_BANKROLL");
         }
 
         const lineResult = await client.query<WagerLineRow>(
@@ -3108,7 +3778,7 @@ export const registerRoutes = (router: Router) => {
         );
 
         if (lineResult.rowCount !== input.legs.length) {
-          throw new Error("One or more selected lines are unavailable");
+          throw new WagerValidationError("One or more selected lines are unavailable", "LINE_UNAVAILABLE");
         }
 
         const requestedLines = new Map(lineResult.rows.map((line) => [line.id, line]));
@@ -3118,10 +3788,10 @@ export const registerRoutes = (router: Router) => {
         for (const leg of input.legs) {
           const requestedLine = requestedLines.get(leg.gameLineId);
           if (!requestedLine) {
-            throw new Error("One or more selected lines are unavailable");
+            throw new WagerValidationError("One or more selected lines are unavailable", "LINE_UNAVAILABLE");
           }
           if (leg.selectedTeam !== requestedLine.favorite_team) {
-            throw new Error("Selected outcome is not available");
+            throw new WagerValidationError("Selected outcome is not available", "OUTCOME_UNAVAILABLE");
           }
           let currentLine = requestedLine;
           if (!requestedLine.is_active) {
@@ -3151,15 +3821,18 @@ export const registerRoutes = (router: Router) => {
               ]
             );
             if (replacementResult.rowCount !== 1) {
-              throw new Error(unavailableLineMessage(requestedLine));
+              throw new WagerValidationError(unavailableLineMessage(requestedLine), "LINE_UNAVAILABLE");
             }
             currentLine = replacementResult.rows[0];
           }
           if (currentLine.starts_at.getTime() <= Date.now()) {
-            throw new Error(`${currentLine.away_team} @ ${currentLine.home_team} has already started`);
+            throw new WagerValidationError(`${currentLine.away_team} @ ${currentLine.home_team} has already started`, "GAME_STARTED");
           }
           if (!isInContestWeek(currentLine.starts_at, weekStart)) {
-            throw new Error(`${currentLine.away_team} @ ${currentLine.home_team} is outside the current contest week`);
+            throw new WagerValidationError(
+              `${currentLine.away_team} @ ${currentLine.home_team} is outside the current contest week. Weekly bankroll can only be used on games scheduled for this contest week.`,
+              "OUTSIDE_CONTEST_WEEK"
+            );
           }
 
           const expectedSpread = leg.expectedSpread ?? requestedLine.spread;
@@ -3195,7 +3868,7 @@ export const registerRoutes = (router: Router) => {
             summary.teamMarkets += 1;
           }
           if (summary.teamMarkets > 1 || summary.totals > 1) {
-            throw new Error("Only one team pick and one over/under are allowed for the same game");
+            throw new WagerValidationError("Only one team pick and one over/under are allowed for the same game", "SAME_GAME_CONFLICT");
           }
           sameGameSelections.set(key, summary);
         }
@@ -3261,6 +3934,10 @@ export const registerRoutes = (router: Router) => {
       }
       if (error instanceof ReferralBoostDecisionRequiredError) {
         res.status(409).json(error.body);
+        return;
+      }
+      if (error instanceof WagerValidationError) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
         return;
       }
       if ((error as Error).message === "Insufficient bankroll") {
