@@ -2108,6 +2108,7 @@ const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.sele
 
 export const dailyAiWagerMinConfidence = 0.7;
 export const dailyAiStraightBankrollFraction = 0.6;
+export const dailyAiMaxStraightWagerBankrollFraction = 0.2;
 const dailyAiRoundRobinEnabled = false;
 const dailyAiRoundRobinPicks = 3;
 const dailyAiRoundRobinMinExpectedRoi = 0.08;
@@ -2520,14 +2521,18 @@ export const generateAiPicks = async ({
       }
     }
     const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
+    const maxStraightStakeCents = Math.floor(dailyStartingBankrollCents * dailyAiMaxStraightWagerBankrollFraction);
     const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
     const straightBufferSlots = 1;
     const plannedStraightSlots = Math.max(
       existingStraightGameKeys.size + newStraightWagerSlotKeys.size + straightBufferSlots,
       1
     );
-    const plannedStraightStakeCents = dailyStraightBudgetCents > 0
+    const uncappedPlannedStraightStakeCents = dailyStraightBudgetCents > 0
       ? Math.max(1, Math.floor(dailyStraightBudgetCents / plannedStraightSlots))
+      : 0;
+    const plannedStraightStakeCents = uncappedPlannedStraightStakeCents > 0
+      ? Math.max(1, Math.min(uncappedPlannedStraightStakeCents, maxStraightStakeCents))
       : 0;
     const dailyStraightPlan = placeWagers && aiUser.rowCount && aiEntry && plannedStraightStakeCents > 0
       ? await client.query<{ straight_wager_stake_cents: number | null; straight_wager_slots: number | null }>(
@@ -2550,8 +2555,11 @@ export const generateAiPicks = async ({
       )
       : null;
     const anchoredStraightStakeCents = dailyStraightPlan?.rows[0]?.straight_wager_stake_cents ?? plannedStraightStakeCents;
+    const cappedAnchoredStraightStakeCents = anchoredStraightStakeCents > 0
+      ? Math.max(1, Math.min(anchoredStraightStakeCents, maxStraightStakeCents))
+      : 0;
     const dailyStraightStakeCents = aiEntry && newStraightWagerSlotKeys.size > 0 && anchoredStraightStakeCents > 0
-      ? remainingDailyStraightBudgetCents >= anchoredStraightStakeCents ? anchoredStraightStakeCents : 0
+      ? remainingDailyStraightBudgetCents >= cappedAnchoredStraightStakeCents ? cappedAnchoredStraightStakeCents : 0
       : aiEntry && stakeFractionOfBalance !== undefined
       ? Math.max(1, Math.floor(aiEntry.balance_cents * stakeFractionOfBalance))
       : stakeCents;
@@ -2852,9 +2860,11 @@ export const generateAiPicks = async ({
       dailyStraight: {
         budgetCents: dailyStraightBudgetCents,
         remainingBudgetCents: remainingDailyStraightBudgetCents,
+        maxStakeCents: maxStraightStakeCents,
         plannedSlots: dailyStraightPlan?.rows[0]?.straight_wager_slots ?? plannedStraightSlots,
         bufferSlots: straightBufferSlots,
-        plannedStakeCents: anchoredStraightStakeCents,
+        uncappedPlannedStakeCents: uncappedPlannedStraightStakeCents,
+        plannedStakeCents: cappedAnchoredStraightStakeCents,
         stakeCents: dailyStraightStakeCents
       },
       published
