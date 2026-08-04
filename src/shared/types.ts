@@ -185,6 +185,8 @@ export type DailyChineParlayLeg = {
 
 export type DailyChineParlay = {
   id: string;
+  kind?: WagerKind;
+  projected?: boolean;
   pickDate: string;
   units: string;
   stakeCents?: number;

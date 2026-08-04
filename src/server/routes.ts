@@ -12,8 +12,9 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, getTodayRedditLockStatus, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
-import { dailyAiStraightBankrollFraction, dailyAiWagerMinConfidence } from "./ai.js";
+import { dailyAiParlayBankrollFraction, dailyAiStraightBankrollFraction, dailyAiWagerMinConfidence } from "./ai.js";
 import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
+import type { DailyAiPick, DailyChineParlay } from "../shared/types.js";
 import {
   buildTowerHandForUser,
   capTowerHandForUser,
@@ -3238,7 +3239,7 @@ export const registerRoutes = (router: Router) => {
 
   router.get("/ai-picks", async (_req, res, next) => {
     try {
-      const result = await query(
+      const result = await query<DailyAiPick>(
         `
           WITH ranked AS (
             SELECT DISTINCT ON (
@@ -3320,35 +3321,11 @@ export const registerRoutes = (router: Router) => {
         `,
         [dailyAiWagerMinConfidence, config.aiUsername, dailyAiStraightBankrollFraction]
       );
-      const chineParlay = (await query<{
-        id: string;
-        pickDate: string;
-        units: string;
-        potentialReturnUnits: string;
-        stakeCents: number;
-        potentialReturnCents: number;
-        status: string;
-        profitCents: number;
-        profitUnits: string;
-        legs: Array<{
-          id: string;
-          selectedTeam: string;
-          legIndex: number;
-          status: string;
-          decimalOdds: string;
-          oddsAmerican: number;
-          sport: string;
-          league: string;
-          startsAt: Date;
-          homeTeam: string;
-          awayTeam: string;
-          spread: string;
-          marketKey: string;
-        }>;
-      }>(
+      const chineParlay = (await query<DailyChineParlay>(
         `
           SELECT
             w.id,
+            w.kind::text AS kind,
             (w.placed_at AT TIME ZONE 'America/Chicago')::date::text AS "pickDate",
             (w.stake_cents / 10000.0)::numeric(8,2)::text AS units,
             w.stake_cents AS "stakeCents",
@@ -3405,7 +3382,76 @@ export const registerRoutes = (router: Router) => {
         `,
         [config.aiUsername]
       )).rows[0] ?? null;
-      res.json({ picks: result.rows, parlay: chineParlay });
+
+      let dailyParlay = chineParlay;
+      if (!dailyParlay) {
+        const bankroll = await query<{ startingBalanceCents: number }>(
+          `
+            SELECT adb.starting_balance_cents AS "startingBalanceCents"
+            FROM ai_daily_bankroll adb
+            JOIN app_user u ON u.id = adb.user_id
+            WHERE u.username = $1
+              AND u.role = 'system'
+              AND adb.bankroll_date = (now() AT TIME ZONE 'America/Chicago')::date
+            LIMIT 1
+          `,
+          [config.aiUsername]
+        );
+        const startingBalanceCents = Number(bankroll.rows[0]?.startingBalanceCents ?? 0);
+        const projectedStakeCents = Math.max(0, Math.floor(startingBalanceCents * dailyAiParlayBankrollFraction));
+        const parlayPicks: typeof result.rows = [];
+        const seenGames = new Set<string>();
+        const seenTeams = new Set<string>();
+        for (const pick of [...result.rows].sort((left, right) => {
+          const confidence = Number(right.confidence ?? 0) - Number(left.confidence ?? 0);
+          if (confidence !== 0) return confidence;
+          const score = Number(right.score ?? 0) - Number(left.score ?? 0);
+          if (score !== 0) return score;
+          return new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime();
+        })) {
+          const gameKey = `${pick.sport}:${pick.awayTeam}:${pick.homeTeam}:${new Date(pick.startsAt).toISOString()}`;
+          const teamKey = String(pick.selectedTeam).toLowerCase();
+          if (seenGames.has(gameKey) || seenTeams.has(teamKey)) continue;
+          seenGames.add(gameKey);
+          seenTeams.add(teamKey);
+          parlayPicks.push(pick);
+          if (parlayPicks.length >= 2) break;
+        }
+
+        if (parlayPicks.length === 2) {
+          const potentialReturnCents = estimatePayoutCents(projectedStakeCents, parlayPicks.map((pick) => Number(pick.oddsAmerican)));
+          dailyParlay = {
+            id: "projected-daily-chine-parlay",
+            kind: "parlay",
+            projected: true,
+            pickDate: new Date().toLocaleDateString("en-CA", { timeZone: "America/Chicago" }),
+            units: (projectedStakeCents / 10000).toFixed(2),
+            stakeCents: projectedStakeCents,
+            potentialReturnCents,
+            potentialReturnUnits: (potentialReturnCents / 10000).toFixed(2),
+            status: "pending",
+            profitCents: 0,
+            profitUnits: "0.00",
+            legs: parlayPicks.map((pick, index) => ({
+              id: pick.id,
+              selectedTeam: pick.selectedTeam,
+              legIndex: index + 1,
+              status: "pending",
+              decimalOdds: (Number(pick.oddsAmerican) > 0 ? 1 + Number(pick.oddsAmerican) / 100 : 1 + 100 / Math.abs(Number(pick.oddsAmerican))).toFixed(3),
+              oddsAmerican: Number(pick.oddsAmerican),
+              sport: pick.sport,
+              league: pick.league,
+              startsAt: pick.startsAt,
+              homeTeam: pick.homeTeam,
+              awayTeam: pick.awayTeam,
+              spread: pick.spread,
+              marketKey: pick.marketKey
+            }))
+          };
+        }
+      }
+
+      res.json({ picks: result.rows, parlay: dailyParlay });
     } catch (error) {
       next(error);
     }

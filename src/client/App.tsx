@@ -597,6 +597,12 @@ const trackedResultLabel = (status: DailyChineParlay["status"]) => {
 };
 
 const dailyChineParlayWagerSummary = (parlay: DailyChineParlay) => {
+  if (parlay.projected) {
+    if (parlay.stakeCents != null && parlay.potentialReturnCents != null) {
+      return `Projected ${money(parlay.stakeCents)} • Could return ${money(parlay.potentialReturnCents)}`;
+    }
+    return "Projected package";
+  }
   if (parlay.status !== "pending" && parlay.profitCents != null) {
     if (parlay.status === "won") return `Won ${signedMoney(parlay.profitCents)}`;
     if (parlay.status === "lost") return `Lost ${signedMoney(parlay.profitCents)}`;
@@ -2313,12 +2319,13 @@ function App() {
     const resultLabel = trackedResultLabel(parlay.status);
     const returnUnits = parlay.potentialReturnUnits ? Number(parlay.potentialReturnUnits) : parlayReturnUnits(parlay);
     const legCount = parlay.legs.length;
-    const roundRobinLabel = `${legCount}-Game Round Robin`;
+    const packageType = parlay.kind === "round_robin" ? "Round Robin" : "Parlay";
+    const roundRobinLabel = `${parlay.projected ? "Projected " : ""}${legCount}-Leg ${packageType}`;
     const wagerSummary = dailyChineParlayWagerSummary(parlay);
     return (
       <div className="ai-pick daily-parlay" key={parlay.id}>
         <div className="pick-badges">
-          <small className="pick-status locked">{roundRobinLabel}</small>
+          <small className={`pick-status ${parlay.projected ? "projected" : "locked"}`}>{roundRobinLabel}</small>
           {resultLabel && <small className={`pick-result ${parlay.status}`}>{resultLabel}</small>}
         </div>
         <strong>{formatUnitAmount(Number(parlay.units))} to return {formatUnitAmount(returnUnits)}</strong>
@@ -2334,7 +2341,10 @@ function App() {
     <>
       {dailyChineParlay && dailyChineParlay.legs.length > 0 && (
         <>
-          <h3 className="pick-section-title">{dailyChineParlay.legs.length}-Game Round Robin</h3>
+          <h3 className="pick-section-title">
+            {dailyChineParlay.projected ? "Projected " : ""}
+            {dailyChineParlay.legs.length}-Leg {dailyChineParlay.kind === "round_robin" ? "Round Robin" : "Parlay"}
+          </h3>
           {renderDailyChineParlay(dailyChineParlay)}
         </>
       )}
