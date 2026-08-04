@@ -2100,6 +2100,42 @@ const placeAiRoundRobinWager = async (
   return wagerId;
 };
 
+const placeAiParlayWager = async (
+  client: pg.PoolClient,
+  userId: string,
+  candidates: ScoredCandidate[],
+  stakeCents: number
+) => {
+  const entry = await ensureWeeklyEntry(client, userId);
+  if (candidates.length < 2 || stakeCents <= 0 || entry.balance_cents < stakeCents) {
+    return null;
+  }
+
+  const potentialPayout = estimatePayoutCents(stakeCents, candidates.map((candidate) => candidate.odds_american));
+  const wagerId = randomUUID();
+
+  await client.query(
+    `
+      INSERT INTO wager (id, user_id, weekly_entry_id, kind, stake_cents, potential_payout_cents, legs_count)
+      VALUES ($1, $2, $3, 'parlay', $4, $5, $6)
+    `,
+    [wagerId, userId, entry.id, stakeCents, potentialPayout, candidates.length]
+  );
+
+  for (const candidate of candidates) {
+    await client.query(
+      `
+        INSERT INTO wager_leg (id, wager_id, game_line_id, selected_team, spread, odds_american)
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [randomUUID(), wagerId, candidate.id, candidate.selected_team, candidate.spread, candidate.odds_american]
+    );
+  }
+
+  await client.query("UPDATE weekly_entry SET balance_cents = balance_cents - $1 WHERE id = $2", [stakeCents, entry.id]);
+  return wagerId;
+};
+
 const gameKeyForPick = (pick: Pick<CandidateLine, "provider_event_id" | "starts_at" | "away_team" | "home_team">) =>
   stableProviderMatchId(pick.provider_event_id)
     ?? `${pick.starts_at.toISOString()}:${pick.away_team}:${pick.home_team}`;
@@ -2109,7 +2145,9 @@ const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.sele
 export const dailyAiWagerMinConfidence = 0.7;
 export const dailyAiStraightBankrollFraction = 0.6;
 export const dailyAiMaxStraightWagerBankrollFraction = 0.2;
+export const dailyAiParlayBankrollFraction = 0.1;
 const dailyAiRoundRobinEnabled = false;
+const dailyAiParlayPicks = 2;
 const dailyAiRoundRobinPicks = 3;
 const dailyAiRoundRobinMinExpectedRoi = 0.08;
 const dailyAiRoundRobinMinOddsAmerican = -230;
@@ -2438,6 +2476,20 @@ export const generateAiPicks = async ({
         [aiUser.rows[0].id, today]
       )
       : null;
+    const existingDailyAiParlay = placeWagers && aiUser.rowCount
+      ? await client.query<{ id: string; stake_cents: number }>(
+        `
+          SELECT w.id, w.stake_cents
+          FROM wager w
+          WHERE w.user_id = $1
+            AND w.kind = 'parlay'
+            AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = $2::date
+          ORDER BY w.placed_at ASC
+          LIMIT 1
+        `,
+        [aiUser.rows[0].id, today]
+      )
+      : null;
     const dailyAiStake = placeWagers && aiUser.rowCount
       ? await client.query<{ total_stake_cents: string | null }>(
         `
@@ -2599,6 +2651,27 @@ export const generateAiPicks = async ({
       : dailyRoundRobinWays > 0
         ? Math.max(1, Math.floor((dailyStartingBankrollCents * aiRoundRobinBankrollFraction) / dailyRoundRobinWays))
         : 0;
+    const parlayGameKeys = new Set<string>();
+    const parlayTeamKeys = new Set<string>();
+    const parlayPicks = wageringCandidates.reduce<ScoredCandidate[]>((acc, candidate) => {
+      if (acc.length >= dailyAiParlayPicks) {
+        return acc;
+      }
+      const gameKey = gameKeyForPick(candidate);
+      const selectedTeamKey = teamKeyForPick(candidate);
+      if (parlayGameKeys.has(gameKey) || parlayTeamKeys.has(selectedTeamKey)) {
+        return acc;
+      }
+      parlayGameKeys.add(gameKey);
+      parlayTeamKeys.add(selectedTeamKey);
+      acc.push(candidate);
+      return acc;
+    }, []);
+    const dailyParlayStakeCents = existingDailyAiParlay?.rowCount
+      ? existingDailyAiParlay.rows[0].stake_cents
+      : dailyStartingBankrollCents > 0
+        ? Math.max(1, Math.floor(dailyStartingBankrollCents * dailyAiParlayBankrollFraction))
+        : 0;
 
     await client.query(
       `
@@ -2627,6 +2700,7 @@ export const generateAiPicks = async ({
 
     const published: PublishedAiPick[] = [];
     let dailyRoundRobinWagerId = existingDailyAiRoundRobin?.rows[0]?.id ?? null;
+    let dailyParlayWagerId = existingDailyAiParlay?.rows[0]?.id ?? null;
     const shouldLockRoundRobin = dailyAiRoundRobinEnabled
       && roundRobinPicks.length === aiRoundRobinPicks
       && dailyRoundRobinWays > 0
@@ -2677,6 +2751,44 @@ export const generateAiPicks = async ({
       );
       if (!dailyRoundRobinWagerId) {
         dailyRoundRobinSkippedReason = "insufficient bankroll for round robin";
+      }
+    }
+
+    const shouldLockDailyParlay = parlayPicks.length === dailyAiParlayPicks
+      && now >= new Date(Math.min(...parlayPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))
+      && parlayPicks.every((pick) => now < pick.starts_at);
+    let dailyParlaySkippedReason: string | null = null;
+    if (parlayPicks.length < dailyAiParlayPicks) {
+      dailyParlaySkippedReason = `only ${parlayPicks.length} wager-eligible picks available`;
+    } else if (now < new Date(Math.min(...parlayPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))) {
+      dailyParlaySkippedReason = "before parlay lock window";
+    } else if (!parlayPicks.every((pick) => now < pick.starts_at)) {
+      dailyParlaySkippedReason = "one or more parlay picks already started";
+    } else if (!placeWagers) {
+      dailyParlaySkippedReason = "wager placement disabled";
+    } else if (!aiUser.rowCount) {
+      dailyParlaySkippedReason = "system user missing";
+    } else if (dailyParlayWagerId) {
+      dailyParlaySkippedReason = "parlay already placed";
+    } else if (dailyParlayStakeCents <= 0) {
+      dailyParlaySkippedReason = "parlay stake is zero";
+    }
+
+    if (
+      shouldLockDailyParlay
+      && placeWagers
+      && aiUser.rowCount
+      && !dailyParlayWagerId
+      && dailyParlayStakeCents > 0
+    ) {
+      dailyParlayWagerId = await placeAiParlayWager(
+        client,
+        aiUser.rows[0].id,
+        parlayPicks,
+        dailyParlayStakeCents
+      );
+      if (!dailyParlayWagerId) {
+        dailyParlaySkippedReason = "insufficient bankroll for parlay";
       }
     }
 
@@ -2856,6 +2968,16 @@ export const generateAiPicks = async ({
         wagerId: dailyRoundRobinWagerId,
         shouldLock: shouldLockRoundRobin,
         skippedReason: dailyRoundRobinWagerId ? null : dailyRoundRobinSkippedReason
+      },
+      dailyParlay: {
+        enabled: true,
+        requiredPicks: dailyAiParlayPicks,
+        selectedPicks: parlayPicks.length,
+        bankrollFraction: dailyAiParlayBankrollFraction,
+        stakeCents: dailyParlayStakeCents,
+        wagerId: dailyParlayWagerId,
+        shouldLock: shouldLockDailyParlay,
+        skippedReason: dailyParlayWagerId ? null : dailyParlaySkippedReason
       },
       dailyStraight: {
         budgetCents: dailyStraightBudgetCents,

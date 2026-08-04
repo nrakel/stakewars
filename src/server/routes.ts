@@ -3396,10 +3396,10 @@ export const registerRoutes = (router: Router) => {
           JOIN wager_leg wl ON wl.id = leg_rows.id
           JOIN game_line gl ON gl.id = wl.game_line_id
           WHERE u.username = $1
-            AND w.kind = 'round_robin'
+            AND w.kind IN ('parlay', 'round_robin')
             AND (w.placed_at AT TIME ZONE 'America/Chicago')::date = (now() AT TIME ZONE 'America/Chicago')::date
           GROUP BY w.id
-          HAVING count(wl.id) = 3
+          HAVING count(wl.id) >= 2
           ORDER BY w.placed_at DESC
           LIMIT 1
         `,
