@@ -1666,13 +1666,12 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, nflConfidenceResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
         api<ReferralInfo>("/me/referral", {}, authToken),
-        api<SurvivorState>("/survivor", {}, authToken).catch(() => null),
-        api<NflConfidenceState>("/nfl-confidence", {}, authToken).catch(() => null)
+        api<SurvivorState>("/survivor", {}, authToken).catch(() => null)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1687,7 +1686,6 @@ function App() {
       setPushPreferences(pushPreferenceResult.preferences);
       setReferralInfo(referralResult);
       setSurvivorState(survivorResult);
-      setNflConfidenceState(nflConfidenceResult);
       if (TOWER_FEATURE_ENABLED) {
         api<TowerState>("/tower/state", {}, authToken)
           .then((result) => setTowerState(result))
@@ -2990,6 +2988,11 @@ function App() {
       setNflConfidenceNotice((err as Error).message);
     }
   };
+
+  useEffect(() => {
+    if (activePage !== "nfl-confidence" || !token || !isNateRakelAccount || nflConfidenceState) return;
+    refreshNflConfidence().catch((err) => setNflConfidenceNotice((err as Error).message));
+  }, [activePage, token, isNateRakelAccount, nflConfidenceState]);
 
   const joinNflConfidence = async () => {
     if (!token || !isNateRakelAccount) return;
