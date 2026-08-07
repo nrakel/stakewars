@@ -1,5 +1,5 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
 import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
@@ -3558,7 +3558,7 @@ function App() {
                             disabled={nflConfidencePending || index === 0}
                             onClick={() => moveNflConfidenceRank(game.id, -1)}
                           >
-                            <ChevronDown size={16} />
+                            <ArrowDown size={16} />
                           </button>
                           <button
                             type="button"
@@ -3566,7 +3566,7 @@ function App() {
                             disabled={nflConfidencePending || index === availablePoints.length - 1}
                             onClick={() => moveNflConfidenceRank(game.id, 1)}
                           >
-                            <ChevronRight size={16} />
+                            <ArrowUp size={16} />
                           </button>
                         </div>
                       </div>
