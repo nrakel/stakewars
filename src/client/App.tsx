@@ -3555,16 +3555,16 @@ function App() {
                           <button
                             type="button"
                             title="Move down in confidence"
-                            disabled={nflConfidencePending || index === 0}
-                            onClick={() => moveNflConfidenceRank(game.id, -1)}
+                            disabled={nflConfidencePending || index === availablePoints.length - 1}
+                            onClick={() => moveNflConfidenceRank(game.id, 1)}
                           >
                             <ArrowDown size={16} />
                           </button>
                           <button
                             type="button"
                             title="Move up in confidence"
-                            disabled={nflConfidencePending || index === availablePoints.length - 1}
-                            onClick={() => moveNflConfidenceRank(game.id, 1)}
+                            disabled={nflConfidencePending || index === 0}
+                            onClick={() => moveNflConfidenceRank(game.id, -1)}
                           >
                             <ArrowUp size={16} />
                           </button>
