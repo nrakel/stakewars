@@ -271,6 +271,61 @@ export type SurvivorPick = {
   ownerName?: string;
 };
 
+export type NflConfidenceGame = {
+  id: string;
+  week: number;
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+  status: "scheduled" | "in_progress" | "final" | "void";
+  awayScore: number | null;
+  homeScore: number | null;
+};
+
+export type NflConfidencePick = {
+  id: string;
+  gameId: string;
+  selectedTeam: string | null;
+  confidencePoints: number | null;
+  status: "pending" | "won" | "lost" | "void" | "no_pick";
+  pointsAwarded: number;
+};
+
+export type NflConfidenceStanding = {
+  userId: string;
+  displayName: string;
+  weekPoints: number;
+  seasonPoints: number;
+  submittedPicks: number;
+  possibleWeekPoints: number;
+};
+
+export type NflConfidenceState = {
+  pool: {
+    id: string;
+    name: string;
+    season: number;
+    startsOn: string;
+    weeklyPrizeCents: number;
+    seasonWinnerPrizeCents: number;
+    seasonRunnerUpPrizeCents: number;
+  };
+  entry: {
+    id: string;
+    status: "active" | "inactive";
+  } | null;
+  currentWeek: number;
+  games: NflConfidenceGame[];
+  picks: NflConfidencePick[];
+  unavailableConfidencePoints: number[];
+  missedThursdayPick: boolean;
+  sundayLocked: boolean;
+  firstGameStartsAt: string | null;
+  firstSundayGameStartsAt: string | null;
+  weeklyStandings: NflConfidenceStanding[];
+  seasonStandings: NflConfidenceStanding[];
+};
+
 export type SurvivorEntry = {
   id: string;
   status: SurvivorStatus;

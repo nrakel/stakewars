@@ -2,12 +2,12 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowLeft, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
+import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
 type AdminSection = "traffic" | "support" | "survivor" | "prizes" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
@@ -808,6 +808,7 @@ const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: S
   if (page === "install") return "Install App";
   if (page === "ai-picks") return "Daily Chine Picks";
   if (page === "survivor") return "NFL Survivor";
+  if (page === "nfl-confidence") return "NFL Confidence";
   if (page === "tower") return "Tower";
   if (page === "admin") return "Admin";
   return page.charAt(0).toUpperCase() + page.slice(1);
@@ -1492,6 +1493,13 @@ function App() {
   const [survivorState, setSurvivorState] = useState<SurvivorState | null>(null);
   const [survivorNotice, setSurvivorNotice] = useState("");
   const [survivorPending, setSurvivorPending] = useState(false);
+  const [nflConfidenceState, setNflConfidenceState] = useState<NflConfidenceState | null>(null);
+  const [nflConfidenceNotice, setNflConfidenceNotice] = useState("");
+  const [nflConfidencePending, setNflConfidencePending] = useState(false);
+  const [nflConfidenceStep, setNflConfidenceStep] = useState<"winners" | "ranking">("winners");
+  const [nflConfidenceSelections, setNflConfidenceSelections] = useState<Record<string, string>>({});
+  const [nflConfidenceRanking, setNflConfidenceRanking] = useState<string[]>([]);
+  const [nflConfidenceDragging, setNflConfidenceDragging] = useState<string | null>(null);
   const [towerState, setTowerState] = useState<TowerState | null>(null);
   const [towerValueWager, setTowerValueWager] = useState("5");
   const [towerHeightWager, setTowerHeightWager] = useState("5");
@@ -1591,6 +1599,22 @@ function App() {
   const [referralNotice, setReferralNotice] = useState("");
   const [merchStoreUrl, setMerchStoreUrl] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!nflConfidenceState) return;
+    const nextSelections: Record<string, string> = {};
+    const ranked: string[] = [];
+    [...nflConfidenceState.picks]
+      .sort((left, right) => (left.confidencePoints ?? 999) - (right.confidencePoints ?? 999))
+      .forEach((pick) => {
+        if (!pick.selectedTeam) return;
+        nextSelections[pick.gameId] = pick.selectedTeam;
+        ranked.push(pick.gameId);
+      });
+    setNflConfidenceSelections(nextSelections);
+    setNflConfidenceRanking(ranked);
+    setNflConfidenceStep(ranked.length > 0 ? "ranking" : "winners");
+  }, [nflConfidenceState]);
+
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
     const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult] = await Promise.all([
@@ -1642,12 +1666,13 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, nflConfidenceResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
         api<ReferralInfo>("/me/referral", {}, authToken),
-        api<SurvivorState>("/survivor", {}, authToken).catch(() => null)
+        api<SurvivorState>("/survivor", {}, authToken).catch(() => null),
+        api<NflConfidenceState>("/nfl-confidence", {}, authToken).catch(() => null)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1662,6 +1687,7 @@ function App() {
       setPushPreferences(pushPreferenceResult.preferences);
       setReferralInfo(referralResult);
       setSurvivorState(survivorResult);
+      setNflConfidenceState(nflConfidenceResult);
       if (TOWER_FEATURE_ENABLED) {
         api<TowerState>("/tower/state", {}, authToken)
           .then((result) => setTowerState(result))
@@ -2953,6 +2979,118 @@ function App() {
     }
   };
 
+  const refreshNflConfidence = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setNflConfidenceNotice("");
+    try {
+      const result = await api<NflConfidenceState>("/nfl-confidence", {}, token);
+      setNflConfidenceState(result);
+      setNflConfidenceNotice("NFL Confidence refreshed.");
+    } catch (err) {
+      setNflConfidenceNotice((err as Error).message);
+    }
+  };
+
+  const joinNflConfidence = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setNflConfidencePending(true);
+    setNflConfidenceNotice("");
+    try {
+      await api<{ ok: boolean }>("/nfl-confidence/entry", { method: "POST" }, token);
+      const result = await api<NflConfidenceState>("/nfl-confidence", {}, token);
+      setNflConfidenceState(result);
+      setNflConfidenceNotice("You joined NFL Confidence.");
+    } catch (err) {
+      setNflConfidenceNotice((err as Error).message);
+    } finally {
+      setNflConfidencePending(false);
+    }
+  };
+
+  const confidencePointValues = (gameCount: number, unavailable: number[]) => {
+    const blocked = new Set(unavailable);
+    return Array.from({ length: gameCount }, (_, index) => index + 1).filter((value) => !blocked.has(value));
+  };
+
+  const nflConfidencePickForGame = (gameId: string) =>
+    nflConfidenceState?.picks.find((pick) => pick.gameId === gameId) ?? null;
+
+  const nflConfidenceSelectableGames = () =>
+    nflConfidenceState?.games.filter((game) => {
+      const pick = nflConfidencePickForGame(game.id);
+      return !(pick && pick.selectedTeam === null && (pick.status === "lost" || pick.status === "void"));
+    }) ?? [];
+
+  const selectNflConfidenceWinner = (gameId: string, selectedTeam: string) => {
+    setNflConfidenceSelections((current) => ({ ...current, [gameId]: selectedTeam }));
+    setNflConfidenceRanking((current) => current.includes(gameId) ? current : [...current, gameId]);
+  };
+
+  const reorderNflConfidenceRanking = (targetGameId: string) => {
+    if (!nflConfidenceDragging || nflConfidenceDragging === targetGameId) return;
+    setNflConfidenceRanking((current) => {
+      const withoutDragging = current.filter((gameId) => gameId !== nflConfidenceDragging);
+      const targetIndex = withoutDragging.indexOf(targetGameId);
+      if (targetIndex < 0) return current;
+      const next = [...withoutDragging];
+      next.splice(targetIndex, 0, nflConfidenceDragging);
+      return next;
+    });
+  };
+
+  const saveNflConfidencePicks = async () => {
+    if (!token || !nflConfidenceState) return;
+    setNflConfidencePending(true);
+    setNflConfidenceNotice("");
+    try {
+      const availablePoints = confidencePointValues(nflConfidenceState.games.length, nflConfidenceState.unavailableConfidencePoints);
+      const selectableGames = nflConfidenceSelectableGames();
+      if (nflConfidenceRanking.length !== selectableGames.length || availablePoints.length !== selectableGames.length) {
+        setNflConfidenceNotice("Select every available game and rank every confidence slot before saving.");
+        return;
+      }
+      const picks = nflConfidenceRanking.map((gameId, index) => {
+        const selectedTeam = nflConfidenceSelections[gameId];
+        if (!selectedTeam) throw new Error("Every ranked game must have a winner selected.");
+        return {
+          gameId,
+          selectedTeam,
+          confidencePoints: availablePoints[index]
+        };
+      });
+      await api<{ ok: boolean }>("/nfl-confidence/picks", {
+        method: "PUT",
+        body: JSON.stringify({ week: nflConfidenceState.currentWeek, picks })
+      }, token);
+      const result = await api<NflConfidenceState>("/nfl-confidence", {}, token);
+      setNflConfidenceState(result);
+      setNflConfidenceNotice("NFL Confidence picks saved.");
+    } catch (err) {
+      setNflConfidenceNotice((err as Error).message);
+    } finally {
+      setNflConfidencePending(false);
+    }
+  };
+
+  const settleNflConfidence = async () => {
+    if (!token || !nflConfidenceState || !isNateRakelAccount) return;
+    setNflConfidencePending(true);
+    setNflConfidenceNotice("");
+    try {
+      const result = await api<{ week: number; completedEvents: number; settled: number }>("/nfl-confidence/settle", {
+        method: "POST",
+        body: JSON.stringify({ week: nflConfidenceState.currentWeek })
+      }, token);
+      const nextState = await api<NflConfidenceState>("/nfl-confidence", {}, token);
+      setNflConfidenceState(nextState);
+      setNflConfidenceNotice(`Checked ${result.completedEvents} final game(s). Settled ${result.settled} pick(s).`);
+    } catch (err) {
+      setNflConfidenceNotice((err as Error).message);
+    } finally {
+      setNflConfidencePending(false);
+    }
+  };
+
   const refreshAdminSurvivor = async () => {
     if (!token || !isNateRakelAccount) return;
     setAdminSurvivorNotice("");
@@ -3240,6 +3378,230 @@ function App() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const NflConfidencePage = () => {
+    const state = nflConfidenceState;
+    const selectableGames = nflConfidenceSelectableGames();
+    const selectedCount = selectableGames.filter((game) => nflConfidenceSelections[game.id]).length;
+    const allWinnersSelected = selectableGames.length > 0 && selectedCount === selectableGames.length;
+    const availablePoints = state ? confidencePointValues(state.games.length, state.unavailableConfidencePoints) : [];
+    const rankedGames = nflConfidenceRanking
+      .map((gameId) => selectableGames.find((game) => game.id === gameId))
+      .filter(Boolean) as NonNullable<typeof state>["games"];
+    const unrankedSelectedGames = selectableGames.filter((game) => nflConfidenceSelections[game.id] && !nflConfidenceRanking.includes(game.id));
+    const savedPickByGame = new Map(state?.picks.map((pick) => [pick.gameId, pick]) ?? []);
+
+    return (
+      <div className="nfl-confidence-page">
+        <div className="panel page-panel nfl-confidence-hero">
+          <div className="panel-title">
+            <ClipboardList size={20} />
+            <div>
+              <h2>NFL Confidence</h2>
+              <span>Winner picks first. Confidence ranking second.</span>
+            </div>
+          </div>
+          <p className="muted">Pick every NFL winner for the week, then drag those picks onto a confidence scale. Low values are low confidence. The highest value is your strongest pick.</p>
+          {!state ? (
+            <button className="secondary-action" onClick={refreshNflConfidence}>Load NFL Confidence</button>
+          ) : !state.entry ? (
+            <div className="notification-card">
+              <div>
+                <strong>Join NFL Confidence</strong>
+                <span>Weekly prize: {money(state.pool.weeklyPrizeCents)}. Season prizes: {money(state.pool.seasonWinnerPrizeCents)} winner, {money(state.pool.seasonRunnerUpPrizeCents)} runner-up.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="primary" disabled={nflConfidencePending} onClick={joinNflConfidence}>Join Contest</button>
+              </div>
+            </div>
+          ) : (
+            <div className="survivor-status-grid">
+              <div className="metric-card">
+                <span>Season</span>
+                <strong>{state.pool.season}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Week</span>
+                <strong>{state.currentWeek}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Selected</span>
+                <strong>{selectedCount}/{selectableGames.length}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Weekly Prize</span>
+                <strong>{money(state.pool.weeklyPrizeCents)}</strong>
+                <small>Ties roll over</small>
+              </div>
+            </div>
+          )}
+          {state?.missedThursdayPick && <p className="error">The first-game pick was missed. That game is a loss and confidence value 5 is unavailable this week.</p>}
+          {state?.sundayLocked && <p className="error">The first Sunday kickoff has passed. This week is locked with no points awarded.</p>}
+          {nflConfidenceNotice && <p className={nflConfidenceNotice.includes("saved") || nflConfidenceNotice.includes("joined") || nflConfidenceNotice.includes("refreshed") ? "success" : "error"}>{nflConfidenceNotice}</p>}
+        </div>
+
+        {state?.entry && (
+          <>
+            <div className="panel page-panel nfl-confidence-stepper">
+              <button className={nflConfidenceStep === "winners" ? "active" : ""} onClick={() => setNflConfidenceStep("winners")}>1. Pick Winners</button>
+              <button className={nflConfidenceStep === "ranking" ? "active" : ""} disabled={!allWinnersSelected} onClick={() => setNflConfidenceStep("ranking")}>2. Rank Confidence</button>
+            </div>
+
+            {nflConfidenceStep === "winners" && (
+              <div className="panel page-panel nfl-confidence-games">
+                <div className="panel-title">
+                  <ClipboardList size={20} />
+                  <h2>Week {state.currentWeek} Matchups</h2>
+                </div>
+                <div className="survivor-game-list">
+                  {state.games.map((game) => {
+                    const started = new Date(game.startsAt).getTime() <= currentTime;
+                    const penaltyPick = savedPickByGame.get(game.id);
+                    const blockedByPenalty = Boolean(penaltyPick && penaltyPick.selectedTeam === null);
+                    const selectedTeam = nflConfidenceSelections[game.id];
+                    return (
+                      <div key={game.id} className={`survivor-game-card ${blockedByPenalty ? "disabled-card" : ""}`}>
+                        <div>
+                          <strong>{game.awayTeam} @ {game.homeTeam}</strong>
+                          <span>{shortDateTime(game.startsAt)}{game.status === "final" && game.awayScore != null && game.homeScore != null ? ` • Final ${game.awayScore}-${game.homeScore}` : ""}</span>
+                        </div>
+                        {blockedByPenalty ? (
+                          <span className="game-started-pill">No pick - loss</span>
+                        ) : (
+                          <div className="survivor-pick-buttons">
+                            <button
+                              className={selectedTeam === game.awayTeam ? "selected" : ""}
+                              disabled={nflConfidencePending || started}
+                              onClick={() => selectNflConfidenceWinner(game.id, game.awayTeam)}
+                            >
+                              {game.awayTeam}
+                            </button>
+                            <button
+                              className={selectedTeam === game.homeTeam ? "selected" : ""}
+                              disabled={nflConfidencePending || started}
+                              onClick={() => selectNflConfidenceWinner(game.id, game.homeTeam)}
+                            >
+                              {game.homeTeam}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="notification-actions">
+                  <button className="primary" disabled={!allWinnersSelected} onClick={() => setNflConfidenceStep("ranking")}>Continue to Confidence</button>
+                  <button className="secondary-action" onClick={refreshNflConfidence}>Refresh</button>
+                </div>
+              </div>
+            )}
+
+            {nflConfidenceStep === "ranking" && (
+              <div className="panel page-panel nfl-confidence-ranking">
+                <div className="panel-title">
+                  <ShieldCheck size={20} />
+                  <div>
+                    <h2>Confidence Scale</h2>
+                    <span>Drag picks from lowest confidence to highest confidence.</span>
+                  </div>
+                </div>
+                {state.unavailableConfidencePoints.length > 0 && (
+                  <p className="muted">Unavailable confidence values: {state.unavailableConfidencePoints.join(", ")}</p>
+                )}
+                <div className="confidence-scale">
+                  {[...rankedGames, ...unrankedSelectedGames].map((game, index) => {
+                    const points = availablePoints[index] ?? index + 1;
+                    const selectedTeam = nflConfidenceSelections[game.id];
+                    const pick = savedPickByGame.get(game.id);
+                    return (
+                      <div
+                        key={game.id}
+                        className={`confidence-rank-row ${nflConfidenceDragging === game.id ? "dragging" : ""}`}
+                        draggable={!nflConfidencePending}
+                        onDragStart={() => setNflConfidenceDragging(game.id)}
+                        onDragEnd={() => setNflConfidenceDragging(null)}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDrop={() => reorderNflConfidenceRanking(game.id)}
+                      >
+                        <strong>{points}</strong>
+                        <div>
+                          <span>{selectedTeam}</span>
+                          <small>{game.awayTeam} @ {game.homeTeam} • {shortDateTime(game.startsAt)}</small>
+                        </div>
+                        {pick && <em>{survivorStatusLabel(pick.status)}{pick.pointsAwarded ? ` • ${pick.pointsAwarded} pts` : ""}</em>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="notification-actions">
+                  <button className="secondary-action" onClick={() => setNflConfidenceStep("winners")}>Back</button>
+                  <button className="primary" disabled={nflConfidencePending || rankedGames.length + unrankedSelectedGames.length !== availablePoints.length} onClick={saveNflConfidencePicks}>
+                    Save Picks
+                  </button>
+                  <button className="secondary-action" disabled={nflConfidencePending} onClick={settleNflConfidence}>Settle Finals</button>
+                </div>
+              </div>
+            )}
+
+            <div className="nfl-confidence-standings">
+              <div className="panel page-panel">
+                <div className="panel-title">
+                  <Trophy size={20} />
+                  <h2>Weekly Standings</h2>
+                </div>
+                <div className="user-map-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Player</th>
+                        <th>Week Pts</th>
+                        <th>Picks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {state.weeklyStandings.map((standing) => (
+                        <tr key={standing.userId}>
+                          <td>{standing.displayName}</td>
+                          <td>{standing.weekPoints}</td>
+                          <td>{standing.submittedPicks}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="panel page-panel">
+                <div className="panel-title">
+                  <Trophy size={20} />
+                  <h2>Season Standings</h2>
+                </div>
+                <div className="user-map-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Player</th>
+                        <th>Season Pts</th>
+                        <th>Week Pts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {state.seasonStandings.map((standing) => (
+                        <tr key={standing.userId}>
+                          <td>{standing.displayName}</td>
+                          <td>{standing.seasonPoints}</td>
+                          <td>{standing.weekPoints}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </>
@@ -3816,6 +4178,9 @@ function App() {
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
           <button className={activePage === "survivor" ? "active" : ""} onClick={() => openPage("survivor")}><Trophy size={18} /> NFL Survivor</button>
+          {isNateRakelAccount && (
+            <button className={activePage === "nfl-confidence" ? "active" : ""} onClick={() => openPage("nfl-confidence")}><ClipboardList size={18} /> NFL Confidence</button>
+          )}
           {TOWER_FEATURE_ENABLED && isNateRakelAccount && (
             <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
           )}
@@ -4074,6 +4439,7 @@ function App() {
 
         {activePage === "tower" && TOWER_FEATURE_ENABLED && isNateRakelAccount && TowerPage()}
         {activePage === "survivor" && SurvivorPage()}
+        {activePage === "nfl-confidence" && isNateRakelAccount && NflConfidencePage()}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">

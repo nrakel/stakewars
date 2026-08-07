@@ -135,6 +135,19 @@ const survivorAdminPickSchema = z.object({
   note: z.string().trim().max(500).optional()
 });
 
+const nflConfidenceSubmitSchema = z.object({
+  week: z.number().int().min(1).max(25),
+  picks: z.array(z.object({
+    gameId: z.string().uuid(),
+    selectedTeam: z.string().trim().min(1).max(120),
+    confidencePoints: z.number().int().min(1).max(32)
+  })).min(1).max(32)
+});
+
+const nflConfidenceSettleSchema = z.object({
+  week: z.number().int().min(1).max(25).optional()
+});
+
 type WagerLineRow = {
   id: string;
   sport: SportKey;
@@ -217,6 +230,131 @@ const getActiveSurvivorPool = async () => {
     `
   );
   return result.rows[0] ?? null;
+};
+
+const getActiveNflConfidencePool = async () => {
+  const result = await query<{
+    id: string;
+    name: string;
+    season: number;
+    startsOn: string;
+    weeklyPrizeCents: number;
+    seasonWinnerPrizeCents: number;
+    seasonRunnerUpPrizeCents: number;
+  }>(
+    `
+      SELECT
+        id,
+        name,
+        season,
+        starts_on::text AS "startsOn",
+        weekly_prize_cents AS "weeklyPrizeCents",
+        season_winner_prize_cents AS "seasonWinnerPrizeCents",
+        season_runner_up_prize_cents AS "seasonRunnerUpPrizeCents"
+      FROM nfl_confidence_pool
+      WHERE status = 'active'
+      ORDER BY starts_on DESC
+      LIMIT 1
+    `
+  );
+  return result.rows[0] ?? null;
+};
+
+type EspnNflScoreboardResponse = {
+  events?: Array<{
+    id: string;
+    date: string;
+    competitions?: Array<{
+      status?: {
+        type?: {
+          completed?: boolean;
+          state?: string;
+          name?: string;
+        };
+      };
+      competitors?: Array<{
+        homeAway?: "home" | "away";
+        score?: string;
+        team?: {
+          displayName?: string;
+          name?: string;
+          shortDisplayName?: string;
+        };
+      }>;
+    }>;
+  }>;
+};
+
+const fetchEspnNflWeek = async (season: number, week: number) => {
+  const url = new URL("https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard");
+  url.searchParams.set("year", String(season));
+  url.searchParams.set("seasontype", "2");
+  url.searchParams.set("week", String(week));
+  url.searchParams.set("limit", "100");
+  const response = await fetch(url, { headers: { "accept": "*/*", "user-agent": "curl/8.0.1" } });
+  if (!response.ok) {
+    throw new Error(`ESPN NFL schedule failed with ${response.status}`);
+  }
+  return (await response.json()) as EspnNflScoreboardResponse;
+};
+
+const ensureNflConfidenceWeekGames = async (pool: { id: string; season: number }, week: number) => {
+  const existing = await query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM nfl_confidence_game WHERE pool_id = $1 AND week = $2",
+    [pool.id, week]
+  );
+  if (Number(existing.rows[0]?.count ?? 0) > 0) {
+    return;
+  }
+
+  const scoreboard = await fetchEspnNflWeek(pool.season, week);
+  await transaction(async (client) => {
+    for (const event of scoreboard.events ?? []) {
+      const competition = event.competitions?.[0];
+      const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+      const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+      const homeTeam = home?.team?.displayName ?? home?.team?.name ?? home?.team?.shortDisplayName;
+      const awayTeam = away?.team?.displayName ?? away?.team?.name ?? away?.team?.shortDisplayName;
+      const startsAt = new Date(event.date);
+      if (!event.id || !homeTeam || !awayTeam || Number.isNaN(startsAt.getTime())) {
+        continue;
+      }
+      const weekStart = currentWeekStart(startsAt);
+      await client.query(
+        `
+          INSERT INTO nfl_confidence_game (
+            id, pool_id, season, week, week_start, provider_event_id, starts_at, away_team, home_team
+          )
+          VALUES ($1, $2, $3, $4, $5::date, $6, $7, $8, $9)
+          ON CONFLICT (pool_id, provider_event_id) DO UPDATE
+          SET starts_at = EXCLUDED.starts_at,
+              away_team = EXCLUDED.away_team,
+              home_team = EXCLUDED.home_team,
+              updated_at = now()
+        `,
+        [randomUUID(), pool.id, pool.season, week, weekStart, event.id, startsAt, awayTeam, homeTeam]
+      );
+    }
+  });
+};
+
+const currentNflConfidenceWeek = async (pool: { id: string; season: number; startsOn: string }) => {
+  const today = centralDate();
+  if (today < pool.startsOn) {
+    return 1;
+  }
+  const upcoming = await query<{ week: number }>(
+    `
+      SELECT week
+      FROM nfl_confidence_game
+      WHERE pool_id = $1
+        AND starts_at >= now() - interval '12 hours'
+      ORDER BY week ASC, starts_at ASC
+      LIMIT 1
+    `,
+    [pool.id]
+  );
+  return upcoming.rows[0]?.week ?? 1;
 };
 
 const survivorVisiblePickTeam = (startsAt: Date, selectedTeam: string, isCurrentUser: boolean, isAdmin = false) =>
@@ -1344,6 +1482,497 @@ export const registerRoutes = (router: Router) => {
       }
       await sendVerificationLink(user.id, user.email);
       res.json({ sent: true, email: user.email });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/nfl-confidence", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const pool = await getActiveNflConfidencePool();
+      if (!pool) {
+        res.status(404).json({ error: "No active NFL Confidence pool is available." });
+        return;
+      }
+      let week = await currentNflConfidenceWeek(pool);
+      await ensureNflConfidenceWeekGames(pool, week);
+
+      const gamesResult = await query<{
+        id: string;
+        week: number;
+        startsAt: Date;
+        awayTeam: string;
+        homeTeam: string;
+        awayScore: number | null;
+        homeScore: number | null;
+        status: "scheduled" | "in_progress" | "final" | "void";
+      }>(
+        `
+          SELECT
+            id,
+            week,
+            starts_at AS "startsAt",
+            away_team AS "awayTeam",
+            home_team AS "homeTeam",
+            away_score AS "awayScore",
+            home_score AS "homeScore",
+            status
+          FROM nfl_confidence_game
+          WHERE pool_id = $1 AND week = $2
+          ORDER BY starts_at ASC, away_team ASC
+        `,
+        [pool.id, week]
+      );
+      if (gamesResult.rows.length === 0 && week !== 1) {
+        week = 1;
+        await ensureNflConfidenceWeekGames(pool, week);
+      }
+
+      const games = gamesResult.rows.length ? gamesResult.rows : (await query<typeof gamesResult.rows[number]>(
+        `
+          SELECT
+            id,
+            week,
+            starts_at AS "startsAt",
+            away_team AS "awayTeam",
+            home_team AS "homeTeam",
+            away_score AS "awayScore",
+            home_score AS "homeScore",
+            status
+          FROM nfl_confidence_game
+          WHERE pool_id = $1 AND week = $2
+          ORDER BY starts_at ASC, away_team ASC
+        `,
+        [pool.id, week]
+      )).rows;
+
+      const entryResult = await query<{ id: string; status: "active" | "inactive" }>(
+        `
+          SELECT id, status
+          FROM nfl_confidence_entry
+          WHERE pool_id = $1 AND user_id = $2
+          LIMIT 1
+        `,
+        [pool.id, req.user!.id]
+      );
+      const entry = entryResult.rows[0] ?? null;
+      const firstGame = games[0] ?? null;
+      const firstSundayGame = games.find((game) => {
+        const formatter = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" });
+        return formatter.format(game.startsAt) === "Sun";
+      }) ?? null;
+
+      if (entry && firstGame && firstGame.startsAt.getTime() <= Date.now()) {
+        const selectedCount = await query<{ count: string }>(
+          `
+            SELECT count(*)::text AS count
+            FROM nfl_confidence_pick
+            WHERE entry_id = $1
+              AND week = $2
+              AND selected_team IS NOT NULL
+          `,
+          [entry.id, week]
+        );
+
+        const firstPick = await query(
+          "SELECT 1 FROM nfl_confidence_pick WHERE entry_id = $1 AND game_id = $2 LIMIT 1",
+          [entry.id, firstGame.id]
+        );
+        if (!firstPick.rowCount) {
+          await query(
+            `
+              INSERT INTO nfl_confidence_pick (
+                id, pool_id, entry_id, user_id, game_id, season, week,
+                selected_team, confidence_points, status, points_awarded, locked_at
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, 5, 'lost', 0, now())
+              ON CONFLICT (entry_id, game_id) DO NOTHING
+            `,
+            [randomUUID(), pool.id, entry.id, req.user!.id, firstGame.id, pool.season, week]
+          );
+        }
+
+        if (firstSundayGame && firstSundayGame.startsAt.getTime() <= Date.now() && Number(selectedCount.rows[0]?.count ?? 0) === 0) {
+          for (const game of games) {
+            await query(
+              `
+                INSERT INTO nfl_confidence_pick (
+                  id, pool_id, entry_id, user_id, game_id, season, week,
+                  selected_team, confidence_points, status, points_awarded, locked_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, 'void', 0, now())
+                ON CONFLICT (entry_id, game_id) DO NOTHING
+              `,
+              [randomUUID(), pool.id, entry.id, req.user!.id, game.id, pool.season, week]
+            );
+          }
+        }
+      }
+
+      const picks = entry ? (await query<{
+        id: string;
+        gameId: string;
+        selectedTeam: string | null;
+        confidencePoints: number | null;
+        status: "pending" | "won" | "lost" | "void" | "no_pick";
+        pointsAwarded: number;
+      }>(
+        `
+          SELECT
+            id,
+            game_id AS "gameId",
+            selected_team AS "selectedTeam",
+            confidence_points AS "confidencePoints",
+            status,
+            points_awarded AS "pointsAwarded"
+          FROM nfl_confidence_pick
+          WHERE entry_id = $1 AND week = $2
+          ORDER BY confidence_points NULLS LAST, created_at ASC
+        `,
+        [entry.id, week]
+      )).rows : [];
+
+      const weeklyStandings = await query<{
+        userId: string;
+        displayName: string | null;
+        username: string;
+        weekPoints: number;
+        seasonPoints: number;
+        submittedPicks: number;
+        possibleWeekPoints: number;
+      }>(
+        `
+          WITH season_points AS (
+            SELECT entry_id, COALESCE(sum(points_awarded), 0)::int AS points
+            FROM nfl_confidence_pick
+            WHERE pool_id = $1
+            GROUP BY entry_id
+          ),
+          week_points AS (
+            SELECT entry_id,
+                   COALESCE(sum(points_awarded), 0)::int AS points,
+                   count(*) FILTER (WHERE selected_team IS NOT NULL)::int AS submitted,
+                   COALESCE(sum(confidence_points) FILTER (WHERE selected_team IS NOT NULL), 0)::int AS possible
+            FROM nfl_confidence_pick
+            WHERE pool_id = $1 AND week = $2
+            GROUP BY entry_id
+          )
+          SELECT
+            u.id AS "userId",
+            u.display_name AS "displayName",
+            u.username,
+            COALESCE(wp.points, 0)::int AS "weekPoints",
+            COALESCE(sp.points, 0)::int AS "seasonPoints",
+            COALESCE(wp.submitted, 0)::int AS "submittedPicks",
+            COALESCE(wp.possible, 0)::int AS "possibleWeekPoints"
+          FROM nfl_confidence_entry e
+          JOIN app_user u ON u.id = e.user_id
+          LEFT JOIN season_points sp ON sp.entry_id = e.id
+          LEFT JOIN week_points wp ON wp.entry_id = e.id
+          WHERE e.pool_id = $1
+          ORDER BY COALESCE(wp.points, 0) DESC, COALESCE(sp.points, 0) DESC, lower(COALESCE(NULLIF(u.display_name, ''), u.username))
+        `,
+        [pool.id, week]
+      );
+
+      const seasonStandings = [...weeklyStandings.rows]
+        .sort((left, right) => right.seasonPoints - left.seasonPoints || right.weekPoints - left.weekPoints || (left.displayName || left.username).localeCompare(right.displayName || right.username));
+
+      res.json({
+        pool,
+        entry,
+        currentWeek: week,
+        games: games.map((game) => ({
+          id: game.id,
+          week: game.week,
+          startsAt: game.startsAt.toISOString(),
+          awayTeam: game.awayTeam,
+          homeTeam: game.homeTeam,
+          status: game.status,
+          awayScore: game.awayScore,
+          homeScore: game.homeScore
+        })),
+        picks,
+        unavailableConfidencePoints: picks.some((pick) => pick.confidencePoints === 5 && pick.selectedTeam === null) ? [5] : [],
+        missedThursdayPick: picks.some((pick) => pick.confidencePoints === 5 && pick.selectedTeam === null && pick.status === "lost"),
+        sundayLocked: Boolean(firstSundayGame && firstSundayGame.startsAt.getTime() <= Date.now() && !picks.some((pick) => pick.selectedTeam)),
+        firstGameStartsAt: firstGame?.startsAt.toISOString() ?? null,
+        firstSundayGameStartsAt: firstSundayGame?.startsAt.toISOString() ?? null,
+        weeklyStandings: weeklyStandings.rows.map((row) => ({
+          userId: row.userId,
+          displayName: row.displayName || row.username,
+          weekPoints: row.weekPoints,
+          seasonPoints: row.seasonPoints,
+          submittedPicks: row.submittedPicks,
+          possibleWeekPoints: row.possibleWeekPoints
+        })),
+        seasonStandings: seasonStandings.map((row) => ({
+          userId: row.userId,
+          displayName: row.displayName || row.username,
+          weekPoints: row.weekPoints,
+          seasonPoints: row.seasonPoints,
+          submittedPicks: row.submittedPicks,
+          possibleWeekPoints: row.possibleWeekPoints
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/nfl-confidence/entry", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const pool = await getActiveNflConfidencePool();
+      if (!pool) {
+        res.status(404).json({ error: "No active NFL Confidence pool is available." });
+        return;
+      }
+      await query(
+        `
+          INSERT INTO nfl_confidence_entry (id, pool_id, user_id)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (pool_id, user_id) DO NOTHING
+        `,
+        [randomUUID(), pool.id, req.user!.id]
+      );
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put("/nfl-confidence/picks", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const input = nflConfidenceSubmitSchema.parse(req.body);
+      const pool = await getActiveNflConfidencePool();
+      if (!pool) {
+        res.status(404).json({ error: "No active NFL Confidence pool is available." });
+        return;
+      }
+      await ensureNflConfidenceWeekGames(pool, input.week);
+      const saved = await transaction(async (client) => {
+        const entryResult = await client.query<{ id: string; status: "active" | "inactive" }>(
+          "SELECT id, status FROM nfl_confidence_entry WHERE pool_id = $1 AND user_id = $2 FOR UPDATE",
+          [pool.id, req.user!.id]
+        );
+        const entry = entryResult.rows[0];
+        if (!entry) throw new WagerValidationError("Join NFL Confidence before making picks.");
+        if (entry.status !== "active") throw new WagerValidationError("Your NFL Confidence entry is inactive.");
+
+        const gamesResult = await client.query<{
+          id: string;
+          starts_at: Date;
+          away_team: string;
+          home_team: string;
+        }>(
+          `
+            SELECT id, starts_at, away_team, home_team
+            FROM nfl_confidence_game
+            WHERE pool_id = $1 AND week = $2
+            ORDER BY starts_at ASC
+            FOR SHARE
+          `,
+          [pool.id, input.week]
+        );
+        const games = gamesResult.rows;
+        if (!games.length) throw new WagerValidationError("No NFL Confidence games are available for this week.");
+
+        const firstGame = games[0];
+        const firstSundayGame = games.find((game) => new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", weekday: "short" }).format(game.starts_at) === "Sun");
+        const existingSelected = await client.query<{ count: string }>(
+          `
+            SELECT count(*)::text AS count
+            FROM nfl_confidence_pick
+            WHERE entry_id = $1
+              AND week = $2
+              AND selected_team IS NOT NULL
+          `,
+          [entry.id, input.week]
+        );
+        if (firstSundayGame && firstSundayGame.starts_at.getTime() <= Date.now() && Number(existingSelected.rows[0]?.count ?? 0) === 0) {
+          throw new WagerValidationError("The first Sunday kickoff has passed. This week is locked with no points awarded.");
+        }
+
+        const pickMap = new Map(input.picks.map((pick) => [pick.gameId, pick]));
+        const missedFirstGame = firstGame.starts_at.getTime() <= Date.now() && !pickMap.has(firstGame.id);
+        const expectedGames = missedFirstGame ? games.filter((game) => game.id !== firstGame.id) : games;
+        if (input.picks.length !== expectedGames.length) {
+          throw new WagerValidationError("Pick a winner for every available NFL Confidence game.");
+        }
+
+        const confidenceValues = input.picks.map((pick) => pick.confidencePoints);
+        if (new Set(confidenceValues).size !== confidenceValues.length) {
+          throw new WagerValidationError("Each confidence value can only be used once.");
+        }
+        const unavailable = missedFirstGame ? new Set([5]) : new Set<number>();
+        if (confidenceValues.some((value) => unavailable.has(value))) {
+          throw new WagerValidationError("Confidence value 5 is unavailable because the Thursday pick was missed.");
+        }
+
+        for (const game of expectedGames) {
+          const pick = pickMap.get(game.id);
+          if (!pick) throw new WagerValidationError("Pick a winner for every available NFL Confidence game.");
+          if (game.starts_at.getTime() <= Date.now()) {
+            throw new WagerValidationError(`${game.away_team} @ ${game.home_team} has already started.`);
+          }
+          if (pick.selectedTeam !== game.away_team && pick.selectedTeam !== game.home_team) {
+            throw new WagerValidationError("Selected team is not in the selected game.");
+          }
+        }
+
+        if (missedFirstGame) {
+          await client.query(
+            `
+              INSERT INTO nfl_confidence_pick (
+                id, pool_id, entry_id, user_id, game_id, season, week,
+                selected_team, confidence_points, status, points_awarded, locked_at
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, 5, 'lost', 0, now())
+              ON CONFLICT (entry_id, game_id) DO NOTHING
+            `,
+            [randomUUID(), pool.id, entry.id, req.user!.id, firstGame.id, pool.season, input.week]
+          );
+        }
+
+        for (const pick of input.picks) {
+          const game = games.find((candidate) => candidate.id === pick.gameId);
+          if (!game) continue;
+          await client.query(
+            `
+              INSERT INTO nfl_confidence_pick (
+                id, pool_id, entry_id, user_id, game_id, season, week,
+                selected_team, confidence_points, status, points_awarded
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 0)
+              ON CONFLICT (entry_id, game_id) DO UPDATE
+              SET selected_team = EXCLUDED.selected_team,
+                  confidence_points = EXCLUDED.confidence_points,
+                  status = 'pending',
+                  points_awarded = 0,
+                  updated_at = now()
+              WHERE nfl_confidence_pick.locked_at IS NULL
+              RETURNING id
+            `,
+            [randomUUID(), pool.id, entry.id, req.user!.id, pick.gameId, pool.season, input.week, pick.selectedTeam, pick.confidencePoints]
+          );
+        }
+        return { ok: true };
+      });
+      res.json(saved);
+    } catch (error) {
+      if (error instanceof WagerValidationError) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.post("/nfl-confidence/settle", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const input = nflConfidenceSettleSchema.parse(req.body ?? {});
+      const pool = await getActiveNflConfidencePool();
+      if (!pool) {
+        res.status(404).json({ error: "No active NFL Confidence pool is available." });
+        return;
+      }
+      const week = input.week ?? await currentNflConfidenceWeek(pool);
+      const scoreboard = await fetchEspnNflWeek(pool.season, week);
+      const events = scoreboard.events ?? [];
+      const completedEvents = events.filter((event) => event.competitions?.[0]?.status?.type?.completed);
+
+      const settled = await transaction(async (client) => {
+        for (const event of events) {
+          const competition = event.competitions?.[0];
+          const competitors = competition?.competitors ?? [];
+          const away = competitors.find((competitor) => competitor.homeAway === "away");
+          const home = competitors.find((competitor) => competitor.homeAway === "home");
+          if (!away || !home) continue;
+          const status = competition?.status?.type?.completed
+            ? "final"
+            : competition?.status?.type?.state === "in"
+              ? "in_progress"
+              : "scheduled";
+          await client.query(
+            `
+              UPDATE nfl_confidence_game
+              SET away_score = $5,
+                  home_score = $6,
+                  status = $7,
+                  updated_at = now()
+              WHERE pool_id = $1
+                AND season = $2
+                AND week = $3
+                AND provider_event_id = $4
+            `,
+            [
+              pool.id,
+              pool.season,
+              week,
+              event.id,
+              away.score == null ? null : Number(away.score),
+              home.score == null ? null : Number(home.score),
+              status
+            ]
+          );
+        }
+
+        let updated = 0;
+        const finalGames = await client.query<{
+          id: string;
+          awayTeam: string;
+          homeTeam: string;
+          awayScore: number | null;
+          homeScore: number | null;
+        }>(
+          `
+            SELECT
+              id,
+              away_team AS "awayTeam",
+              home_team AS "homeTeam",
+              away_score AS "awayScore",
+              home_score AS "homeScore"
+            FROM nfl_confidence_game
+            WHERE pool_id = $1
+              AND week = $2
+              AND status = 'final'
+          `,
+          [pool.id, week]
+        );
+        for (const game of finalGames.rows) {
+          if (game.awayScore == null || game.homeScore == null) continue;
+          const winner = game.awayScore > game.homeScore
+            ? game.awayTeam
+            : game.homeScore > game.awayScore
+              ? game.homeTeam
+              : null;
+          const result = await client.query(
+            `
+              UPDATE nfl_confidence_pick
+              SET status = CASE
+                    WHEN selected_team IS NULL THEN status
+                    WHEN selected_team = $2 THEN 'won'
+                    ELSE 'lost'
+                  END,
+                  points_awarded = CASE
+                    WHEN selected_team = $2 THEN COALESCE(confidence_points, 0)
+                    ELSE 0
+                  END,
+                  locked_at = COALESCE(locked_at, now()),
+                  updated_at = now()
+              WHERE pool_id = $1
+                AND game_id = $3
+                AND status = 'pending'
+            `,
+            [pool.id, winner, game.id]
+          );
+          updated += result.rowCount ?? 0;
+        }
+        return updated;
+      });
+
+      await logAdminAction(req, "nfl_confidence.settle", { week, completedEvents: completedEvents.length, settled });
+      res.json({ week, completedEvents: completedEvents.length, settled });
     } catch (error) {
       next(error);
     }
