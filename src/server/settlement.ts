@@ -67,7 +67,7 @@ type PendingLeg = {
   spread: string;
   odds_american: number;
   leg_status: WagerOutcome | "pending";
-  sport: "MLB" | "EPL" | "WORLDCUP";
+  sport: "MLB" | "NFL" | "EPL" | "WORLDCUP";
   market_key: "h2h" | "spreads" | "totals";
   starts_at: string;
   starts_on: string;
@@ -161,6 +161,8 @@ type EspnScoreboardResponse = {
 
 const espnLeagueForSport = (sport: "EPL" | "WORLDCUP") => sport === "EPL" ? "eng.1" : "fifa.world";
 
+const espnFootballLeagueForSport = (sport: "NFL") => sport.toLowerCase();
+
 const aliasKey = (sport: string | null | undefined, provider: string | null | undefined, team: string) =>
   `${sport ?? "*"}:${provider ?? "*"}:${team}`;
 
@@ -248,12 +250,17 @@ const espnDatesParam = (startDate: string, endDate: string) => {
   return `${startDate.replace(/-/g, "")}-${endDate.replace(/-/g, "")}`;
 };
 
+const espnFetchHeaders = {
+  "accept": "*/*",
+  "user-agent": "curl/8.0.1"
+};
+
 export const fetchSoccerFinals = async (sport: "EPL" | "WORLDCUP", startDate: string, endDate: string) => {
   const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/soccer/${espnLeagueForSport(sport)}/scoreboard`);
   url.searchParams.set("limit", "300");
   url.searchParams.set("dates", espnDatesParam(startDate, endDate));
 
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: espnFetchHeaders });
   if (!response.ok) {
     throw new Error(`ESPN soccer scoreboard ${sport} failed with ${response.status}`);
   }
@@ -272,6 +279,59 @@ export const fetchSoccerFinals = async (sport: "EPL" | "WORLDCUP", startDate: st
     const competition = event.competitions?.[0];
     const status = competition?.status?.type;
     if (!status?.completed && status?.state !== "post" && status?.name !== "STATUS_FULL_TIME") {
+      continue;
+    }
+
+    const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+    const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+    const homeScore = Number(home?.score);
+    const awayScore = Number(away?.score);
+    const homeTeam = home?.team?.displayName ?? home?.team?.name ?? home?.team?.shortDisplayName;
+    const awayTeam = away?.team?.displayName ?? away?.team?.name ?? away?.team?.shortDisplayName;
+
+    if (!homeTeam || !awayTeam || !Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
+      continue;
+    }
+
+    finals.push({
+      providerGameId: event.id,
+      startsAt: startsAt.toISOString(),
+      startsOn: yyyyMmDd(startsAt),
+      awayTeam,
+      homeTeam,
+      awayScore,
+      homeScore,
+      metadata: { source: "espn-scoreboard", sport, status }
+    });
+  }
+
+  return finals;
+};
+
+export const fetchFootballFinals = async (sport: "NFL", startDate: string, endDate: string) => {
+  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${espnFootballLeagueForSport(sport)}/scoreboard`);
+  url.searchParams.set("limit", "300");
+  url.searchParams.set("dates", espnDatesParam(startDate, endDate));
+
+  const response = await fetch(url, { headers: espnFetchHeaders });
+  if (!response.ok) {
+    throw new Error(`ESPN football scoreboard ${sport} failed with ${response.status}`);
+  }
+
+  const body = (await response.json()) as EspnScoreboardResponse;
+  const finals: FinalGame[] = [];
+  const startTime = new Date(`${startDate}T00:00:00.000Z`).getTime();
+  const endTime = new Date(`${endDate}T23:59:59.999Z`).getTime();
+
+  for (const event of body.events ?? []) {
+    const startsAt = new Date(event.date);
+    if (Number.isNaN(startsAt.getTime()) || startsAt.getTime() < startTime || startsAt.getTime() > endTime) {
+      continue;
+    }
+
+    const competition = event.competitions?.[0];
+    const status = competition?.status?.type;
+    if (!status?.completed && status?.state !== "post" && status?.name !== "STATUS_FINAL") {
       continue;
     }
 
@@ -376,7 +436,8 @@ export const outcomeForSelection = ({
   homeTeam,
   marketKey,
   spread,
-  game
+  game,
+  sport
 }: {
   selectedTeam: string;
   awayTeam: string;
@@ -384,6 +445,7 @@ export const outcomeForSelection = ({
   marketKey: "h2h" | "spreads" | "totals";
   spread: number;
   game: FinalGame;
+  sport?: string;
 }) => {
   if (game.noAction) {
     return "void" as const;
@@ -410,7 +472,7 @@ export const outcomeForSelection = ({
   if (marketKey === "h2h") {
     if (selectedScore > opponentScore) return "won" as const;
     if (selectedScore < opponentScore) return "lost" as const;
-    return "lost" as const;
+    return sport === "NFL" || sport === "NCAAF" ? "push" as const : "lost" as const;
   }
 
   const adjusted = selectedScore + spread;
@@ -426,7 +488,8 @@ const outcomeForLeg = (leg: PendingLeg, game: FinalGame) => {
     homeTeam: leg.home_team,
     marketKey: leg.market_key,
     spread: Number(leg.spread),
-    game
+    game,
+    sport: leg.sport
   });
 };
 
@@ -1011,4 +1074,12 @@ export const settleSoccerWagers = async (
     ...await fetchSoccerFinals("EPL", startDate, endDate)
   ];
   return settleWagersForFinals({ startDate, endDate, sports: ["EPL"], finals });
+};
+
+export const settleNflWagers = async (
+  startDate = yyyyMmDd(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+  endDate = yyyyMmDd(new Date())
+) => {
+  const finals = await fetchFootballFinals("NFL", startDate, endDate);
+  return settleWagersForFinals({ startDate, endDate, sports: ["NFL"], finals });
 };
