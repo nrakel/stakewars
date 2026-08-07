@@ -3041,6 +3041,18 @@ function App() {
     });
   };
 
+  const moveNflConfidenceRank = (gameId: string, direction: -1 | 1) => {
+    setNflConfidenceRanking((current) => {
+      const index = current.indexOf(gameId);
+      if (index < 0) return current;
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= current.length) return current;
+      const next = [...current];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
   const saveNflConfidencePicks = async () => {
     if (!token || !nflConfidenceState) return;
     setNflConfidencePending(true);
@@ -3539,6 +3551,24 @@ function App() {
                           <small>{game.awayTeam} @ {game.homeTeam} • {shortDateTime(game.startsAt)}</small>
                         </div>
                         {pick && <em>{survivorStatusLabel(pick.status)}{pick.pointsAwarded ? ` • ${pick.pointsAwarded} pts` : ""}</em>}
+                        <div className="confidence-rank-actions">
+                          <button
+                            type="button"
+                            title="Move down in confidence"
+                            disabled={nflConfidencePending || index === 0}
+                            onClick={() => moveNflConfidenceRank(game.id, -1)}
+                          >
+                            <ChevronDown size={16} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Move up in confidence"
+                            disabled={nflConfidencePending || index === availablePoints.length - 1}
+                            onClick={() => moveNflConfidenceRank(game.id, 1)}
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                        </div>
                       </div>
                     );
                   })}
