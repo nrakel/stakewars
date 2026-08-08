@@ -8,7 +8,7 @@ import "./styles.css";
 
 type AuthMode = "login" | "register";
 type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
-type AdminSection = "traffic" | "support" | "survivor" | "prizes" | "model" | "reddit" | "users";
+type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 const MAX_CHECKED_LEGS = 8;
@@ -150,6 +150,30 @@ type VisitorMetrics = {
   lastUpdatedAt: string | null;
   rows: VisitorMetricRow[];
   qrCampaigns: QrCampaignMetricRow[];
+};
+
+type AdminEligibilityRow = {
+  userId: string;
+  displayName: string;
+  username: string;
+  role: SessionUser["role"];
+  rank: number;
+  balanceCents: number;
+  settledProfitCents: number;
+  emailVerified: boolean;
+  weeklyWagers: number;
+  weeklyStakeCents: number;
+  requiredStakeCents: number;
+  referralBoostsUsed: number;
+  beatAi: boolean;
+  eligible: boolean;
+  hasWeeklyEntry: boolean;
+};
+
+type AdminEligibilityResponse = {
+  weekStart: string;
+  weeks: LeaderboardWeek[];
+  rows: AdminEligibilityRow[];
 };
 
 type AdminSurvivorState = Pick<SurvivorState, "pool" | "currentWeekStart" | "standings">;
@@ -1570,6 +1594,9 @@ function App() {
   const [userDisplayMapNotice, setUserDisplayMapNotice] = useState("");
   const [visitorMetrics, setVisitorMetrics] = useState<VisitorMetrics | null>(null);
   const [visitorMetricsNotice, setVisitorMetricsNotice] = useState("");
+  const [adminEligibility, setAdminEligibility] = useState<AdminEligibilityResponse | null>(null);
+  const [adminEligibilityWeekStart, setAdminEligibilityWeekStart] = useState("");
+  const [adminEligibilityNotice, setAdminEligibilityNotice] = useState("");
   const [adminSurvivorState, setAdminSurvivorState] = useState<AdminSurvivorState | null>(null);
   const [adminSurvivorNotice, setAdminSurvivorNotice] = useState("");
   const [adminPrizes, setAdminPrizes] = useState<WeeklyPrize[]>([]);
@@ -2073,6 +2100,8 @@ function App() {
       setUserDisplayMapNotice("");
       setVisitorMetrics(null);
       setVisitorMetricsNotice("");
+      setAdminEligibility(null);
+      setAdminEligibilityNotice("");
       setAdminSurvivorState(null);
       setAdminSurvivorNotice("");
       setAdminSupportConversations([]);
@@ -2084,14 +2113,17 @@ function App() {
     Promise.all([
       api<{ users: UserDisplayMapRow[] }>("/admin/user-display-map", {}, token),
       api<VisitorMetrics>("/admin/visitors", {}, token),
+      api<AdminEligibilityResponse>("/admin/eligibility", {}, token),
       api<AdminSurvivorState>("/admin/survivor", {}, token).catch(() => null),
       api<{ conversations: SupportConversation[] }>("/admin/support/conversations?status=open", {}, token),
       api<AdminPrizesResponse>("/admin/prizes", {}, token),
       api<ChineModelAudit>("/admin/chine-model-audit", {}, token)
     ])
-      .then(([usersResult, visitorsResult, survivorResult, supportResult, prizesResult, auditResult]) => {
+      .then(([usersResult, visitorsResult, eligibilityResult, survivorResult, supportResult, prizesResult, auditResult]) => {
         setUserDisplayMap(usersResult.users);
         setVisitorMetrics(visitorsResult);
+        setAdminEligibility(eligibilityResult);
+        setAdminEligibilityWeekStart(eligibilityResult.weekStart);
         setAdminSurvivorState(survivorResult);
         setAdminSupportConversations(supportResult.conversations);
         setAdminPrizes(prizesResult.prizes);
@@ -2105,6 +2137,7 @@ function App() {
         }
         setUserDisplayMapNotice("");
         setVisitorMetricsNotice("");
+        setAdminEligibilityNotice("");
         setChineModelAuditNotice("");
       })
       .catch((err) => setUserDisplayMapNotice((err as Error).message));
@@ -2930,6 +2963,20 @@ function App() {
     }
   };
 
+  const refreshAdminEligibility = async (weekStart = adminEligibilityWeekStart) => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminEligibilityNotice("");
+    try {
+      const path = weekStart ? `/admin/eligibility?weekStart=${encodeURIComponent(weekStart)}` : "/admin/eligibility";
+      const result = await api<AdminEligibilityResponse>(path, {}, token);
+      setAdminEligibility(result);
+      setAdminEligibilityWeekStart(result.weekStart);
+      setAdminEligibilityNotice("Eligibility refreshed.");
+    } catch (err) {
+      setAdminEligibilityNotice((err as Error).message);
+    }
+  };
+
   const refreshSurvivor = async () => {
     if (!token) return;
     setSurvivorNotice("");
@@ -3263,6 +3310,17 @@ function App() {
       case "winner": return "Winner";
       default: return status.charAt(0).toUpperCase() + status.slice(1);
     }
+  };
+
+  const adminEligibilityIssues = (row: AdminEligibilityRow) => {
+    if (row.role === "system") return ["System account"];
+    const issues = [];
+    if (!row.hasWeeklyEntry) issues.push("No weekly entry");
+    if (!row.emailVerified) issues.push("Email");
+    if (row.weeklyWagers < 10) issues.push("Wagers");
+    if (row.weeklyStakeCents < row.requiredStakeCents) issues.push("Stake");
+    if (!row.beatAi) issues.push("Beat Chine");
+    return issues;
   };
 
   const SurvivorPage = () => {
@@ -4753,6 +4811,7 @@ function App() {
                 ["traffic", "Traffic"],
                 ["support", "Support Chat"],
                 ["survivor", "Survivor"],
+                ["eligibility", "Eligibility"],
                 ["prizes", "Prizes"],
                 ["model", "Chine Model"],
                 ["reddit", "Reddit"],
@@ -5037,6 +5096,83 @@ function App() {
               </div>
               {adminSurvivorState && <small className="muted">{adminSurvivorState.pool.name} • {weekRangeLabel(adminSurvivorState.currentWeekStart)}</small>}
               {adminSurvivorNotice && <p className={adminSurvivorNotice.includes("refreshed") || adminSurvivorNotice.includes("Settled") || adminSurvivorNotice.includes("marked") ? "success" : "error"}>{adminSurvivorNotice}</p>}
+            </div>
+            )}
+            {adminSection === "eligibility" && (
+            <div className="notification-card eligibility-admin-card">
+              <div>
+                <strong>Weekly Eligibility</strong>
+                <span>Admin-only view of every player&apos;s reward eligibility progress for the selected contest week.</span>
+              </div>
+              <div className="notification-actions">
+                <label className="admin-week-select">
+                  Week
+                  <select
+                    value={adminEligibilityWeekStart}
+                    onChange={(event) => {
+                      setAdminEligibilityWeekStart(event.target.value);
+                      void refreshAdminEligibility(event.target.value);
+                    }}
+                  >
+                    {(adminEligibility?.weeks ?? leaderboardWeeks).map((week) => (
+                      <option key={week.weekStart} value={week.weekStart}>
+                        {weekRangeLabel(week.weekStart)}{week.isCurrent ? " (Current)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button className="secondary-action" onClick={() => refreshAdminEligibility()}>Refresh eligibility</button>
+              </div>
+              <div className="user-map-table visitor-table eligibility-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Player</th>
+                      <th>Balance</th>
+                      <th>Email</th>
+                      <th>Wagers</th>
+                      <th>Stake</th>
+                      <th>Boost</th>
+                      <th>Beat Chine</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(adminEligibility?.rows ?? []).map((row) => {
+                      const issues = adminEligibilityIssues(row);
+                      return (
+                        <tr key={row.userId} className={row.eligible ? "eligible-row" : row.role === "system" ? "system-row" : ""}>
+                          <td>{row.rank}</td>
+                          <td>
+                            <strong>{row.displayName}</strong>
+                            <small>{row.username}</small>
+                          </td>
+                          <td>{money(row.balanceCents)}</td>
+                          <td>{row.emailVerified ? "Verified" : "Missing"}</td>
+                          <td>{row.weeklyWagers}/10</td>
+                          <td>{money(row.weeklyStakeCents)} / {money(row.requiredStakeCents)}</td>
+                          <td>{row.referralBoostsUsed > 0 ? `x${row.referralBoostsUsed}` : "-"}</td>
+                          <td>{row.beatAi ? "Yes" : "No"}</td>
+                          <td>
+                            {row.eligible ? (
+                              <span className="eligibility-status eligible">Eligible</span>
+                            ) : (
+                              <span className="eligibility-status ineligible">{issues.join(", ")}</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {(!adminEligibility || adminEligibility.rows.length === 0) && (
+                      <tr>
+                        <td colSpan={9}>No users found for this week.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {adminEligibilityNotice && <p className={adminEligibilityNotice.includes("refreshed") ? "success" : "error"}>{adminEligibilityNotice}</p>}
             </div>
             )}
             {adminSection === "model" && (

@@ -3145,6 +3145,139 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
+  router.get("/admin/eligibility", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const requestedWeekStart = typeof req.query.weekStart === "string" && /^\d{4}-\d{2}-\d{2}$/.test(req.query.weekStart)
+        ? req.query.weekStart
+        : null;
+      const weeks = await query<{ weekStart: string; isCurrent: boolean }>(
+        `
+          WITH current_week AS (
+            SELECT (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date AS week_start
+          )
+          SELECT
+            week_start::text AS "weekStart",
+            week_start = (SELECT week_start FROM current_week) AS "isCurrent"
+          FROM (
+            SELECT week_starts_on AS week_start FROM weekly_entry
+            UNION
+            SELECT week_starts_on AS week_start FROM weekly_prize
+            UNION
+            SELECT week_start FROM current_week
+          ) weeks
+          ORDER BY week_start DESC
+        `
+      );
+      const currentWeek = weeks.rows.find((week) => week.isCurrent);
+      const selectedWeekStart = requestedWeekStart ?? currentWeek?.weekStart ?? weeks.rows[0]?.weekStart ?? centralDate();
+      const result = await query(
+        `
+          WITH selected_week AS (
+            SELECT $2::date AS week_start
+          ),
+          wager_activity AS (
+            SELECT
+              w.weekly_entry_id,
+              count(*)::int AS weekly_wagers,
+              coalesce(sum(w.stake_cents), 0)::int AS weekly_stake_cents,
+              COALESCE(sum(CASE
+                WHEN w.kind = 'round_robin' THEN COALESCE(rr.profit_cents, 0)
+                WHEN w.status = 'won' THEN w.potential_payout_cents - w.stake_cents
+                WHEN w.status = 'lost' THEN -w.stake_cents
+                WHEN w.status IN ('push', 'void') THEN 0
+                ELSE 0
+              END), 0)::int AS settled_profit_cents
+            FROM wager w
+            LEFT JOIN (
+              SELECT wager_id, sum(profit_cents)::int AS profit_cents
+              FROM round_robin_way_settlement
+              GROUP BY wager_id
+            ) rr ON rr.wager_id = w.id
+            GROUP BY w.weekly_entry_id
+          ),
+          ai AS (
+            SELECT e.starting_bankroll_cents + e.settled_profit_cents AS leaderboard_cents
+            FROM weekly_entry e
+            JOIN app_user u ON u.id = e.user_id
+            JOIN selected_week sw ON sw.week_start = e.week_starts_on
+            WHERE u.username = $1
+            LIMIT 1
+          ),
+          rows AS (
+            SELECT
+              u.id AS user_id,
+              u.username,
+              u.display_name,
+              u.role,
+              u.email_verified,
+              e.id IS NOT NULL AS has_weekly_entry,
+              COALESCE(wa.weekly_wagers, 0)::int AS weekly_wagers,
+              COALESCE(wa.weekly_stake_cents, 0)::int AS weekly_stake_cents,
+              (COALESCE(e.starting_bankroll_cents, $3::int) * 1.5)::int AS required_stake_cents,
+              COALESCE(e.starting_bankroll_cents, $3::int)
+                + (
+                  SELECT COALESCE(sum(boost.amount_cents), 0)::int
+                  FROM referral_bankroll_boost boost
+                  WHERE boost.referrer_user_id = u.id
+                    AND boost.status = 'used'
+                    AND boost.used_week_starts_on = (SELECT week_start FROM selected_week)
+                )
+                + COALESCE(e.settled_profit_cents, 0) AS leaderboard_cents,
+              COALESCE(e.settled_profit_cents, 0)::int AS settled_profit_cents,
+              (
+                SELECT count(*)::int
+                FROM referral_bankroll_boost boost
+                WHERE boost.referrer_user_id = u.id
+                  AND boost.status = 'used'
+                  AND boost.used_week_starts_on = (SELECT week_start FROM selected_week)
+              ) AS referral_boosts_used
+            FROM app_user u
+            CROSS JOIN selected_week sw
+            LEFT JOIN weekly_entry e ON e.user_id = u.id AND e.week_starts_on = sw.week_start
+            LEFT JOIN wager_activity wa ON wa.weekly_entry_id = e.id
+            WHERE u.role IN ('player', 'system')
+          )
+          SELECT
+            user_id AS "userId",
+            COALESCE(NULLIF(display_name, ''), CASE WHEN role = 'system' THEN 'StakeWars Chine' ELSE username END) AS "displayName",
+            username,
+            role,
+            (row_number() OVER (ORDER BY leaderboard_cents DESC, settled_profit_cents DESC))::int AS rank,
+            leaderboard_cents AS "balanceCents",
+            settled_profit_cents AS "settledProfitCents",
+            email_verified AS "emailVerified",
+            weekly_wagers AS "weeklyWagers",
+            weekly_stake_cents AS "weeklyStakeCents",
+            required_stake_cents AS "requiredStakeCents",
+            referral_boosts_used AS "referralBoostsUsed",
+            has_weekly_entry AS "hasWeeklyEntry",
+            CASE
+              WHEN role = 'system' THEN false
+              WHEN (SELECT leaderboard_cents FROM ai) IS NULL THEN false
+              ELSE leaderboard_cents > (SELECT leaderboard_cents FROM ai)
+            END AS "beatAi",
+            CASE
+              WHEN role = 'system' THEN false
+              WHEN email_verified
+                AND weekly_wagers >= 10
+                AND weekly_stake_cents >= required_stake_cents
+                AND (SELECT leaderboard_cents FROM ai) IS NOT NULL
+                AND leaderboard_cents > (SELECT leaderboard_cents FROM ai)
+              THEN true
+              ELSE false
+            END AS eligible
+          FROM rows
+          ORDER BY leaderboard_cents DESC, settled_profit_cents DESC
+        `,
+        [config.aiUsername, selectedWeekStart, config.weeklyBankrollCents]
+      );
+      await logAdminAction(req, "admin.eligibility.view", { weekStart: selectedWeekStart, rowCount: result.rowCount });
+      res.json({ weekStart: selectedWeekStart, weeks: weeks.rows, rows: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/admin/chine-model-audit", requireNateRakelAccount, async (req, res, next) => {
     try {
       const since = optionalDateParam.parse(typeof req.query.since === "string" ? req.query.since : undefined) ?? null;
