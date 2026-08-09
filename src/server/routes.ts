@@ -1834,6 +1834,16 @@ export const registerRoutes = (router: Router) => {
           );
         }
 
+        await client.query(
+          `
+            DELETE FROM nfl_confidence_pick
+            WHERE entry_id = $1
+              AND week = $2
+              AND locked_at IS NULL
+          `,
+          [entry.id, input.week]
+        );
+
         for (const pick of input.picks) {
           const game = games.find((candidate) => candidate.id === pick.gameId);
           if (!game) continue;
@@ -1844,14 +1854,6 @@ export const registerRoutes = (router: Router) => {
                 selected_team, confidence_points, status, points_awarded
               )
               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending', 0)
-              ON CONFLICT (entry_id, game_id) DO UPDATE
-              SET selected_team = EXCLUDED.selected_team,
-                  confidence_points = EXCLUDED.confidence_points,
-                  status = 'pending',
-                  points_awarded = 0,
-                  updated_at = now()
-              WHERE nfl_confidence_pick.locked_at IS NULL
-              RETURNING id
             `,
             [randomUUID(), pool.id, entry.id, req.user!.id, pick.gameId, pool.season, input.week, pick.selectedTeam, pick.confidencePoints]
           );
