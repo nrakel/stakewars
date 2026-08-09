@@ -3340,13 +3340,67 @@ textarea {
 @media (max-width: 860px) {
   .tower-page,
   .support-admin-layout,
-  .nfl-confidence-standings,
-  .confidence-builder {
+  .nfl-confidence-standings {
     grid-template-columns: 1fr;
   }
 
+  .confidence-builder {
+    grid-template-columns: minmax(120px, 0.85fr) minmax(150px, 1.15fr);
+    gap: 8px;
+  }
+
+  .confidence-bucket {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .confidence-bucket h3 {
+    font-size: 0.82rem;
+  }
+
+  .confidence-pick-chip {
+    padding: 7px;
+    border-radius: 7px;
+  }
+
+  .confidence-pick-chip strong {
+    font-size: 0.76rem;
+    line-height: 1.15;
+  }
+
+  .confidence-pick-chip span {
+    font-size: 0.65rem;
+    line-height: 1.2;
+  }
+
   .confidence-rank-row {
-    grid-template-columns: 42px minmax(0, 1fr);
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 6px;
+    padding: 7px;
+    border-radius: 7px;
+  }
+
+  .confidence-rank-row > strong {
+    width: 28px;
+    height: 28px;
+    font-size: 0.78rem;
+  }
+
+  .confidence-rank-row span {
+    font-size: 0.76rem;
+    line-height: 1.15;
+  }
+
+  .confidence-rank-row small,
+  .confidence-rank-row em,
+  .confidence-slot-help {
+    font-size: 0.64rem;
+    line-height: 1.2;
+  }
+
+  .confidence-empty-slot {
+    padding: 7px;
+    font-size: 0.72rem;
   }
 
   .confidence-rank-row em,
@@ -3356,8 +3410,8 @@ textarea {
   }
 
   .confidence-rank-actions button {
-    width: 42px;
-    height: 38px;
+    width: 30px;
+    height: 30px;
   }
 
   .tower-wager-grid,
