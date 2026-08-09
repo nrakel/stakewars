@@ -1631,7 +1631,7 @@ function App() {
     const nextSelections: Record<string, string> = {};
     const ranked: string[] = [];
     [...nflConfidenceState.picks]
-      .sort((left, right) => (left.confidencePoints ?? 999) - (right.confidencePoints ?? 999))
+      .sort((left, right) => (right.confidencePoints ?? -1) - (left.confidencePoints ?? -1))
       .forEach((pick) => {
         if (!pick.selectedTeam) return;
         nextSelections[pick.gameId] = pick.selectedTeam;
@@ -3059,7 +3059,7 @@ function App() {
 
   const confidencePointValues = (gameCount: number, unavailable: number[]) => {
     const blocked = new Set(unavailable);
-    return Array.from({ length: gameCount }, (_, index) => index + 1).filter((value) => !blocked.has(value));
+    return Array.from({ length: gameCount }, (_, index) => gameCount - index).filter((value) => !blocked.has(value));
   };
 
   const nflConfidencePickForGame = (gameId: string) =>
@@ -3073,17 +3073,18 @@ function App() {
 
   const selectNflConfidenceWinner = (gameId: string, selectedTeam: string) => {
     setNflConfidenceSelections((current) => ({ ...current, [gameId]: selectedTeam }));
-    setNflConfidenceRanking((current) => current.includes(gameId) ? current : [...current, gameId]);
   };
 
-  const reorderNflConfidenceRanking = (targetGameId: string) => {
-    if (!nflConfidenceDragging || nflConfidenceDragging === targetGameId) return;
+  const assignNflConfidenceRank = (targetIndex: number) => {
+    if (!nflConfidenceDragging) return;
     setNflConfidenceRanking((current) => {
-      const withoutDragging = current.filter((gameId) => gameId !== nflConfidenceDragging);
-      const targetIndex = withoutDragging.indexOf(targetGameId);
-      if (targetIndex < 0) return current;
-      const next = [...withoutDragging];
-      next.splice(targetIndex, 0, nflConfidenceDragging);
+      const next = [...current];
+      const fromIndex = next.indexOf(nflConfidenceDragging);
+      if (fromIndex >= 0) {
+        [next[fromIndex], next[targetIndex]] = [next[targetIndex] ?? "", next[fromIndex]];
+      } else {
+        next[targetIndex] = nflConfidenceDragging;
+      }
       return next;
     });
   };
@@ -3095,9 +3096,13 @@ function App() {
       const nextIndex = index + direction;
       if (nextIndex < 0 || nextIndex >= current.length) return current;
       const next = [...current];
-      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      [next[index], next[nextIndex]] = [next[nextIndex] ?? "", next[index]];
       return next;
     });
+  };
+
+  const removeNflConfidenceRank = (gameId: string) => {
+    setNflConfidenceRanking((current) => current.map((currentGameId) => currentGameId === gameId ? "" : currentGameId));
   };
 
   const saveNflConfidencePicks = async () => {
@@ -3107,8 +3112,9 @@ function App() {
     try {
       const availablePoints = confidencePointValues(nflConfidenceState.games.length, nflConfidenceState.unavailableConfidencePoints);
       const selectableGames = nflConfidenceSelectableGames();
-      if (nflConfidenceRanking.length !== selectableGames.length || availablePoints.length !== selectableGames.length) {
-        setNflConfidenceNotice("Select every available game and rank every confidence slot before saving.");
+      const assignedRanking = nflConfidenceRanking.filter(Boolean);
+      if (assignedRanking.length !== selectableGames.length || availablePoints.length !== selectableGames.length) {
+        setNflConfidenceNotice("Place every selected game into a confidence slot before saving.");
         return;
       }
       const picks = nflConfidenceRanking.map((gameId, index) => {
@@ -3465,10 +3471,8 @@ function App() {
     const selectedCount = selectableGames.filter((game) => nflConfidenceSelections[game.id]).length;
     const allWinnersSelected = selectableGames.length > 0 && selectedCount === selectableGames.length;
     const availablePoints = state ? confidencePointValues(state.games.length, state.unavailableConfidencePoints) : [];
-    const rankedGames = nflConfidenceRanking
-      .map((gameId) => selectableGames.find((game) => game.id === gameId))
-      .filter(Boolean) as NonNullable<typeof state>["games"];
-    const unrankedSelectedGames = selectableGames.filter((game) => nflConfidenceSelections[game.id] && !nflConfidenceRanking.includes(game.id));
+    const assignedRankings = nflConfidenceRanking.filter(Boolean);
+    const unrankedSelectedGames = selectableGames.filter((game) => nflConfidenceSelections[game.id] && !assignedRankings.includes(game.id));
     const savedPickByGame = new Map(state?.picks.map((pick) => [pick.gameId, pick]) ?? []);
 
     return (
@@ -3582,58 +3586,104 @@ function App() {
                   <ShieldCheck size={20} />
                   <div>
                     <h2>Confidence Scale</h2>
-                    <span>Drag picks from lowest confidence to highest confidence.</span>
+                    <span>Move each pick from the bucket into a confidence slot.</span>
                   </div>
                 </div>
                 {state.unavailableConfidencePoints.length > 0 && (
                   <p className="muted">Unavailable confidence values: {state.unavailableConfidencePoints.join(", ")}</p>
                 )}
-                <div className="confidence-scale">
-                  {[...rankedGames, ...unrankedSelectedGames].map((game, index) => {
-                    const points = availablePoints[index] ?? index + 1;
-                    const selectedTeam = nflConfidenceSelections[game.id];
-                    const pick = savedPickByGame.get(game.id);
-                    return (
-                      <div
-                        key={game.id}
-                        className={`confidence-rank-row ${nflConfidenceDragging === game.id ? "dragging" : ""}`}
-                        draggable={!nflConfidencePending}
-                        onDragStart={() => setNflConfidenceDragging(game.id)}
-                        onDragEnd={() => setNflConfidenceDragging(null)}
-                        onDragOver={(event) => event.preventDefault()}
-                        onDrop={() => reorderNflConfidenceRanking(game.id)}
-                      >
-                        <strong>{points}</strong>
-                        <div>
-                          <span>{selectedTeam}</span>
-                          <small>{game.awayTeam} @ {game.homeTeam} • {shortDateTime(game.startsAt)}</small>
+                <div className="confidence-builder">
+                  <div className="confidence-bucket">
+                    <h3>Pick Bucket</h3>
+                    {unrankedSelectedGames.length === 0 ? (
+                      <p className="muted">All selected games are on the ladder.</p>
+                    ) : unrankedSelectedGames.map((game) => {
+                      const selectedTeam = nflConfidenceSelections[game.id];
+                      return (
+                        <button
+                          key={game.id}
+                          type="button"
+                          className={`confidence-pick-chip ${nflConfidenceDragging === game.id ? "dragging" : ""}`}
+                          draggable={!nflConfidencePending}
+                          onClick={() => setNflConfidenceDragging((current) => current === game.id ? null : game.id)}
+                          onDragStart={() => setNflConfidenceDragging(game.id)}
+                          onDragEnd={() => setNflConfidenceDragging(null)}
+                        >
+                          <strong>{selectedTeam}</strong>
+                          <span>{game.awayTeam} @ {game.homeTeam} • {shortDateTime(game.startsAt)}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="confidence-scale">
+                    {availablePoints.map((points, index) => {
+                      const gameId = nflConfidenceRanking[index] ?? "";
+                      const game = selectableGames.find((candidate) => candidate.id === gameId) ?? null;
+                      const selectedTeam = game ? nflConfidenceSelections[game.id] : "";
+                      const pick = game ? savedPickByGame.get(game.id) : null;
+                      return (
+                        <div
+                          key={points}
+                          className={`confidence-rank-row ${nflConfidenceDragging && !game ? "empty-target" : ""}`}
+                          onDragOver={(event) => event.preventDefault()}
+                          onDrop={() => assignNflConfidenceRank(index)}
+                        >
+                          <strong>{points}</strong>
+                          {game ? (
+                            <>
+                              <div>
+                                <span>{selectedTeam}</span>
+                                <small>{game.awayTeam} @ {game.homeTeam} • {shortDateTime(game.startsAt)}</small>
+                              </div>
+                              {pick && <em>{survivorStatusLabel(pick.status)}{pick.pointsAwarded ? ` • ${pick.pointsAwarded} pts` : ""}</em>}
+                              <div className="confidence-rank-actions">
+                                <button
+                                  type="button"
+                                  title="Remove from confidence ladder"
+                                  disabled={nflConfidencePending}
+                                  onClick={() => removeNflConfidenceRank(game.id)}
+                                >
+                                  <X size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Move down in confidence"
+                                  disabled={nflConfidencePending || index === availablePoints.length - 1}
+                                  onClick={() => moveNflConfidenceRank(game.id, 1)}
+                                >
+                                  <ArrowDown size={16} />
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Move up in confidence"
+                                  disabled={nflConfidencePending || index === 0}
+                                  onClick={() => moveNflConfidenceRank(game.id, -1)}
+                                >
+                                  <ArrowUp size={16} />
+                                </button>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className="confidence-empty-slot"
+                                disabled={!nflConfidenceDragging || nflConfidencePending}
+                                onClick={() => assignNflConfidenceRank(index)}
+                              >
+                                {nflConfidenceDragging ? "Place selected pick here" : "Empty slot"}
+                              </button>
+                              <span className="confidence-slot-help">Confidence {points}</span>
+                            </>
+                          )}
                         </div>
-                        {pick && <em>{survivorStatusLabel(pick.status)}{pick.pointsAwarded ? ` • ${pick.pointsAwarded} pts` : ""}</em>}
-                        <div className="confidence-rank-actions">
-                          <button
-                            type="button"
-                            title="Move down in confidence"
-                            disabled={nflConfidencePending || index === availablePoints.length - 1}
-                            onClick={() => moveNflConfidenceRank(game.id, 1)}
-                          >
-                            <ArrowDown size={16} />
-                          </button>
-                          <button
-                            type="button"
-                            title="Move up in confidence"
-                            disabled={nflConfidencePending || index === 0}
-                            onClick={() => moveNflConfidenceRank(game.id, -1)}
-                          >
-                            <ArrowUp size={16} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
                 <div className="notification-actions">
                   <button className="secondary-action" onClick={() => setNflConfidenceStep("winners")}>Back</button>
-                  <button className="primary" disabled={nflConfidencePending || rankedGames.length + unrankedSelectedGames.length !== availablePoints.length} onClick={saveNflConfidencePicks}>
+                  <button className="primary" disabled={nflConfidencePending || assignedRankings.length !== availablePoints.length} onClick={saveNflConfidencePicks}>
                     Save Picks
                   </button>
                   <button className="secondary-action" disabled={nflConfidencePending} onClick={settleNflConfidence}>Settle Finals</button>
