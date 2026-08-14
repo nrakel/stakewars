@@ -3327,18 +3327,6 @@ textarea {
   color: #141414;
 }
 
-.confidence-prize-trophy span {
-  position: absolute;
-  top: 15px;
-  left: 0;
-  right: 0;
-  color: #141414;
-  font-size: 0.72rem;
-  font-weight: 1000;
-  text-align: center;
-  line-height: 1;
-}
-
 .confidence-prize-card.gold .confidence-prize-trophy {
   background: #facc15;
 }

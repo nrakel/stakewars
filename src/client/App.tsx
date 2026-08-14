@@ -3589,7 +3589,6 @@ function App() {
                     <div className={`confidence-prize-card ${prize.className}`} key={prize.place}>
                       <div className="confidence-prize-trophy" aria-hidden="true">
                         <Trophy size={24} />
-                        <span>{prize.place}</span>
                       </div>
                       <div>
                         <strong>{money(prize.amount)}</strong>
