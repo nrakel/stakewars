@@ -161,6 +161,46 @@ type WagerLineRow = {
   is_active: boolean;
 };
 
+const nflTeamNames = [
+  "Arizona Cardinals",
+  "Atlanta Falcons",
+  "Baltimore Ravens",
+  "Buffalo Bills",
+  "Carolina Panthers",
+  "Chicago Bears",
+  "Cincinnati Bengals",
+  "Cleveland Browns",
+  "Dallas Cowboys",
+  "Denver Broncos",
+  "Detroit Lions",
+  "Green Bay Packers",
+  "Houston Texans",
+  "Indianapolis Colts",
+  "Jacksonville Jaguars",
+  "Kansas City Chiefs",
+  "Las Vegas Raiders",
+  "Los Angeles Chargers",
+  "Los Angeles Rams",
+  "Miami Dolphins",
+  "Minnesota Vikings",
+  "New England Patriots",
+  "New Orleans Saints",
+  "New York Giants",
+  "New York Jets",
+  "Philadelphia Eagles",
+  "Pittsburgh Steelers",
+  "San Francisco 49ers",
+  "Seattle Seahawks",
+  "Tampa Bay Buccaneers",
+  "Tennessee Titans",
+  "Washington Commanders"
+];
+
+const nflTeamNameSet = new Set(nflTeamNames);
+
+const isNflMatchup = (awayTeam: string | null | undefined, homeTeam: string | null | undefined) =>
+  Boolean(awayTeam && homeTeam && nflTeamNameSet.has(awayTeam) && nflTeamNameSet.has(homeTeam));
+
 const generateReferralCode = () => randomBytes(9).toString("base64url").toLowerCase();
 
 const createUniqueReferralCode = async () => {
@@ -2050,7 +2090,6 @@ export const registerRoutes = (router: Router) => {
 
       const lineResult = await query<{
         id: string;
-        providerEventId: string | null;
         startsAt: Date;
         awayTeam: string;
         homeTeam: string;
@@ -2058,11 +2097,11 @@ export const registerRoutes = (router: Router) => {
       }>(
         `
           SELECT DISTINCT ON (
-            COALESCE(split_part(provider_event_id, ':', 1), sport::text || ':' || away_team || ':' || home_team || ':' || starts_at::text),
+            away_team,
+            home_team,
             favorite_team
           )
             id,
-            provider_event_id AS "providerEventId",
             starts_at AS "startsAt",
             away_team AS "awayTeam",
             home_team AS "homeTeam",
@@ -2071,14 +2110,17 @@ export const registerRoutes = (router: Router) => {
           WHERE sport = 'NFL'
             AND market_key = 'h2h'
             AND is_active = true
+            AND away_team = ANY($3::text[])
+            AND home_team = ANY($3::text[])
             AND (starts_at AT TIME ZONE 'America/Chicago')::date >= $1::date
             AND (starts_at AT TIME ZONE 'America/Chicago')::date < $2::date
           ORDER BY
-            COALESCE(split_part(provider_event_id, ':', 1), sport::text || ':' || away_team || ':' || home_team || ':' || starts_at::text),
+            away_team,
+            home_team,
             favorite_team,
             fetched_at DESC
         `,
-        [weekStart, weekEnd]
+        [weekStart, weekEnd, nflTeamNames]
       );
       const games = new Map<string, {
         eventKey: string;
@@ -2089,13 +2131,7 @@ export const registerRoutes = (router: Router) => {
         homeLineId: string | null;
       }>();
       for (const line of lineResult.rows) {
-        const eventKey = gameEventKey({
-          providerEventId: line.providerEventId,
-          sport: "NFL",
-          startsAt: line.startsAt,
-          awayTeam: line.awayTeam,
-          homeTeam: line.homeTeam
-        });
+        const eventKey = `NFL:${line.awayTeam}:${line.homeTeam}`;
         const game = games.get(eventKey) ?? {
           eventKey,
           startsAt: line.startsAt.toISOString(),
@@ -2266,7 +2302,12 @@ export const registerRoutes = (router: Router) => {
           [input.gameLineId]
         );
         const line = lineResult.rows[0];
-        if (!line || !line.is_active || line.favorite_team !== input.selectedTeam) {
+        if (
+          !line ||
+          !line.is_active ||
+          line.favorite_team !== input.selectedTeam ||
+          !isNflMatchup(line.away_team, line.home_team)
+        ) {
           throw new WagerValidationError("Selected Survivor team is not available.");
         }
         if (line.starts_at.getTime() <= Date.now()) {
@@ -2503,12 +2544,14 @@ export const registerRoutes = (router: Router) => {
           FROM game_line
           WHERE sport = 'NFL'
             AND market_key = 'h2h'
+            AND away_team = ANY($3::text[])
+            AND home_team = ANY($3::text[])
             AND (starts_at AT TIME ZONE 'America/Chicago')::date >= $1::date
             AND (starts_at AT TIME ZONE 'America/Chicago')::date < $2::date
             AND starts_at <= now()
           LIMIT 1
         `,
-        [weekStart, weekEnd]
+        [weekStart, weekEnd, nflTeamNames]
       );
       let missed = 0;
       if (firstKickoffResult.rowCount) {
