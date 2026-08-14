@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowDown, ArrowLeft, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
+import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
@@ -11,6 +11,7 @@ type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "nfl-confidenc
 type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
+type LeaderboardTab = "weekly" | "confidence" | "survivor";
 const MAX_CHECKED_LEGS = 8;
 const sportsMenu: ScoreboardSport[] = ["MLB", "NFL", "NBA", "NHL", "NCAAMB", "NCAAF", "EPL"];
 const TOWER_FEATURE_ENABLED = false;
@@ -322,6 +323,7 @@ type LeaderboardResponse = {
   weeklyPrizeCents: number;
   weeklyPrize?: WeeklyPrize;
   nflConfidenceLeaderboard: NflConfidenceLeaderboard | null;
+  survivorLeaderboard: SurvivorLeaderboard | null;
 };
 
 type NflConfidenceLeaderboard = {
@@ -329,6 +331,12 @@ type NflConfidenceLeaderboard = {
   currentWeek: number;
   weeklyStandings: NflConfidenceStanding[];
   seasonStandings: NflConfidenceStanding[];
+};
+
+type SurvivorLeaderboard = {
+  pool: SurvivorState["pool"];
+  currentWeekStart: string;
+  standings: SurvivorStanding[];
 };
 
 type WeeklyPrize = {
@@ -1551,10 +1559,12 @@ function App() {
   const [leaderboardWeeks, setLeaderboardWeeks] = useState<LeaderboardWeek[]>([]);
   const [leaderboardWeekStart, setLeaderboardWeekStart] = useState("");
   const [leaderboardIsCurrentWeek, setLeaderboardIsCurrentWeek] = useState(true);
+  const [leaderboardTab, setLeaderboardTab] = useState<LeaderboardTab>("weekly");
   const [registeredPlayers, setRegisteredPlayers] = useState(0);
   const [weeklyPrizeCents, setWeeklyPrizeCents] = useState(0);
   const [weeklyFirstPlaceBonus, setWeeklyFirstPlaceBonus] = useState<string | null>(null);
   const [nflConfidenceLeaderboard, setNflConfidenceLeaderboard] = useState<NflConfidenceLeaderboard | null>(null);
+  const [survivorLeaderboard, setSurvivorLeaderboard] = useState<SurvivorLeaderboard | null>(null);
   const [liveGames, setLiveGames] = useState<LiveGameState[]>([]);
   const [openBets, setOpenBets] = useState<OpenBet[]>([]);
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
@@ -1733,6 +1743,7 @@ function App() {
     setWeeklyPrizeCents(boardResult.weeklyPrizeCents ?? 0);
     setWeeklyFirstPlaceBonus(boardResult.weeklyPrize?.firstPlaceBonus ?? null);
     setNflConfidenceLeaderboard(boardResult.nflConfidenceLeaderboard ?? null);
+    setSurvivorLeaderboard(boardResult.survivorLeaderboard ?? null);
     if (boardResult.weekStart && (!leaderboardWeekStart || leaderboardWeekStart !== boardResult.weekStart)) {
       setLeaderboardWeekStart(boardResult.weekStart);
     }
@@ -1824,6 +1835,7 @@ function App() {
     setWeeklyPrizeCents(result.weeklyPrizeCents ?? 0);
     setWeeklyFirstPlaceBonus(result.weeklyPrize?.firstPlaceBonus ?? null);
     setNflConfidenceLeaderboard(result.nflConfidenceLeaderboard ?? null);
+    setSurvivorLeaderboard(result.survivorLeaderboard ?? null);
     if (result.weekStart) {
       setLeaderboardWeekStart(result.weekStart);
     }
@@ -1853,6 +1865,11 @@ function App() {
     if (isMobileLayout()) {
       setMobileMenuOpen(false);
     }
+  };
+
+  const openLeaderboardTab = (tab: LeaderboardTab) => {
+    setLeaderboardTab(tab);
+    openPage("leaderboard");
   };
 
   const toggleNavGroup = (group: "lines" | "scoreboard") => {
@@ -3397,11 +3414,14 @@ function App() {
           <div className="panel-title">
             <Trophy size={20} />
             <h2>NFL Survivor</h2>
-          </div>
-          <p className="muted">Pick one NFL team each week. Win and advance. Lose, tie, or miss a pick and you are eliminated. You cannot use the same team twice.</p>
-          {!survivorState ? (
-            <div className="notification-actions">
-              <button className="secondary-action" onClick={refreshSurvivor}>Load Survivor</button>
+	          </div>
+	          <p className="muted">Pick one NFL team each week. Win and advance. Lose, tie, or miss a pick and you are eliminated. You cannot use the same team twice.</p>
+	          <div className="notification-actions">
+	            <button className="secondary-action" type="button" onClick={() => openLeaderboardTab("survivor")}>View Survivor Leaderboard</button>
+	          </div>
+	          {!survivorState ? (
+	            <div className="notification-actions">
+	              <button className="secondary-action" onClick={refreshSurvivor}>Load Survivor</button>
             </div>
           ) : !entry ? (
             <div className="notification-card">
@@ -3539,10 +3559,13 @@ function App() {
               <h2>NFL Confidence</h2>
               <span>Winner picks first. Confidence ranking second.</span>
             </div>
-          </div>
-          <p className="muted">Pick every NFL winner for the week, then drag those picks onto a confidence scale. Low values are low confidence. The highest value is your strongest pick.</p>
-          {!state ? (
-            <button className="secondary-action" onClick={refreshNflConfidence}>Load NFL Confidence</button>
+	          </div>
+	          <p className="muted">Pick every NFL winner for the week, then drag those picks onto a confidence scale. Low values are low confidence. The highest value is your strongest pick.</p>
+	          <div className="notification-actions">
+	            <button className="secondary-action" type="button" onClick={() => openLeaderboardTab("confidence")}>View Confidence Leaderboard</button>
+	          </div>
+	          {!state ? (
+	            <button className="secondary-action" onClick={refreshNflConfidence}>Load NFL Confidence</button>
           ) : !state.entry ? (
             <div className="notification-card">
               <div>
@@ -4681,89 +4704,100 @@ function App() {
                   <span className="registered-count">Registered Players: {registeredPlayers}</span>
                 </div>
                 <span>{leaderboardIsCurrentWeek ? "Current week" : "Previous week"} standings</span>
-              </div>
-            </div>
-            {leaderboardWeeks.length > 0 && (
-              <label className="leaderboard-week-select">
-                Week
-                <select value={leaderboardWeekStart} onChange={(event) => void loadLeaderboardWeek(event.target.value)}>
-                  {leaderboardWeeks.map((week) => (
-                    <option key={week.weekStart} value={week.weekStart}>
-                      {weekRangeLabel(week.weekStart)}{week.isCurrent ? " (Current)" : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className="leaderboard-leaders-box">
-              <img className="leaders-crown" src="/images/stakewars-crown.png" alt="" aria-hidden="true" />
-              <div className="leaders-content">
-                <span>{leaderboardIsCurrentWeek ? "Current eligible leaders" : "Eligible winners"}</span>
-                {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
-                  <strong className="weekly-prize">Weekly prize pool: {money(weeklyPrizeCents)}</strong>
-                )}
-                {!leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
-                  <strong className="weekly-prize">Prize pool: {money(weeklyPrizeCents)}</strong>
-                )}
-                {weeklyFirstPlaceBonus && (
-                  <strong className="weekly-prize">1st place bonus: {weeklyFirstPlaceBonus}</strong>
-                )}
-                {qualifiedLeaderboardRows.length > 0 ? (
-                  <ol className="leaders-list">
-                    {qualifiedLeaderboardRows.map((row) => (
-                      <li key={`leader-${row.rank}-${row.displayName}`}>
-                        <strong>{row.rank}. {row.displayName}</strong>
-                        <small>
-                          {money(row.balanceCents)}
-                          {weeklyPrizeCents > 0
-                            ? ` • ${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`
-                            : !leaderboardIsCurrentWeek && ` • ${rewardShareByRank.get(row.rank) ?? 0}% reward`}
-                        </small>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <strong>No eligible leaders yet</strong>
-                )}
-              </div>
-            </div>
-            <ol className="leaderboard leaderboard-page-list">
-              {leaderboard.map((row) => (
-                <li key={`${row.rank}-${row.displayName}`} className={row.role === "system" ? "chine-leaderboard-row" : undefined}>
-                  <span>
-                    {row.rank}. {row.displayName}
-                    {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && row.eligible && (
-                      <small className="reward-share-badge">
-                        {`${rewardShareByRank.get(row.rank) ?? 0}% reward`}
-                      </small>
-                    )}
-                    {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && row.role !== "system" && row.rank <= 3 && row.eligible && (
-                      <small className="reward-share-badge">
-                        {`${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`}
-                      </small>
-                    )}
-                    {row.role !== "system" && row.referralBoostsUsed > 0 && (
-                      <small className="reward-share-badge">
-                        {row.referralBoostsUsed === 1 ? "Boost" : `Boost x${row.referralBoostsUsed}`}
-                      </small>
-                    )}
-                    {row.role !== "system" && !row.eligible && (
-                      <>
-                        <small className="disqualified-badge">Ineligible</small>
-                        {row.isCurrentUser && (
-                          <small className="eligibility-progress">
-                            {row.emailVerified === false ? "verify email • " : ""}{row.weeklyWagers ?? 0}/10 wagers • {money(row.weeklyStakeCents ?? 0)}/{money(row.requiredStakeCents ?? 0)}
-                            {row.beatAi ? "" : " • must beat Chine"}
-                          </small>
-                        )}
-                      </>
-                    )}
-                  </span>
-                  <strong>{money(row.balanceCents)}</strong>
-                </li>
-              ))}
-            </ol>
-            {nflConfidenceLeaderboard && (
+	              </div>
+	            </div>
+	            <div className="leaderboard-tabs" role="tablist" aria-label="Leaderboard contest">
+	              <button type="button" className={leaderboardTab === "weekly" ? "active" : ""} onClick={() => setLeaderboardTab("weekly")}>Weekly Contest</button>
+	              <button type="button" className={leaderboardTab === "confidence" ? "active" : ""} onClick={() => setLeaderboardTab("confidence")}>NFL Confidence</button>
+	              <button type="button" className={leaderboardTab === "survivor" ? "active" : ""} onClick={() => setLeaderboardTab("survivor")}>Survivor</button>
+	            </div>
+
+	            {leaderboardTab === "weekly" && (
+	              <>
+	                {leaderboardWeeks.length > 0 && (
+	                  <label className="leaderboard-week-select">
+	                    Week
+	                    <select value={leaderboardWeekStart} onChange={(event) => void loadLeaderboardWeek(event.target.value)}>
+	                      {leaderboardWeeks.map((week) => (
+	                        <option key={week.weekStart} value={week.weekStart}>
+	                          {weekRangeLabel(week.weekStart)}{week.isCurrent ? " (Current)" : ""}
+	                        </option>
+	                      ))}
+	                    </select>
+	                  </label>
+	                )}
+	                <div className="leaderboard-leaders-box">
+	                  <img className="leaders-crown" src="/images/stakewars-crown.png" alt="" aria-hidden="true" />
+	                  <div className="leaders-content">
+	                    <span>{leaderboardIsCurrentWeek ? "Current eligible leaders" : "Eligible winners"}</span>
+	                    {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
+	                      <strong className="weekly-prize">Weekly prize pool: {money(weeklyPrizeCents)}</strong>
+	                    )}
+	                    {!leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && (
+	                      <strong className="weekly-prize">Prize pool: {money(weeklyPrizeCents)}</strong>
+	                    )}
+	                    {weeklyFirstPlaceBonus && (
+	                      <strong className="weekly-prize">1st place bonus: {weeklyFirstPlaceBonus}</strong>
+	                    )}
+	                    {qualifiedLeaderboardRows.length > 0 ? (
+	                      <ol className="leaders-list">
+	                        {qualifiedLeaderboardRows.map((row) => (
+	                          <li key={`leader-${row.rank}-${row.displayName}`}>
+	                            <strong>{row.rank}. {row.displayName}</strong>
+	                            <small>
+	                              {money(row.balanceCents)}
+	                              {weeklyPrizeCents > 0
+	                                ? ` • ${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`
+	                                : !leaderboardIsCurrentWeek && ` • ${rewardShareByRank.get(row.rank) ?? 0}% reward`}
+	                            </small>
+	                          </li>
+	                        ))}
+	                      </ol>
+	                    ) : (
+	                      <strong>No eligible leaders yet</strong>
+	                    )}
+	                  </div>
+	                </div>
+	                <ol className="leaderboard leaderboard-page-list">
+	                  {leaderboard.map((row) => (
+	                    <li key={`${row.rank}-${row.displayName}`} className={row.role === "system" ? "chine-leaderboard-row" : undefined}>
+	                      <span>
+	                        {row.rank}. {row.displayName}
+	                        {!leaderboardIsCurrentWeek && row.role !== "system" && row.rank <= 3 && row.eligible && (
+	                          <small className="reward-share-badge">
+	                            {`${rewardShareByRank.get(row.rank) ?? 0}% reward`}
+	                          </small>
+	                        )}
+	                        {leaderboardIsCurrentWeek && weeklyPrizeCents > 0 && row.role !== "system" && row.rank <= 3 && row.eligible && (
+	                          <small className="reward-share-badge">
+	                            {`${money(rewardCentsByRank.get(row.rank) ?? 0)} reward`}
+	                          </small>
+	                        )}
+	                        {row.role !== "system" && row.referralBoostsUsed > 0 && (
+	                          <small className="reward-share-badge">
+	                            {row.referralBoostsUsed === 1 ? "Boost" : `Boost x${row.referralBoostsUsed}`}
+	                          </small>
+	                        )}
+	                        {row.role !== "system" && !row.eligible && (
+	                          <>
+	                            <small className="disqualified-badge">Ineligible</small>
+	                            {row.isCurrentUser && (
+	                              <small className="eligibility-progress">
+	                                {row.emailVerified === false ? "verify email • " : ""}{row.weeklyWagers ?? 0}/10 wagers • {money(row.weeklyStakeCents ?? 0)}/{money(row.requiredStakeCents ?? 0)}
+	                                {row.beatAi ? "" : " • must beat Chine"}
+	                              </small>
+	                            )}
+	                          </>
+	                        )}
+	                      </span>
+	                      <strong>{money(row.balanceCents)}</strong>
+	                    </li>
+	                  ))}
+	                </ol>
+	              </>
+	            )}
+
+            {leaderboardTab === "confidence" && nflConfidenceLeaderboard && (
               <section className="contest-leaderboard-section">
                 <div className="panel-title">
                   <ClipboardList size={20} />
@@ -4839,11 +4873,64 @@ function App() {
                       </table>
                     </div>
                   </div>
-                </div>
-              </section>
-            )}
-          </div>
-        )}
+	                </div>
+	              </section>
+	            )}
+
+	            {leaderboardTab === "confidence" && !nflConfidenceLeaderboard && (
+	              <p className="muted">NFL Confidence standings are not available yet.</p>
+	            )}
+
+	            {leaderboardTab === "survivor" && survivorLeaderboard && (
+	              <section className="contest-leaderboard-section">
+	                <div className="panel-title">
+	                  <Trophy size={20} />
+	                  <div>
+	                    <h2>NFL Survivor</h2>
+	                    <span>{survivorLeaderboard.pool.season} pool • Current week {weekRangeLabel(survivorLeaderboard.currentWeekStart)}</span>
+	                  </div>
+	                </div>
+	                <div className="user-map-table contest-table">
+	                  <table>
+	                    <thead>
+	                      <tr>
+	                        <th>Rank</th>
+	                        <th>Player</th>
+	                        <th>Status</th>
+	                        <th>Picks Made</th>
+	                        <th>Current Pick</th>
+	                      </tr>
+	                    </thead>
+	                    <tbody>
+	                      {survivorLeaderboard.standings.map((standing, index) => (
+	                        <tr key={`survivor-leaderboard-${standing.userId}`}>
+	                          <td>{index + 1}</td>
+	                          <td>{standing.displayName}</td>
+	                          <td>{survivorStatusLabel(standing.status)}</td>
+	                          <td>{standing.picksMade}</td>
+	                          <td>
+	                            {standing.currentPick
+	                              ? `${standing.currentPick.displayTeam ?? "Hidden until kickoff"} (${survivorStatusLabel(standing.currentPick.status)})`
+	                              : "No pick"}
+	                          </td>
+	                        </tr>
+	                      ))}
+	                      {survivorLeaderboard.standings.length === 0 && (
+	                        <tr>
+	                          <td colSpan={5}>No Survivor entries yet.</td>
+	                        </tr>
+	                      )}
+	                    </tbody>
+	                  </table>
+	                </div>
+	              </section>
+	            )}
+
+	            {leaderboardTab === "survivor" && !survivorLeaderboard && (
+	              <p className="muted">Survivor standings are not available yet.</p>
+	            )}
+	          </div>
+	        )}
 
         {activePage === "open-bets" && (
           <div className="panel page-panel">

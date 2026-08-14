@@ -4056,6 +4056,80 @@ export const registerRoutes = (router: Router) => {
           };
         })()
         : null;
+      const survivorPool = await getActiveSurvivorPool();
+      const survivorLeaderboard = survivorPool
+        ? await (async () => {
+          const weekStart = currentSurvivorWeekStart(survivorPool);
+          const standings = await query<{
+            userId: string;
+            displayName: string | null;
+            username: string;
+            status: "active" | "eliminated" | "winner";
+            eliminatedWeekStart: string | null;
+            picksMade: number;
+            pickId: string | null;
+            pickWeekStart: string | null;
+            selectedTeam: string | null;
+            awayTeam: string | null;
+            homeTeam: string | null;
+            startsAt: Date | null;
+            pickStatus: "pending" | "won" | "lost" | "tie" | "no_pick" | "void" | null;
+          }>(
+            `
+              SELECT
+                u.id AS "userId",
+                u.display_name AS "displayName",
+                u.username,
+                e.status,
+                e.eliminated_week_start::text AS "eliminatedWeekStart",
+                count(p_all.id)::int AS "picksMade",
+                p.id AS "pickId",
+                p.week_start::text AS "pickWeekStart",
+                p.selected_team AS "selectedTeam",
+                p.away_team AS "awayTeam",
+                p.home_team AS "homeTeam",
+                p.starts_at AS "startsAt",
+                p.status AS "pickStatus"
+              FROM survivor_entry e
+              JOIN app_user u ON u.id = e.user_id
+              LEFT JOIN survivor_pick p_all ON p_all.entry_id = e.id AND p_all.status <> 'void'
+              LEFT JOIN survivor_pick p ON p.entry_id = e.id AND p.week_start = $2::date
+              WHERE e.pool_id = $1
+              GROUP BY u.id, u.display_name, u.username, e.status, e.eliminated_week_start,
+                       p.id, p.week_start, p.selected_team, p.away_team, p.home_team, p.starts_at, p.status
+              ORDER BY
+                CASE e.status WHEN 'active' THEN 1 WHEN 'winner' THEN 2 ELSE 3 END,
+                count(p_all.id) DESC,
+                lower(COALESCE(NULLIF(u.display_name, ''), u.username))
+              LIMIT 100
+            `,
+            [survivorPool.id, weekStart]
+          );
+          return {
+            pool: survivorPool,
+            currentWeekStart: weekStart,
+            standings: standings.rows.map((row) => ({
+              userId: row.userId,
+              displayName: row.displayName || row.username,
+              status: row.status,
+              eliminatedWeekStart: row.eliminatedWeekStart,
+              picksMade: row.picksMade,
+              currentPick: row.pickId && row.startsAt && row.selectedTeam && row.awayTeam && row.homeTeam && row.pickWeekStart ? {
+                id: row.pickId,
+                weekStart: row.pickWeekStart,
+                selectedTeam: row.selectedTeam,
+                awayTeam: row.awayTeam,
+                homeTeam: row.homeTeam,
+                startsAt: row.startsAt.toISOString(),
+                status: row.pickStatus ?? "pending",
+                locked: row.startsAt.getTime() <= Date.now(),
+                visible: row.startsAt.getTime() <= Date.now() || row.userId === req.user?.id,
+                displayTeam: survivorVisiblePickTeam(row.startsAt, row.selectedTeam, row.userId === req.user?.id)
+              } : null
+            }))
+          };
+        })()
+        : null;
       res.json({
         leaderboard: result.rows,
         weeks: weeks.rows,
@@ -4064,7 +4138,8 @@ export const registerRoutes = (router: Router) => {
         registeredPlayers: Number(registeredPlayers.rows[0]?.count ?? 0),
         weeklyPrizeCents: weeklyPrize.cashPrizeCents,
         weeklyPrize,
-        nflConfidenceLeaderboard
+        nflConfidenceLeaderboard,
+        survivorLeaderboard
       });
     } catch (error) {
       next(error);

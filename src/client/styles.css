@@ -578,6 +578,29 @@ textarea {
   margin-bottom: 14px;
 }
 
+.leaderboard-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 16px;
+}
+
+.leaderboard-tabs button {
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #fff;
+  color: #43524c;
+  padding: 10px 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.leaderboard-tabs button.active {
+  background: #14201c;
+  border-color: #14201c;
+  color: #fff;
+}
+
 .leaderboard-leaders-box {
   display: flex;
   align-items: center;
@@ -742,6 +765,10 @@ textarea {
   margin: 0;
   color: #14201c;
   font-size: 1rem;
+}
+
+.contest-table {
+  max-width: 980px;
 }
 
 .reward-share-badge,
