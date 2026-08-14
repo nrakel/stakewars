@@ -1850,6 +1850,10 @@ textarea {
   font-size: 0.95rem;
 }
 
+.rules-content section {
+  scroll-margin-top: 18px;
+}
+
 .rules-content p {
   color: #43524c;
   font-size: 0.92rem;

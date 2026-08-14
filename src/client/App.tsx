@@ -1038,10 +1038,16 @@ function RulesContent() {
         <p>A referral qualifies when a new user registers through your referral link and places at least one valid wager. Each qualified referral earns one $1,000 Bankroll Boost. Players may use up to two boosts per contest week.</p>
         <p>Referral boosts must be activated before placing your first wager of the contest week. If you have an available boost and continue with your first wager without activating it, you waive referral boosts for that week. Boosts increase current bankroll only and do not change starting bankroll or weekly eligibility requirements.</p>
       </section>
-      <section>
+      <section id="nfl-survivor-rules">
         <h2>NFL Survivor</h2>
         <p>NFL Survivor is independent from the weekly StakeWars bankroll contest. Each active player may pick one NFL team per week. If that team wins, the player advances. If that team loses, ties, or the player misses the weekly pick, the player is eliminated.</p>
         <p>A team can only be used once per Survivor pool. Picks may be changed until that selected team's kickoff, then they lock. Other players' current-week picks stay hidden until kickoff.</p>
+      </section>
+      <section id="nfl-confidence-rules">
+        <h2>NFL Confidence</h2>
+        <p>NFL Confidence is independent from the weekly StakeWars bankroll contest. Each active player picks the winner of every NFL game for the week, then assigns each pick a unique confidence value. Correct picks earn the assigned confidence points. Incorrect picks earn zero points.</p>
+        <p>Weekly prizes are awarded after the conclusion of Monday Night Football. Ties at the top roll over the weekly prize. Season-long prizes are awarded after the NFL regular season based on total confidence points.</p>
+        <p>If a player misses the Thursday game pick, that game is scored as a loss and confidence value 5 is removed from that player's available values. If a player does not make picks before the first Sunday kickoff, the week is locked with no points awarded.</p>
       </section>
       <section>
         <h2>Baseball Settlement</h2>
@@ -1870,6 +1876,13 @@ function App() {
   const openLeaderboardTab = (tab: LeaderboardTab) => {
     setLeaderboardTab(tab);
     openPage("leaderboard");
+  };
+
+  const openRulesSection = (sectionId: string) => {
+    openPage("rules");
+    window.setTimeout(() => {
+      document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   };
 
   const toggleNavGroup = (group: "lines" | "scoreboard") => {
@@ -3415,9 +3428,9 @@ function App() {
             <Trophy size={20} />
             <h2>NFL Survivor</h2>
 	          </div>
-	          <p className="muted">Pick one NFL team each week. Win and advance. Lose, tie, or miss a pick and you are eliminated. You cannot use the same team twice.</p>
 	          <div className="notification-actions">
 	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("survivor")}>View Survivor Leaderboard</button>
+	            <button className="orange-action" type="button" onClick={() => openRulesSection("nfl-survivor-rules")}>Contest Rules</button>
 	          </div>
 	          {!survivorState ? (
 	            <div className="notification-actions">
@@ -3560,9 +3573,9 @@ function App() {
               <span>Winner picks first. Confidence ranking second.</span>
             </div>
 	          </div>
-	          <p className="muted">Pick every NFL winner for the week, then drag those picks onto a confidence scale. Low values are low confidence. The highest value is your strongest pick.</p>
 	          <div className="notification-actions">
 	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("confidence")}>View Confidence Leaderboard</button>
+	            <button className="orange-action" type="button" onClick={() => openRulesSection("nfl-confidence-rules")}>Contest Rules</button>
 	          </div>
 	          {!state ? (
 	            <button className="secondary-action" onClick={refreshNflConfidence}>Load NFL Confidence</button>
