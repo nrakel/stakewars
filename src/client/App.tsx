@@ -3115,7 +3115,7 @@ function App() {
     try {
       const result = await api<NflConfidenceState>("/nfl-confidence", {}, token);
       setNflConfidenceState(result);
-      setNflConfidenceNotice("NFL Confidence refreshed.");
+      setNflConfidenceNotice("");
     } catch (err) {
       setNflConfidenceNotice((err as Error).message);
     }
