@@ -3184,6 +3184,35 @@ textarea {
   opacity: 0.7;
 }
 
+.nfl-confidence-game-card {
+  border: 2px solid #b9c4bd;
+  box-shadow: 0 1px 0 rgba(20, 32, 28, 0.04);
+}
+
+.nfl-confidence-game-card:hover {
+  border-color: #8fa198;
+}
+
+.nfl-confidence-game-card .survivor-pick-buttons button {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+.nfl-confidence-game-card .survivor-pick-buttons button.selected {
+  box-shadow: 0 0 0 3px rgba(255, 105, 0, 0.16);
+}
+
+.nfl-confidence-game-card .survivor-pick-buttons button span {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}
+
+.confidence-team-short {
+  display: none !important;
+}
+
 .confidence-scale {
   display: grid;
   gap: 8px;
@@ -3412,6 +3441,33 @@ textarea {
   .confidence-rank-actions button {
     width: 30px;
     height: 30px;
+  }
+
+  .nfl-confidence-game-card {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .nfl-confidence-game-card .survivor-pick-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .nfl-confidence-game-card .survivor-pick-buttons button {
+    width: 100%;
+    min-height: 42px;
+    padding: 9px 8px;
+    font-size: 0.86rem;
+    line-height: 1.1;
+  }
+
+  .nfl-confidence-game-card .confidence-team-full {
+    display: none !important;
+  }
+
+  .nfl-confidence-game-card .confidence-team-short {
+    display: inline !important;
   }
 
   .tower-wager-grid,

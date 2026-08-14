@@ -681,6 +681,43 @@ const teamAbbreviation = (team: string) => teamAbbreviations[team] ?? team
   .slice(0, 3)
   .toUpperCase();
 
+const nflTeamShortNames: Record<string, string> = {
+  "Arizona Cardinals": "Cardinals",
+  "Atlanta Falcons": "Falcons",
+  "Baltimore Ravens": "Ravens",
+  "Buffalo Bills": "Bills",
+  "Carolina Panthers": "Panthers",
+  "Chicago Bears": "Bears",
+  "Cincinnati Bengals": "Bengals",
+  "Cleveland Browns": "Browns",
+  "Dallas Cowboys": "Cowboys",
+  "Denver Broncos": "Broncos",
+  "Detroit Lions": "Lions",
+  "Green Bay Packers": "Packers",
+  "Houston Texans": "Texans",
+  "Indianapolis Colts": "Colts",
+  "Jacksonville Jaguars": "Jaguars",
+  "Kansas City Chiefs": "Chiefs",
+  "Las Vegas Raiders": "Raiders",
+  "Los Angeles Chargers": "Chargers",
+  "Los Angeles Rams": "Rams",
+  "Miami Dolphins": "Dolphins",
+  "Minnesota Vikings": "Vikings",
+  "New England Patriots": "Patriots",
+  "New Orleans Saints": "Saints",
+  "New York Giants": "Giants",
+  "New York Jets": "Jets",
+  "Philadelphia Eagles": "Eagles",
+  "Pittsburgh Steelers": "Steelers",
+  "San Francisco 49ers": "49ers",
+  "Seattle Seahawks": "Seahawks",
+  "Tampa Bay Buccaneers": "Buccaneers",
+  "Tennessee Titans": "Titans",
+  "Washington Commanders": "Commanders"
+};
+
+const nflTeamShortName = (team: string) => nflTeamShortNames[team] ?? team;
+
 const LegStatusIcon = ({ status }: { status: string }) => {
   if (status === "won") {
     return <Check className="leg-status-icon won" size={16} aria-label="Won leg" />;
@@ -3501,10 +3538,6 @@ function App() {
           ) : (
             <div className="survivor-status-grid">
               <div className="metric-card">
-                <span>Season</span>
-                <strong>{state.pool.season}</strong>
-              </div>
-              <div className="metric-card">
                 <span>Week</span>
                 <strong>{state.currentWeek}</strong>
               </div>
@@ -3544,7 +3577,7 @@ function App() {
                     const blockedByPenalty = Boolean(penaltyPick && penaltyPick.selectedTeam === null);
                     const selectedTeam = nflConfidenceSelections[game.id];
                     return (
-                      <div key={game.id} className={`survivor-game-card ${blockedByPenalty ? "disabled-card" : ""}`}>
+                      <div key={game.id} className={`survivor-game-card nfl-confidence-game-card ${blockedByPenalty ? "disabled-card" : ""}`}>
                         <div>
                           <strong>{game.awayTeam} @ {game.homeTeam}</strong>
                           <span>{shortDateTime(game.startsAt)}{game.status === "final" && game.awayScore != null && game.homeScore != null ? ` • Final ${game.awayScore}-${game.homeScore}` : ""}</span>
@@ -3558,14 +3591,16 @@ function App() {
                               disabled={nflConfidencePending || started}
                               onClick={() => selectNflConfidenceWinner(game.id, game.awayTeam)}
                             >
-                              {game.awayTeam}
+                              <span className="confidence-team-full">{game.awayTeam}</span>
+                              <span className="confidence-team-short">{nflTeamShortName(game.awayTeam)}</span>
                             </button>
                             <button
                               className={selectedTeam === game.homeTeam ? "selected" : ""}
                               disabled={nflConfidencePending || started}
                               onClick={() => selectNflConfidenceWinner(game.id, game.homeTeam)}
                             >
-                              {game.homeTeam}
+                              <span className="confidence-team-full">{game.homeTeam}</span>
+                              <span className="confidence-team-short">{nflTeamShortName(game.homeTeam)}</span>
                             </button>
                           </div>
                         )}
