@@ -309,6 +309,7 @@ export type NflConfidenceState = {
     weeklyPrizeCents: number;
     seasonWinnerPrizeCents: number;
     seasonRunnerUpPrizeCents: number;
+    seasonThirdPlacePrizeCents: number;
   };
   entry: {
     id: string;

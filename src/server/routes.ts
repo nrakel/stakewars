@@ -241,6 +241,7 @@ const getActiveNflConfidencePool = async () => {
     weeklyPrizeCents: number;
     seasonWinnerPrizeCents: number;
     seasonRunnerUpPrizeCents: number;
+    seasonThirdPlacePrizeCents: number;
   }>(
     `
       SELECT
@@ -250,7 +251,8 @@ const getActiveNflConfidencePool = async () => {
         starts_on::text AS "startsOn",
         weekly_prize_cents AS "weeklyPrizeCents",
         season_winner_prize_cents AS "seasonWinnerPrizeCents",
-        season_runner_up_prize_cents AS "seasonRunnerUpPrizeCents"
+        season_runner_up_prize_cents AS "seasonRunnerUpPrizeCents",
+        season_third_place_prize_cents AS "seasonThirdPlacePrizeCents"
       FROM nfl_confidence_pool
       WHERE status = 'active'
       ORDER BY starts_on DESC
@@ -3987,6 +3989,73 @@ export const registerRoutes = (router: Router) => {
         )
         : { rows: [] as Array<{ cashPrizeCents: number; firstPlaceBonus: string | null }> };
       const weeklyPrize = prize.rows[0] ?? { cashPrizeCents: 0, firstPlaceBonus: null };
+      const nflConfidencePool = await getActiveNflConfidencePool();
+      const nflConfidenceLeaderboard = nflConfidencePool
+        ? await (async () => {
+          const week = await currentNflConfidenceWeek(nflConfidencePool);
+          await ensureNflConfidenceWeekGames(nflConfidencePool, week);
+          const standings = await query<{
+            userId: string;
+            displayName: string | null;
+            username: string;
+            weekPoints: number;
+            seasonPoints: number;
+            submittedPicks: number;
+            possibleWeekPoints: number;
+          }>(
+            `
+              WITH season_points AS (
+                SELECT entry_id, COALESCE(sum(points_awarded), 0)::int AS points
+                FROM nfl_confidence_pick
+                WHERE pool_id = $1
+                GROUP BY entry_id
+              ),
+              week_points AS (
+                SELECT entry_id,
+                       COALESCE(sum(points_awarded), 0)::int AS points,
+                       count(*) FILTER (WHERE selected_team IS NOT NULL)::int AS submitted,
+                       COALESCE(sum(confidence_points) FILTER (WHERE selected_team IS NOT NULL), 0)::int AS possible
+                FROM nfl_confidence_pick
+                WHERE pool_id = $1 AND week = $2
+                GROUP BY entry_id
+              )
+              SELECT
+                u.id AS "userId",
+                u.display_name AS "displayName",
+                u.username,
+                COALESCE(wp.points, 0)::int AS "weekPoints",
+                COALESCE(sp.points, 0)::int AS "seasonPoints",
+                COALESCE(wp.submitted, 0)::int AS "submittedPicks",
+                COALESCE(wp.possible, 0)::int AS "possibleWeekPoints"
+              FROM nfl_confidence_entry e
+              JOIN app_user u ON u.id = e.user_id
+              LEFT JOIN season_points sp ON sp.entry_id = e.id
+              LEFT JOIN week_points wp ON wp.entry_id = e.id
+              WHERE e.pool_id = $1
+                AND e.status = 'active'
+              ORDER BY COALESCE(wp.points, 0) DESC, COALESCE(sp.points, 0) DESC, lower(COALESCE(NULLIF(u.display_name, ''), u.username))
+              LIMIT 100
+            `,
+            [nflConfidencePool.id, week]
+          );
+          const weeklyStandings = standings.rows.map((row) => ({
+            userId: row.userId,
+            displayName: row.displayName || row.username,
+            weekPoints: row.weekPoints,
+            seasonPoints: row.seasonPoints,
+            submittedPicks: row.submittedPicks,
+            possibleWeekPoints: row.possibleWeekPoints
+          }));
+          const seasonStandings = [...weeklyStandings]
+            .sort((left, right) => right.seasonPoints - left.seasonPoints || right.weekPoints - left.weekPoints || left.displayName.localeCompare(right.displayName));
+          return {
+            pool: nflConfidencePool,
+            currentWeek: week,
+            weeklyStandings,
+            seasonStandings
+          };
+        })()
+        : null;
       res.json({
         leaderboard: result.rows,
         weeks: weeks.rows,
@@ -3994,7 +4063,8 @@ export const registerRoutes = (router: Router) => {
         isCurrentWeek: requestedWeekStart ? requestedWeekStart === currentWeek?.weekStart : true,
         registeredPlayers: Number(registeredPlayers.rows[0]?.count ?? 0),
         weeklyPrizeCents: weeklyPrize.cashPrizeCents,
-        weeklyPrize
+        weeklyPrize,
+        nflConfidenceLeaderboard
       });
     } catch (error) {
       next(error);

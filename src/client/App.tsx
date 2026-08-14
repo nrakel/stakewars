@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowDown, ArrowLeft, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
+import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
@@ -321,6 +321,14 @@ type LeaderboardResponse = {
   registeredPlayers: number;
   weeklyPrizeCents: number;
   weeklyPrize?: WeeklyPrize;
+  nflConfidenceLeaderboard: NflConfidenceLeaderboard | null;
+};
+
+type NflConfidenceLeaderboard = {
+  pool: NflConfidenceState["pool"];
+  currentWeek: number;
+  weeklyStandings: NflConfidenceStanding[];
+  seasonStandings: NflConfidenceStanding[];
 };
 
 type WeeklyPrize = {
@@ -1546,6 +1554,7 @@ function App() {
   const [registeredPlayers, setRegisteredPlayers] = useState(0);
   const [weeklyPrizeCents, setWeeklyPrizeCents] = useState(0);
   const [weeklyFirstPlaceBonus, setWeeklyFirstPlaceBonus] = useState<string | null>(null);
+  const [nflConfidenceLeaderboard, setNflConfidenceLeaderboard] = useState<NflConfidenceLeaderboard | null>(null);
   const [liveGames, setLiveGames] = useState<LiveGameState[]>([]);
   const [openBets, setOpenBets] = useState<OpenBet[]>([]);
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
@@ -1723,6 +1732,7 @@ function App() {
     setRegisteredPlayers(boardResult.registeredPlayers ?? 0);
     setWeeklyPrizeCents(boardResult.weeklyPrizeCents ?? 0);
     setWeeklyFirstPlaceBonus(boardResult.weeklyPrize?.firstPlaceBonus ?? null);
+    setNflConfidenceLeaderboard(boardResult.nflConfidenceLeaderboard ?? null);
     if (boardResult.weekStart && (!leaderboardWeekStart || leaderboardWeekStart !== boardResult.weekStart)) {
       setLeaderboardWeekStart(boardResult.weekStart);
     }
@@ -1813,6 +1823,7 @@ function App() {
     setRegisteredPlayers(result.registeredPlayers ?? 0);
     setWeeklyPrizeCents(result.weeklyPrizeCents ?? 0);
     setWeeklyFirstPlaceBonus(result.weeklyPrize?.firstPlaceBonus ?? null);
+    setNflConfidenceLeaderboard(result.nflConfidenceLeaderboard ?? null);
     if (result.weekStart) {
       setLeaderboardWeekStart(result.weekStart);
     }
@@ -2349,6 +2360,13 @@ function App() {
   const projectedAiPicks = aiPicks.filter((pick) => !pick.lockedAt);
   const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.eligible);
   const rewardShares = [50, 35, 15];
+  const nflConfidenceSeasonPrizes = nflConfidenceLeaderboard
+    ? [
+      nflConfidenceLeaderboard.pool.seasonWinnerPrizeCents,
+      nflConfidenceLeaderboard.pool.seasonRunnerUpPrizeCents,
+      nflConfidenceLeaderboard.pool.seasonThirdPlacePrizeCents
+    ]
+    : [];
   const rewardShareByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [row.rank, rewardShares[index] ?? 0]));
   const rewardCentsByRank = new Map(qualifiedLeaderboardRows.map((row, index) => [
     row.rank,
@@ -3529,7 +3547,7 @@ function App() {
             <div className="notification-card">
               <div>
                 <strong>Join NFL Confidence</strong>
-                <span>Weekly prize: {money(state.pool.weeklyPrizeCents)}. Season prizes: {money(state.pool.seasonWinnerPrizeCents)} winner, {money(state.pool.seasonRunnerUpPrizeCents)} runner-up.</span>
+                <span>Weekly prize: {money(state.pool.weeklyPrizeCents)}. Season prizes: {money(state.pool.seasonWinnerPrizeCents)} first, {money(state.pool.seasonRunnerUpPrizeCents)} second, {money(state.pool.seasonThirdPlacePrizeCents)} third.</span>
               </div>
               <div className="notification-actions">
                 <button className="primary" disabled={nflConfidencePending} onClick={joinNflConfidence}>Join Contest</button>
@@ -4745,6 +4763,85 @@ function App() {
                 </li>
               ))}
             </ol>
+            {nflConfidenceLeaderboard && (
+              <section className="contest-leaderboard-section">
+                <div className="panel-title">
+                  <ClipboardList size={20} />
+                  <div>
+                    <h2>NFL Confidence</h2>
+                    <span>Week {nflConfidenceLeaderboard.currentWeek} and season-long standings</span>
+                  </div>
+                </div>
+                <div className="contest-prize-strip">
+                  <strong>Weekly prize: {money(nflConfidenceLeaderboard.pool.weeklyPrizeCents)}</strong>
+                  <span>Paid after Monday Night Football concludes.</span>
+                  <strong>Season prizes: 1st {money(nflConfidenceSeasonPrizes[0] ?? 0)} • 2nd {money(nflConfidenceSeasonPrizes[1] ?? 0)} • 3rd {money(nflConfidenceSeasonPrizes[2] ?? 0)}</strong>
+                  <span>Awarded after the NFL regular season.</span>
+                </div>
+                <div className="contest-leaderboard-grid">
+                  <div className="contest-standings-card">
+                    <h3>Weekly Standings</h3>
+                    <div className="user-map-table">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Rank</th>
+                            <th>Player</th>
+                            <th>Week Pts</th>
+                            <th>Picks</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {nflConfidenceLeaderboard.weeklyStandings.map((standing, index) => (
+                            <tr key={`nfl-confidence-week-${standing.userId}`}>
+                              <td>{index + 1}</td>
+                              <td>{standing.displayName}</td>
+                              <td>{standing.weekPoints}</td>
+                              <td>{standing.submittedPicks}</td>
+                            </tr>
+                          ))}
+                          {nflConfidenceLeaderboard.weeklyStandings.length === 0 && (
+                            <tr>
+                              <td colSpan={4}>No NFL Confidence entries yet.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div className="contest-standings-card">
+                    <h3>Season Standings</h3>
+                    <div className="user-map-table">
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Rank</th>
+                            <th>Player</th>
+                            <th>Season Pts</th>
+                            <th>Prize</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {nflConfidenceLeaderboard.seasonStandings.map((standing, index) => (
+                            <tr key={`nfl-confidence-season-${standing.userId}`}>
+                              <td>{index + 1}</td>
+                              <td>{standing.displayName}</td>
+                              <td>{standing.seasonPoints}</td>
+                              <td>{nflConfidenceSeasonPrizes[index] ? money(nflConfidenceSeasonPrizes[index]) : "-"}</td>
+                            </tr>
+                          ))}
+                          {nflConfidenceLeaderboard.seasonStandings.length === 0 && (
+                            <tr>
+                              <td colSpan={4}>No NFL Confidence entries yet.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         )}
 

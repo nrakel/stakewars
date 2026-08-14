@@ -696,6 +696,54 @@ textarea {
   flex-wrap: wrap;
 }
 
+.contest-leaderboard-section {
+  max-width: 980px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #dfe5df;
+  display: grid;
+  gap: 14px;
+}
+
+.contest-prize-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.contest-prize-strip strong {
+  color: #14201c;
+  font-size: 0.92rem;
+}
+
+.contest-prize-strip span {
+  color: #65736d;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.contest-leaderboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.contest-standings-card {
+  display: grid;
+  gap: 10px;
+}
+
+.contest-standings-card h3 {
+  margin: 0;
+  color: #14201c;
+  font-size: 1rem;
+}
+
 .reward-share-badge,
 .disqualified-badge,
 .eligibility-progress {
@@ -1070,7 +1118,8 @@ textarea {
 
 @media (max-width: 760px) {
   .survivor-status-grid,
-  .survivor-game-card {
+  .survivor-game-card,
+  .contest-leaderboard-grid {
     grid-template-columns: 1fr;
   }
 }
