@@ -3505,44 +3505,6 @@ function App() {
                 {survivorState.games.length === 0 && <p className="muted">No NFL games are available for the current contest week yet.</p>}
               </div>
             </div>
-
-            <div className="panel page-panel survivor-standings">
-              <div className="panel-title">
-                <ShieldCheck size={20} />
-                <h2>Survivor Standings</h2>
-              </div>
-              <div className="user-map-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Player</th>
-                      <th>Status</th>
-                      <th>Picks</th>
-                      <th>This Week</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {survivorState.standings.map((standing) => (
-                      <tr key={standing.userId}>
-                        <td>{standing.displayName}</td>
-                        <td>{survivorStatusLabel(standing.status)}</td>
-                        <td>{standing.picksMade}</td>
-                        <td>
-                          {standing.currentPick
-                            ? `${standing.currentPick.displayTeam ?? "Hidden until kickoff"} (${survivorStatusLabel(standing.currentPick.status)})`
-                            : "No pick"}
-                        </td>
-                      </tr>
-                    ))}
-                    {survivorState.standings.length === 0 && (
-                      <tr>
-                        <td colSpan={4}>No Survivor entries yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
           </>
         )}
       </div>
@@ -3801,61 +3763,6 @@ function App() {
                 </div>
               </div>
             )}
-
-            <div className="nfl-confidence-standings">
-              <div className="panel page-panel">
-                <div className="panel-title">
-                  <Trophy size={20} />
-                  <h2>Weekly Standings</h2>
-                </div>
-                <div className="user-map-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Player</th>
-                        <th>Week Pts</th>
-                        <th>Picks</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.weeklyStandings.map((standing) => (
-                        <tr key={standing.userId}>
-                          <td>{standing.displayName}</td>
-                          <td>{standing.weekPoints}</td>
-                          <td>{standing.submittedPicks}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              <div className="panel page-panel">
-                <div className="panel-title">
-                  <Trophy size={20} />
-                  <h2>Season Standings</h2>
-                </div>
-                <div className="user-map-table">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Player</th>
-                        <th>Season Pts</th>
-                        <th>Week Pts</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.seasonStandings.map((standing) => (
-                        <tr key={standing.userId}>
-                          <td>{standing.displayName}</td>
-                          <td>{standing.seasonPoints}</td>
-                          <td>{standing.weekPoints}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
           </>
         )}
       </div>
