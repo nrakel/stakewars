@@ -3428,7 +3428,7 @@ function App() {
             <Trophy size={20} />
             <h2>NFL Survivor</h2>
 	          </div>
-	          <div className="notification-actions">
+	          <div className="contest-page-actions">
 	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("survivor")}>View Survivor Leaderboard</button>
 	            <button className="orange-action" type="button" onClick={() => openRulesSection("nfl-survivor-rules")}>Contest Rules</button>
 	          </div>
@@ -3449,10 +3449,6 @@ function App() {
             </div>
           ) : (
             <div className="survivor-status-grid">
-              <div className="metric-card">
-                <span>Status</span>
-                <strong>{survivorStatusLabel(entry.status)}</strong>
-              </div>
               <div className="metric-card">
                 <span>This week</span>
                 <strong>{weekRangeLabel(survivorState.currentWeekStart)}</strong>
@@ -3573,7 +3569,7 @@ function App() {
               <span>Winner picks first. Confidence ranking second.</span>
             </div>
 	          </div>
-	          <div className="notification-actions">
+	          <div className="contest-page-actions">
 	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("confidence")}>View Confidence Leaderboard</button>
 	            <button className="orange-action" type="button" onClick={() => openRulesSection("nfl-confidence-rules")}>Contest Rules</button>
 	          </div>
