@@ -3558,6 +3558,11 @@ function App() {
     const assignedRankings = nflConfidenceRanking.filter(Boolean);
     const unrankedSelectedGames = selectableGames.filter((game) => nflConfidenceSelections[game.id] && !assignedRankings.includes(game.id));
     const savedPickByGame = new Map(state?.picks.map((pick) => [pick.gameId, pick]) ?? []);
+    const seasonPrizes = state ? [
+      { place: 1, label: "Champion", amount: state.pool.seasonWinnerPrizeCents, className: "gold" },
+      { place: 2, label: "Runner-up", amount: state.pool.seasonRunnerUpPrizeCents, className: "silver" },
+      { place: 3, label: "Third place", amount: state.pool.seasonThirdPlacePrizeCents, className: "bronze" }
+    ] : [];
 
     return (
       <div className="nfl-confidence-page">
@@ -3573,13 +3578,35 @@ function App() {
 	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("confidence")}>View Confidence Leaderboard</button>
 	            <button className="orange-action" type="button" onClick={() => openRulesSection("nfl-confidence-rules")}>Contest Rules</button>
 	          </div>
+            {state && (
+              <div className="confidence-prize-chart" aria-label="NFL Confidence season-long prizes">
+                <div className="confidence-prize-heading">
+                  <strong>Season-long prizes</strong>
+                  <span>Weekly prize: {money(state.pool.weeklyPrizeCents)}</span>
+                </div>
+                <div className="confidence-prize-podium">
+                  {seasonPrizes.map((prize) => (
+                    <div className={`confidence-prize-card ${prize.className}`} key={prize.place}>
+                      <div className="confidence-prize-trophy" aria-hidden="true">
+                        <Trophy size={24} />
+                        <span>{prize.place}</span>
+                      </div>
+                      <div>
+                        <strong>{money(prize.amount)}</strong>
+                        <span>{prize.label}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 	          {!state ? (
 	            <button className="secondary-action" onClick={refreshNflConfidence}>Load NFL Confidence</button>
           ) : !state.entry ? (
             <div className="notification-card">
               <div>
                 <strong>Join NFL Confidence</strong>
-                <span>Weekly prize: {money(state.pool.weeklyPrizeCents)}. Season prizes: {money(state.pool.seasonWinnerPrizeCents)} first, {money(state.pool.seasonRunnerUpPrizeCents)} second, {money(state.pool.seasonThirdPlacePrizeCents)} third.</span>
+                <span>Pick every NFL winner, rank your confidence, and compete for weekly plus season-long prizes.</span>
               </div>
               <div className="notification-actions">
                 <button className="primary" disabled={nflConfidencePending} onClick={joinNflConfidence}>Join Contest</button>

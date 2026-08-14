@@ -3252,6 +3252,105 @@ textarea {
   margin-top: 12px;
 }
 
+.confidence-prize-chart {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 18px;
+  padding: 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #fbfcfa;
+}
+
+.confidence-prize-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.confidence-prize-heading strong {
+  color: #14201c;
+  font-size: 0.98rem;
+}
+
+.confidence-prize-heading span {
+  color: #65736d;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.confidence-prize-podium {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.confidence-prize-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.confidence-prize-card > div:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.confidence-prize-card strong {
+  color: #14201c;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.confidence-prize-card span {
+  color: #65736d;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.confidence-prize-trophy {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  color: #141414;
+}
+
+.confidence-prize-trophy span {
+  position: absolute;
+  top: 15px;
+  left: 0;
+  right: 0;
+  color: #141414;
+  font-size: 0.72rem;
+  font-weight: 1000;
+  text-align: center;
+  line-height: 1;
+}
+
+.confidence-prize-card.gold .confidence-prize-trophy {
+  background: #facc15;
+}
+
+.confidence-prize-card.silver .confidence-prize-trophy {
+  background: #d1d5db;
+}
+
+.confidence-prize-card.bronze .confidence-prize-trophy {
+  background: #d97706;
+}
+
 .nfl-confidence-stepper {
   display: flex;
   flex-wrap: wrap;
@@ -3476,6 +3575,10 @@ textarea {
   .confidence-builder {
     grid-template-columns: minmax(120px, 0.85fr) minmax(150px, 1.15fr);
     gap: 8px;
+  }
+
+  .confidence-prize-podium {
+    grid-template-columns: 1fr;
   }
 
   .confidence-bucket {
