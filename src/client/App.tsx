@@ -3417,7 +3417,7 @@ function App() {
 	          </div>
 	          <p className="muted">Pick one NFL team each week. Win and advance. Lose, tie, or miss a pick and you are eliminated. You cannot use the same team twice.</p>
 	          <div className="notification-actions">
-	            <button className="secondary-action" type="button" onClick={() => openLeaderboardTab("survivor")}>View Survivor Leaderboard</button>
+	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("survivor")}>View Survivor Leaderboard</button>
 	          </div>
 	          {!survivorState ? (
 	            <div className="notification-actions">
@@ -3562,7 +3562,7 @@ function App() {
 	          </div>
 	          <p className="muted">Pick every NFL winner for the week, then drag those picks onto a confidence scale. Low values are low confidence. The highest value is your strongest pick.</p>
 	          <div className="notification-actions">
-	            <button className="secondary-action" type="button" onClick={() => openLeaderboardTab("confidence")}>View Confidence Leaderboard</button>
+	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("confidence")}>View Confidence Leaderboard</button>
 	          </div>
 	          {!state ? (
 	            <button className="secondary-action" onClick={refreshNflConfidence}>Load NFL Confidence</button>

@@ -308,6 +308,19 @@ textarea {
   gap: 8px;
 }
 
+.orange-action {
+  min-height: 44px;
+  border-radius: 6px;
+  background: #ff6900;
+  color: #14201c;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+}
+
 .hint,
 .muted {
   color: #65736d;
