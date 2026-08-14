@@ -609,9 +609,9 @@ textarea {
 }
 
 .leaderboard-tabs button.active {
-  background: #14201c;
-  border-color: #14201c;
-  color: #fff;
+  background: #ff6900;
+  border-color: #ff6900;
+  color: #14201c;
 }
 
 .leaderboard-leaders-box {
