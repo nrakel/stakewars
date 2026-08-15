@@ -127,6 +127,14 @@ button:disabled {
   min-height: 24px;
 }
 
+.auth-benefits .auth-benefit-subitem {
+  min-height: 20px;
+  padding-left: 28px;
+  color: #43524c;
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
 .auth-signup-cta {
   width: fit-content;
   min-height: 42px;
@@ -140,26 +148,6 @@ button:disabled {
 
 .auth-signup-cta:hover {
   background: #e85f00;
-}
-
-.auth-gear-link {
-  width: fit-content;
-  min-height: 38px;
-  margin-top: 10px;
-  padding: 0 14px;
-  border: 1px solid #d7ddd8;
-  border-radius: 8px;
-  background: #fff;
-  color: #14201c;
-  font-weight: 850;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.auth-gear-link:hover {
-  border-color: #ff6900;
-  color: #ff6900;
 }
 
 .rules-link {
