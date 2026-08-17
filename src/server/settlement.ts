@@ -576,6 +576,15 @@ const matchFinalGame = (
   const clearMargin = 0.08;
   const teamScoresStrong = closest.summary.awayTeamMatch >= minimumTeamScore && closest.summary.homeTeamMatch >= minimumTeamScore;
   const hasClearMargin = !secondClosest || closest.summary.score - secondClosest.summary.score >= clearMargin;
+  const exactTeamCandidates = candidates.filter((candidate) => (
+    candidate.summary.awayTeamMatch >= 0.99
+    && candidate.summary.homeTeamMatch >= 0.99
+  ));
+  const hasUnambiguousExactTeamMatch = exactTeamCandidates.length === 1 && exactTeamCandidates[0] === closest;
+
+  if (hasUnambiguousExactTeamMatch && teamScoresStrong) {
+    return { game: closest.game, candidates: candidates.slice(0, 3).map((candidate) => candidate.summary) };
+  }
 
   if (closest.summary.score < minimumScore || !teamScoresStrong || !hasClearMargin) {
     return { game: null, candidates: candidates.slice(0, 3).map((candidate) => candidate.summary) };
