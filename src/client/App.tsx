@@ -15,6 +15,27 @@ type LeaderboardTab = "weekly" | "confidence" | "survivor";
 const MAX_CHECKED_LEGS = 8;
 const sportsMenu: ScoreboardSport[] = ["MLB", "NFL", "NBA", "NHL", "NCAAMB", "NCAAF", "EPL"];
 const TOWER_FEATURE_ENABLED = false;
+const appPages = new Set<AppPage>([
+  "lines",
+  "scoreboard",
+  "ai-picks",
+  "survivor",
+  "nfl-confidence",
+  "tower",
+  "leaderboard",
+  "open-bets",
+  "history",
+  "rules",
+  "contact",
+  "install",
+  "account",
+  "admin"
+]);
+
+const initialAppPage = (): AppPage => {
+  const page = new URLSearchParams(window.location.search).get("view");
+  return page && appPages.has(page as AppPage) ? page as AppPage : "lines";
+};
 
 type InstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -1585,7 +1606,7 @@ function App() {
   const [slip, setSlip] = useState<SlipLeg[]>([]);
   const [acceptLineMoves, setAcceptLineMoves] = useState(false);
   const [notice, setNotice] = useState("");
-  const [activePage, setActivePage] = useState<AppPage>("lines");
+  const [activePage, setActivePage] = useState<AppPage>(() => initialAppPage());
   const [mobileMenuOpen, setMobileMenuOpen] = useState(() => window.matchMedia("(max-width: 860px)").matches);
   const [expandedNavGroup, setExpandedNavGroup] = useState<"lines" | "scoreboard" | null>(null);
   const [lineSport, setLineSport] = useState<ScoreboardSport>("MLB");
