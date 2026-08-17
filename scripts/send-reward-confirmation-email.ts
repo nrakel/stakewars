@@ -1,6 +1,5 @@
 import { sendMail } from "../src/server/mail.js";
 import { query, pool } from "../src/server/db.js";
-import { config } from "../src/server/config.js";
 import { buildRewardConfirmationEmail } from "../src/server/rewardEmail.js";
 
 const allowedTestRecipient = "nathanielrakel@gmail.com";
@@ -104,7 +103,7 @@ if (!row) {
   throw new Error(`No reward award found for ${allowedTestRecipient}.`);
 }
 
-const origin = (config.publicOrigin.startsWith("http") ? config.publicOrigin : "https://stakewars.ai").replace(/\/+$/, "");
+const origin = (process.env.REWARD_EMAIL_ORIGIN ?? "https://stakewars.ai").replace(/\/+$/, "");
 const email = buildRewardConfirmationEmail({
   displayName: row.display_name,
   weekStart: row.week_start,
@@ -116,8 +115,7 @@ const email = buildRewardConfirmationEmail({
   voids: row.voids,
   topWagerDescription: row.top_legs,
   topWagerProfitCents: row.top_profit_cents,
-  accountUrl: `${origin}/?view=account`,
-  logoUrl: `${origin}/icons/icon-192.png`
+  accountUrl: `${origin}/?view=account`
 });
 
 const result = await sendMail({
@@ -136,4 +134,3 @@ console.log(JSON.stringify({
   weekStart: row.week_start,
   rewardCents: row.reward_cents
 }, null, 2));
-

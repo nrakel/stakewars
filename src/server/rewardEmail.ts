@@ -10,7 +10,6 @@ type RewardConfirmationEmailInput = {
   topWagerDescription: string | null;
   topWagerProfitCents: number | null;
   accountUrl: string;
-  logoUrl: string;
 };
 
 const dollars = (cents: number) =>
@@ -44,7 +43,6 @@ export const buildRewardConfirmationEmail = (input: RewardConfirmationEmailInput
   const safeDisplayName = escapeHtml(input.displayName);
   const safeTopWagerText = escapeHtml(topWagerText);
   const safeAccountUrl = escapeHtml(input.accountUrl);
-  const safeLogoUrl = escapeHtml(input.logoUrl);
   const safeWeekLabel = escapeHtml(weekLabel(input.weekStart));
   const reward = dollars(input.rewardCents);
 
@@ -77,7 +75,6 @@ export const buildRewardConfirmationEmail = (input: RewardConfirmationEmailInput
           <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;background:#15151b;border:1px solid #2a2a34;border-radius:14px;overflow:hidden;">
             <tr>
               <td style="padding:28px 28px 18px;text-align:center;background:#050507;">
-                <img src="${safeLogoUrl}" width="72" height="72" alt="StakeWars" style="display:block;margin:0 auto 14px;border:0;">
                 <div style="font-size:13px;letter-spacing:0.12em;text-transform:uppercase;color:#f97316;font-weight:700;">StakeWars Reward</div>
                 <h1 style="margin:10px 0 0;font-size:28px;line-height:1.15;color:#ffffff;">You've earned a reward.</h1>
               </td>
@@ -128,4 +125,3 @@ export const buildRewardConfirmationEmail = (input: RewardConfirmationEmailInput
 
   return { subject: rewardConfirmationSubject, text, html };
 };
-
