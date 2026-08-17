@@ -65,6 +65,20 @@ const formatAddress = (recipient: MailRecipient) => {
   return `"${escapedName}" <${recipient.email}>`;
 };
 
+const normalizedEmail = (email: string) => email.trim().toLowerCase();
+
+const defaultBccRecipients = (to: MailRecipient[]) => {
+  const bccEmail = config.emailBccAddress?.trim();
+  if (!bccEmail) {
+    return [];
+  }
+  const directRecipients = new Set(to.map((recipient) => normalizedEmail(recipient.email)));
+  if (directRecipients.has(normalizedEmail(bccEmail))) {
+    return [];
+  }
+  return [{ email: bccEmail, name: "StakeWars Support" }];
+};
+
 const sha256Hex = (value: string) =>
   createHash("sha256").update(value, "utf8").digest("hex");
 
@@ -166,10 +180,12 @@ export const sendMail = async ({ to, subject, text, html, replyTo }: SendMailInp
   const now = new Date();
   const amzDate = awsLongDate(now);
   const dateStamp = awsShortDate(now);
+  const bcc = defaultBccRecipients(to);
   const body = JSON.stringify({
     FromEmailAddress: formatAddress({ email: mailConfig.fromEmail, name: mailConfig.fromName }),
     Destination: {
-      ToAddresses: to.map(formatAddress)
+      ToAddresses: to.map(formatAddress),
+      ...(bcc.length ? { BccAddresses: bcc.map(formatAddress) } : {})
     },
     ...(replyTo?.length ? { ReplyToAddresses: replyTo.map(formatAddress) } : {}),
     Content: {
@@ -248,5 +264,5 @@ export const sendMail = async ({ to, subject, text, html, replyTo }: SendMailInp
   }
 
   const responseBody = await response.json().catch(() => ({})) as { MessageId?: string };
-  return { accepted: to.length, messageId: responseBody.MessageId ?? null };
+  return { accepted: to.length + bcc.length, messageId: responseBody.MessageId ?? null };
 };
