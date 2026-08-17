@@ -1,5 +1,6 @@
 import { transaction } from "./db.js";
 import { awardWeeklyRewardsIfFinal, type WeeklyRewardAwardResult } from "./weeklyRewards.js";
+import { sendPendingWeeklyRewardEmails } from "./weeklyRewardEmails.js";
 import type pg from "pg";
 
 type MlbScheduleGame = {
@@ -868,7 +869,7 @@ const settleWagersForFinals = async ({
   sports: Array<PendingLeg["sport"]>;
   finals: FinalGame[];
 }) => {
-  return transaction(async (client) => {
+  const result = await transaction(async (client) => {
     const aliases = await loadTeamAliases(client, sports);
     const pending = await client.query<PendingLeg>(
       `
@@ -1088,6 +1089,13 @@ const settleWagersForFinals = async ({
       unmatched
     };
   });
+  const finalizedWeeks = result.weeklyRewards
+    .filter((reward) => reward.finalized && reward.awards.length > 0)
+    .map((reward) => reward.weekStart);
+  for (const weekStart of finalizedWeeks) {
+    await sendPendingWeeklyRewardEmails(weekStart);
+  }
+  return result;
 };
 
 export const settleMlbStraightWagers = async (
