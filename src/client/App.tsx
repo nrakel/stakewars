@@ -8,7 +8,7 @@ import "./styles.css";
 
 type AuthMode = "login" | "register";
 type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
-type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "model" | "reddit" | "users";
+type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "rewards" | "model" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 type LeaderboardTab = "weekly" | "confidence" | "survivor";
@@ -61,6 +61,7 @@ type SlipLeg = {
 
 type BonusFulfillmentForm = {
   bonusSelection: string;
+  bonusSize: string;
   shippingName: string;
   shippingAddressLine1: string;
   shippingAddressLine2: string;
@@ -382,6 +383,12 @@ type AdminPrizesResponse = {
   currentWeekStart: string;
   nextWeekStart: string;
   prizes: WeeklyPrize[];
+};
+
+type AdminRewardAward = RewardAward & {
+  userId: string;
+  username: string;
+  displayName: string | null;
 };
 
 type ChineModelAuditGroup = {
@@ -1677,6 +1684,8 @@ function App() {
   const [adminPrizeCash, setAdminPrizeCash] = useState("10.00");
   const [adminPrizeBonus, setAdminPrizeBonus] = useState("");
   const [adminPrizeNotice, setAdminPrizeNotice] = useState("");
+  const [adminRewards, setAdminRewards] = useState<AdminRewardAward[]>([]);
+  const [adminRewardsNotice, setAdminRewardsNotice] = useState("");
   const [chineModelAudit, setChineModelAudit] = useState<ChineModelAudit | null>(null);
   const [chineModelAuditNotice, setChineModelAuditNotice] = useState("");
   const [supportOpen, setSupportOpen] = useState(false);
@@ -1791,6 +1800,7 @@ function App() {
           if (!reward.firstPlaceBonus || next[reward.id]) continue;
           next[reward.id] = {
             bonusSelection: reward.bonusSelection ?? reward.bonusOptions[0] ?? "",
+            bonusSize: reward.bonusSize ?? "",
             shippingName: reward.shippingName ?? me.user.fullName ?? me.user.displayName ?? "",
             shippingAddressLine1: reward.shippingAddressLine1 ?? "",
             shippingAddressLine2: reward.shippingAddressLine2 ?? "",
@@ -2214,6 +2224,8 @@ function App() {
       setAdminSurvivorNotice("");
       setAdminSupportConversations([]);
       setAdminPrizes([]);
+      setAdminRewards([]);
+      setAdminRewardsNotice("");
       setChineModelAudit(null);
       setChineModelAuditNotice("");
       return;
@@ -2225,9 +2237,10 @@ function App() {
       api<AdminSurvivorState>("/admin/survivor", {}, token).catch(() => null),
       api<{ conversations: SupportConversation[] }>("/admin/support/conversations?status=open", {}, token),
       api<AdminPrizesResponse>("/admin/prizes", {}, token),
+      api<{ rewards: AdminRewardAward[] }>("/admin/rewards", {}, token),
       api<ChineModelAudit>("/admin/chine-model-audit", {}, token)
     ])
-      .then(([usersResult, visitorsResult, eligibilityResult, survivorResult, supportResult, prizesResult, auditResult]) => {
+      .then(([usersResult, visitorsResult, eligibilityResult, survivorResult, supportResult, prizesResult, rewardsResult, auditResult]) => {
         setUserDisplayMap(usersResult.users);
         setVisitorMetrics(visitorsResult);
         setAdminEligibility(eligibilityResult);
@@ -2235,6 +2248,7 @@ function App() {
         setAdminSurvivorState(survivorResult);
         setAdminSupportConversations(supportResult.conversations);
         setAdminPrizes(prizesResult.prizes);
+        setAdminRewards(rewardsResult.rewards);
         setChineModelAudit(auditResult);
         const selectedPrize = prizesResult.prizes.find((prize) => prize.weekStart === prizesResult.nextWeekStart)
           ?? prizesResult.prizes.find((prize) => prize.weekStart === prizesResult.currentWeekStart);
@@ -2246,6 +2260,7 @@ function App() {
         setUserDisplayMapNotice("");
         setVisitorMetricsNotice("");
         setAdminEligibilityNotice("");
+        setAdminRewardsNotice("");
         setChineModelAuditNotice("");
       })
       .catch((err) => setUserDisplayMapNotice((err as Error).message));
@@ -2957,6 +2972,7 @@ function App() {
       ...current,
       [awardId]: Object.assign({
         bonusSelection: "",
+        bonusSize: "",
         shippingName: "",
         shippingAddressLine1: "",
         shippingAddressLine2: "",
@@ -2979,6 +2995,7 @@ function App() {
         method: "PUT",
         body: JSON.stringify({
           bonusSelection: form.bonusSelection.trim(),
+          bonusSize: form.bonusSize.trim() || null,
           shippingName: form.shippingName.trim(),
           shippingAddressLine1: form.shippingAddressLine1.trim(),
           shippingAddressLine2: form.shippingAddressLine2.trim() || null,
@@ -3391,6 +3408,18 @@ function App() {
       setAdminPrizeNotice("Prize settings refreshed.");
     } catch (err) {
       setAdminPrizeNotice((err as Error).message);
+    }
+  };
+
+  const refreshAdminRewards = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminRewardsNotice("");
+    try {
+      const result = await api<{ rewards: AdminRewardAward[] }>("/admin/rewards", {}, token);
+      setAdminRewards(result.rewards);
+      setAdminRewardsNotice("Rewards refreshed.");
+    } catch (err) {
+      setAdminRewardsNotice((err as Error).message);
     }
   };
 
@@ -5100,6 +5129,7 @@ function App() {
                 ["survivor", "Survivor"],
                 ["eligibility", "Eligibility"],
                 ["prizes", "Prizes"],
+                ["rewards", "Rewards"],
                 ["model", "Chine Model"],
                 ["reddit", "Reddit"],
                 ["users", "Users"]
@@ -5260,6 +5290,65 @@ function App() {
                 </table>
               </div>
               {adminPrizeNotice && <p className={adminPrizeNotice.includes("saved") || adminPrizeNotice.includes("refreshed") ? "success" : "error"}>{adminPrizeNotice}</p>}
+            </div>
+            )}
+            {adminSection === "rewards" && (
+            <div className="notification-card reward-admin-card">
+              <div>
+                <strong>Special Reward Fulfillment</strong>
+                <span>Read-only fulfillment view for weekly first-place bonus rewards.</span>
+              </div>
+              <div className="notification-actions">
+                <button className="secondary-action" onClick={refreshAdminRewards}>Refresh rewards</button>
+              </div>
+              <div className="user-map-table visitor-table reward-admin-table">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Week</th>
+                      <th>Player</th>
+                      <th>Reward</th>
+                      <th>Selection</th>
+                      <th>Size</th>
+                      <th>Shipping</th>
+                      <th>Saved</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminRewards.map((award) => {
+                      const addressLines = [
+                        award.shippingName,
+                        award.shippingAddressLine1,
+                        award.shippingAddressLine2,
+                        [award.shippingCity, award.shippingRegion, award.shippingPostalCode].filter(Boolean).join(", "),
+                        award.shippingCountry
+                      ].filter(Boolean);
+                      return (
+                        <tr key={award.id}>
+                          <td>{weekRangeLabel(award.weekStart)}</td>
+                          <td>
+                            <strong>{award.displayName || award.username}</strong>
+                            <small>{award.username}</small>
+                          </td>
+                          <td>{award.firstPlaceBonus}</td>
+                          <td>{award.bonusSelection || "Pending"}</td>
+                          <td>{award.bonusSize || "-"}</td>
+                          <td>
+                            {addressLines.length > 0 ? addressLines.map((line) => <small key={line}>{line}</small>) : "Pending"}
+                          </td>
+                          <td>{award.bonusFulfillmentSubmittedAt ? new Date(award.bonusFulfillmentSubmittedAt).toLocaleString() : "Pending"}</td>
+                        </tr>
+                      );
+                    })}
+                    {adminRewards.length === 0 && (
+                      <tr>
+                        <td colSpan={7}>No special reward awards found yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {adminRewardsNotice && <p className={adminRewardsNotice.includes("refreshed") ? "success" : "error"}>{adminRewardsNotice}</p>}
             </div>
             )}
             {adminSection === "support" && (
@@ -5725,6 +5814,7 @@ function App() {
                 {bonusRewards.map((award) => {
                   const form = bonusFulfillmentForms[award.id] ?? {
                     bonusSelection: award.bonusSelection ?? award.bonusOptions[0] ?? "",
+                    bonusSize: award.bonusSize ?? "",
                     shippingName: award.shippingName ?? fullName ?? displayName ?? "",
                     shippingAddressLine1: award.shippingAddressLine1 ?? "",
                     shippingAddressLine2: award.shippingAddressLine2 ?? "",
@@ -5733,6 +5823,7 @@ function App() {
                     shippingPostalCode: award.shippingPostalCode ?? "",
                     shippingCountry: award.shippingCountry ?? "United States"
                   };
+                  const selectedBonusRequiresSize = /\bpolo\b/i.test(form.bonusSelection);
                   return (
                     <div className="notification-card bonus-reward-card" key={award.id}>
                       <div>
@@ -5754,6 +5845,20 @@ function App() {
                             ))}
                           </select>
                         </label>
+                        {selectedBonusRequiresSize && (
+                          <label>
+                            Polo size
+                            <select
+                              value={form.bonusSize}
+                              onChange={(event) => updateBonusFulfillmentForm(award.id, { bonusSize: event.target.value })}
+                            >
+                              <option value="">Select size</option>
+                              {["S", "M", "L", "XL", "2XL", "3XL"].map((size) => (
+                                <option key={size} value={size}>{size}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         <label>
                           Ship to name
                           <input value={form.shippingName} maxLength={120} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingName: event.target.value })} />

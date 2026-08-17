@@ -969,6 +969,10 @@ textarea {
   max-width: 860px;
 }
 
+.reward-admin-card {
+  max-width: 1080px;
+}
+
 .model-audit-card {
   max-width: 1180px;
 }
@@ -1009,6 +1013,14 @@ textarea {
 
 .eligibility-table table {
   min-width: 1120px;
+}
+
+.reward-admin-table table {
+  min-width: 1040px;
+}
+
+.reward-admin-table td small {
+  display: block;
 }
 
 .user-map-table th,

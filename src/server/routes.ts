@@ -73,6 +73,7 @@ const profileSchema = z.object({
 
 const bonusFulfillmentSchema = z.object({
   bonusSelection: z.string().trim().min(1).max(80),
+  bonusSize: z.string().trim().min(1).max(20).nullable(),
   shippingName: z.string().trim().min(2).max(120),
   shippingAddressLine1: z.string().trim().min(2).max(160),
   shippingAddressLine2: z.string().trim().max(160).nullable(),
@@ -753,6 +754,63 @@ const bonusOptionsFromText = (bonus: string | null) => {
     }
     return `${sharedPrefix} ${option}`;
   });
+};
+
+const bonusSizeOptions = ["S", "M", "L", "XL", "2XL", "3XL"];
+
+const bonusRequiresSize = (selection: string) =>
+  /\bpolo\b/i.test(selection);
+
+type RewardFulfillmentEmailInput = {
+  playerName: string;
+  username: string;
+  weekStart: string;
+  rewardText: string;
+  bonusSelection: string;
+  bonusSize: string | null;
+  shippingName: string;
+  shippingAddressLine1: string;
+  shippingAddressLine2: string | null;
+  shippingCity: string;
+  shippingRegion: string;
+  shippingPostalCode: string;
+  shippingCountry: string;
+};
+
+const rewardFulfillmentEmailBody = (input: RewardFulfillmentEmailInput) => {
+  const addressLines = [
+    input.shippingName,
+    input.shippingAddressLine1,
+    input.shippingAddressLine2,
+    `${input.shippingCity}, ${input.shippingRegion} ${input.shippingPostalCode}`,
+    input.shippingCountry
+  ].filter((line): line is string => Boolean(line?.trim()));
+  const text = [
+    "A StakeWars special reward was selected.",
+    "",
+    `Player: ${input.playerName} (${input.username})`,
+    `Week: ${input.weekStart}`,
+    `Reward: ${input.rewardText}`,
+    `Selection: ${input.bonusSelection}`,
+    ...(input.bonusSize ? [`Size: ${input.bonusSize}`] : []),
+    "",
+    "Shipping address:",
+    ...addressLines
+  ].join("\n");
+  const html = [
+    "<p>A StakeWars special reward was selected.</p>",
+    "<ul>",
+    `<li><strong>Player:</strong> ${htmlEscape(input.playerName)} (${htmlEscape(input.username)})</li>`,
+    `<li><strong>Week:</strong> ${htmlEscape(input.weekStart)}</li>`,
+    `<li><strong>Reward:</strong> ${htmlEscape(input.rewardText)}</li>`,
+    `<li><strong>Selection:</strong> ${htmlEscape(input.bonusSelection)}</li>`,
+    ...(input.bonusSize ? [`<li><strong>Size:</strong> ${htmlEscape(input.bonusSize)}</li>`] : []),
+    "</ul>",
+    "<p><strong>Shipping address:</strong><br />",
+    addressLines.map((line) => htmlEscape(line)).join("<br />"),
+    "</p>"
+  ].join("");
+  return { text, html };
 };
 
 const verifyEmailSecret = async (userId: string, secret: string) => {
@@ -2635,6 +2693,7 @@ export const registerRoutes = (router: Router) => {
         rewardCents: number;
         firstPlaceBonus: string | null;
         bonusSelection: string | null;
+        bonusSize: string | null;
         shippingName: string | null;
         shippingAddressLine1: string | null;
         shippingAddressLine2: string | null;
@@ -2653,6 +2712,7 @@ export const registerRoutes = (router: Router) => {
             reward_cents AS "rewardCents",
             first_place_bonus AS "firstPlaceBonus",
             bonus_selection AS "bonusSelection",
+            bonus_size AS "bonusSize",
             shipping_name AS "shippingName",
             shipping_address_line1 AS "shippingAddressLine1",
             shipping_address_line2 AS "shippingAddressLine2",
@@ -2682,8 +2742,22 @@ export const registerRoutes = (router: Router) => {
     try {
       const rewardId = z.uuid().parse(req.params.id);
       const input = bonusFulfillmentSchema.parse(req.body);
-      const existing = await query<{ firstPlaceBonus: string | null }>(
-        "SELECT first_place_bonus AS \"firstPlaceBonus\" FROM weekly_reward_award WHERE id = $1 AND user_id = $2",
+      const existing = await query<{
+        firstPlaceBonus: string | null;
+        weekStart: string;
+        username: string;
+        playerName: string;
+      }>(
+        `
+          SELECT
+            a.first_place_bonus AS "firstPlaceBonus",
+            a.week_starts_on::text AS "weekStart",
+            u.username,
+            COALESCE(NULLIF(u.display_name, ''), NULLIF(u.full_name, ''), u.username) AS "playerName"
+          FROM weekly_reward_award a
+          JOIN app_user u ON u.id = a.user_id
+          WHERE a.id = $1 AND a.user_id = $2
+        `,
         [rewardId, req.user!.id]
       );
       const award = existing.rows[0];
@@ -2700,6 +2774,16 @@ export const registerRoutes = (router: Router) => {
         res.status(400).json({ error: "Select one of the available reward options." });
         return;
       }
+      const selectedOption = options.find((option) => option.toLowerCase() === input.bonusSelection.toLowerCase()) ?? input.bonusSelection;
+      const normalizedSize = input.bonusSize?.trim().toUpperCase() || null;
+      if (bonusRequiresSize(selectedOption) && !normalizedSize) {
+        res.status(400).json({ error: "Select a size for the polo." });
+        return;
+      }
+      if (normalizedSize && !bonusSizeOptions.includes(normalizedSize)) {
+        res.status(400).json({ error: "Select one of the available sizes." });
+        return;
+      }
 
       const result = await query<{
         id: string;
@@ -2709,6 +2793,7 @@ export const registerRoutes = (router: Router) => {
         rewardCents: number;
         firstPlaceBonus: string | null;
         bonusSelection: string | null;
+        bonusSize: string | null;
         shippingName: string | null;
         shippingAddressLine1: string | null;
         shippingAddressLine2: string | null;
@@ -2721,13 +2806,14 @@ export const registerRoutes = (router: Router) => {
         `
           UPDATE weekly_reward_award
           SET bonus_selection = $3,
-              shipping_name = $4,
-              shipping_address_line1 = $5,
-              shipping_address_line2 = $6,
-              shipping_city = $7,
-              shipping_region = $8,
-              shipping_postal_code = $9,
-              shipping_country = $10,
+              bonus_size = $4,
+              shipping_name = $5,
+              shipping_address_line1 = $6,
+              shipping_address_line2 = $7,
+              shipping_city = $8,
+              shipping_region = $9,
+              shipping_postal_code = $10,
+              shipping_country = $11,
               bonus_fulfillment_submitted_at = now()
           WHERE id = $1 AND user_id = $2
           RETURNING
@@ -2738,6 +2824,7 @@ export const registerRoutes = (router: Router) => {
             reward_cents AS "rewardCents",
             first_place_bonus AS "firstPlaceBonus",
             bonus_selection AS "bonusSelection",
+            bonus_size AS "bonusSize",
             shipping_name AS "shippingName",
             shipping_address_line1 AS "shippingAddressLine1",
             shipping_address_line2 AS "shippingAddressLine2",
@@ -2750,7 +2837,8 @@ export const registerRoutes = (router: Router) => {
         [
           rewardId,
           req.user!.id,
-          input.bonusSelection,
+          selectedOption,
+          bonusRequiresSize(selectedOption) ? normalizedSize : null,
           input.shippingName,
           input.shippingAddressLine1,
           input.shippingAddressLine2?.trim() || null,
@@ -2761,6 +2849,31 @@ export const registerRoutes = (router: Router) => {
         ]
       );
       const updated = result.rows[0];
+      try {
+        const emailBody = rewardFulfillmentEmailBody({
+          playerName: award.playerName,
+          username: award.username,
+          weekStart: award.weekStart,
+          rewardText: award.firstPlaceBonus ?? selectedOption,
+          bonusSelection: selectedOption,
+          bonusSize: bonusRequiresSize(selectedOption) ? normalizedSize : null,
+          shippingName: input.shippingName,
+          shippingAddressLine1: input.shippingAddressLine1,
+          shippingAddressLine2: input.shippingAddressLine2?.trim() || null,
+          shippingCity: input.shippingCity,
+          shippingRegion: input.shippingRegion,
+          shippingPostalCode: input.shippingPostalCode,
+          shippingCountry: input.shippingCountry
+        });
+        await sendMail({
+          to: [{ email: "nathanielrakel@gmail.com", name: "Nate Rakel" }],
+          subject: "StakeWars special reward selected",
+          text: emailBody.text,
+          html: emailBody.html
+        });
+      } catch (mailError) {
+        console.error("Reward fulfillment notification email failed", mailError);
+      }
       res.json({
         reward: {
           ...updated,
@@ -3549,6 +3662,69 @@ export const registerRoutes = (router: Router) => {
       );
       await logAdminAction(req, "admin.prizes.view", { rowCount: result.rowCount });
       res.json({ currentWeekStart: current, nextWeekStart: nextWeek, prizes: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/rewards", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const result = await query<{
+        id: string;
+        weekStart: string;
+        userId: string;
+        username: string;
+        displayName: string | null;
+        rank: number;
+        sharePercent: number;
+        rewardCents: number;
+        firstPlaceBonus: string | null;
+        bonusSelection: string | null;
+        bonusSize: string | null;
+        shippingName: string | null;
+        shippingAddressLine1: string | null;
+        shippingAddressLine2: string | null;
+        shippingCity: string | null;
+        shippingRegion: string | null;
+        shippingPostalCode: string | null;
+        shippingCountry: string | null;
+        bonusFulfillmentSubmittedAt: string | null;
+      }>(
+        `
+          SELECT
+            a.id,
+            a.week_starts_on::text AS "weekStart",
+            u.id AS "userId",
+            u.username,
+            COALESCE(NULLIF(u.display_name, ''), NULLIF(u.full_name, ''), u.username) AS "displayName",
+            a.rank,
+            a.share_percent AS "sharePercent",
+            a.reward_cents AS "rewardCents",
+            a.first_place_bonus AS "firstPlaceBonus",
+            a.bonus_selection AS "bonusSelection",
+            a.bonus_size AS "bonusSize",
+            a.shipping_name AS "shippingName",
+            a.shipping_address_line1 AS "shippingAddressLine1",
+            a.shipping_address_line2 AS "shippingAddressLine2",
+            a.shipping_city AS "shippingCity",
+            a.shipping_region AS "shippingRegion",
+            a.shipping_postal_code AS "shippingPostalCode",
+            a.shipping_country AS "shippingCountry",
+            a.bonus_fulfillment_submitted_at AS "bonusFulfillmentSubmittedAt"
+          FROM weekly_reward_award a
+          JOIN app_user u ON u.id = a.user_id
+          WHERE a.first_place_bonus IS NOT NULL
+          ORDER BY a.week_starts_on DESC, a.rank ASC
+          LIMIT 100
+        `
+      );
+      await logAdminAction(req, "admin.rewards.view", { rowCount: result.rowCount });
+      res.json({
+        rewards: result.rows.map((award) => ({
+          ...award,
+          bonusOptions: bonusOptionsFromText(award.firstPlaceBonus)
+        }))
+      });
     } catch (error) {
       next(error);
     }

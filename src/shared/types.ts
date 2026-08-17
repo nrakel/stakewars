@@ -25,6 +25,7 @@ export type RewardAward = {
   firstPlaceBonus: string | null;
   bonusOptions: string[];
   bonusSelection: string | null;
+  bonusSize: string | null;
   shippingName: string | null;
   shippingAddressLine1: string | null;
   shippingAddressLine2: string | null;
