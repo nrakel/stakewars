@@ -385,6 +385,25 @@ type AdminPrizesResponse = {
   prizes: WeeklyPrize[];
 };
 
+type RewardWithdrawalRequest = {
+  id: string;
+  amountCents: number;
+  payoutMethod: "paypal" | "venmo";
+  payoutHandle: string;
+  phoneLast4: string;
+  status: "pending" | "completed" | "canceled";
+  requestedAt: string;
+  completedAt: string | null;
+};
+
+type AdminRewardWithdrawalRequest = RewardWithdrawalRequest & {
+  userId: string;
+  username: string;
+  displayName: string | null;
+  email: string | null;
+  rewardBalanceCents: number;
+};
+
 type AdminRewardAward = RewardAward & {
   userId: string;
   username: string;
@@ -1640,6 +1659,10 @@ function App() {
   const [payoutMethod, setPayoutMethod] = useState<SessionUser["payoutMethod"]>("none");
   const [payoutHandle, setPayoutHandle] = useState("");
   const [phoneLast4, setPhoneLast4] = useState("");
+  const [withdrawalNotice, setWithdrawalNotice] = useState("");
+  const [withdrawalRequesting, setWithdrawalRequesting] = useState(false);
+  const [rewardWithdrawals, setRewardWithdrawals] = useState<RewardWithdrawalRequest[]>([]);
+  const [pendingRewardWithdrawal, setPendingRewardWithdrawal] = useState<RewardWithdrawalRequest | null>(null);
   const [rewardAwards, setRewardAwards] = useState<RewardAward[]>([]);
   const [bonusFulfillmentForms, setBonusFulfillmentForms] = useState<Record<string, BonusFulfillmentForm>>({});
   const [bonusFulfillmentNotice, setBonusFulfillmentNotice] = useState("");
@@ -1686,6 +1709,9 @@ function App() {
   const [adminPrizeNotice, setAdminPrizeNotice] = useState("");
   const [adminRewards, setAdminRewards] = useState<AdminRewardAward[]>([]);
   const [adminRewardsNotice, setAdminRewardsNotice] = useState("");
+  const [adminRewardWithdrawals, setAdminRewardWithdrawals] = useState<AdminRewardWithdrawalRequest[]>([]);
+  const [adminRewardWithdrawalNotice, setAdminRewardWithdrawalNotice] = useState("");
+  const [adminRewardWithdrawalSavingId, setAdminRewardWithdrawalSavingId] = useState<string | null>(null);
   const [adminRewardFulfillmentMessages, setAdminRewardFulfillmentMessages] = useState<Record<string, string>>({});
   const [adminRewardFulfillmentSavingId, setAdminRewardFulfillmentSavingId] = useState<string | null>(null);
   const [chineModelAudit, setChineModelAudit] = useState<ChineModelAudit | null>(null);
@@ -1779,13 +1805,14 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
         api<ReferralInfo>("/me/referral", {}, authToken),
         api<SurvivorState>("/survivor", {}, authToken).catch(() => null),
-        api<{ rewards: RewardAward[] }>("/me/rewards", {}, authToken)
+        api<{ rewards: RewardAward[] }>("/me/rewards", {}, authToken),
+        api<{ withdrawals: RewardWithdrawalRequest[]; pendingWithdrawal: RewardWithdrawalRequest | null }>("/me/reward-withdrawals", {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1796,6 +1823,8 @@ function App() {
       setPayoutHandle(me.user.payoutHandle ?? "");
       setPhoneLast4(me.user.phoneLast4 ?? "");
       setRewardAwards(rewardResult.rewards);
+      setRewardWithdrawals(withdrawalResult.withdrawals);
+      setPendingRewardWithdrawal(withdrawalResult.pendingWithdrawal);
       setBonusFulfillmentForms((current) => {
         const next = { ...current };
         for (const reward of rewardResult.rewards) {
@@ -2228,6 +2257,8 @@ function App() {
       setAdminPrizes([]);
       setAdminRewards([]);
       setAdminRewardsNotice("");
+      setAdminRewardWithdrawals([]);
+      setAdminRewardWithdrawalNotice("");
       setChineModelAudit(null);
       setChineModelAuditNotice("");
       return;
@@ -2240,9 +2271,10 @@ function App() {
       api<{ conversations: SupportConversation[] }>("/admin/support/conversations?status=open", {}, token),
       api<AdminPrizesResponse>("/admin/prizes", {}, token),
       api<{ rewards: AdminRewardAward[] }>("/admin/rewards", {}, token),
+      api<{ withdrawals: AdminRewardWithdrawalRequest[] }>("/admin/reward-withdrawals", {}, token),
       api<ChineModelAudit>("/admin/chine-model-audit", {}, token)
     ])
-      .then(([usersResult, visitorsResult, eligibilityResult, survivorResult, supportResult, prizesResult, rewardsResult, auditResult]) => {
+      .then(([usersResult, visitorsResult, eligibilityResult, survivorResult, supportResult, prizesResult, rewardsResult, withdrawalsResult, auditResult]) => {
         setUserDisplayMap(usersResult.users);
         setVisitorMetrics(visitorsResult);
         setAdminEligibility(eligibilityResult);
@@ -2251,6 +2283,7 @@ function App() {
         setAdminSupportConversations(supportResult.conversations);
         setAdminPrizes(prizesResult.prizes);
         setAdminRewards(rewardsResult.rewards);
+        setAdminRewardWithdrawals(withdrawalsResult.withdrawals);
         setChineModelAudit(auditResult);
         const selectedPrize = prizesResult.prizes.find((prize) => prize.weekStart === prizesResult.nextWeekStart)
           ?? prizesResult.prizes.find((prize) => prize.weekStart === prizesResult.currentWeekStart);
@@ -2263,6 +2296,7 @@ function App() {
         setVisitorMetricsNotice("");
         setAdminEligibilityNotice("");
         setAdminRewardsNotice("");
+        setAdminRewardWithdrawalNotice("");
         setChineModelAuditNotice("");
       })
       .catch((err) => setUserDisplayMapNotice((err as Error).message));
@@ -2427,7 +2461,8 @@ function App() {
   const emailNeedsSave = typedEmail !== savedEmail;
   const canWithdraw = Boolean(
     user
-    && user.rewardBalanceCents > 2000
+    && !pendingRewardWithdrawal
+    && user.rewardBalanceCents >= 2000
     && user.emailVerified
     && payoutMethod !== "none"
     && payoutHandle.trim().length >= 2
@@ -2969,6 +3004,27 @@ function App() {
     }
   };
 
+  const requestRewardWithdrawal = async () => {
+    if (!token || withdrawalRequesting) return;
+    setWithdrawalNotice("");
+    setWithdrawalRequesting(true);
+    try {
+      const result = await api<{ token: string; user: SessionUser; request: RewardWithdrawalRequest }>("/me/reward-withdrawals", {
+        method: "POST"
+      }, token);
+      localStorage.setItem("stakewars_token", result.token);
+      setToken(result.token);
+      setUser(result.user);
+      setPendingRewardWithdrawal(result.request);
+      setRewardWithdrawals((current) => [result.request, ...current.filter((withdrawal) => withdrawal.id !== result.request.id)]);
+      setWithdrawalNotice(`Withdrawal requested for ${money(result.request.amountCents)}. StakeWars support has been notified.`);
+    } catch (err) {
+      setWithdrawalNotice((err as Error).message);
+    } finally {
+      setWithdrawalRequesting(false);
+    }
+  };
+
   const updateBonusFulfillmentForm = (awardId: string, patch: Partial<BonusFulfillmentForm>) => {
     setBonusFulfillmentForms((current) => ({
       ...current,
@@ -3422,6 +3478,40 @@ function App() {
       setAdminRewardsNotice("Rewards refreshed.");
     } catch (err) {
       setAdminRewardsNotice((err as Error).message);
+    }
+  };
+
+  const refreshAdminRewardWithdrawals = async () => {
+    if (!token || !isNateRakelAccount) return;
+    setAdminRewardWithdrawalNotice("");
+    try {
+      const result = await api<{ withdrawals: AdminRewardWithdrawalRequest[] }>("/admin/reward-withdrawals", {}, token);
+      setAdminRewardWithdrawals(result.withdrawals);
+      setAdminRewardWithdrawalNotice("Withdrawals refreshed.");
+    } catch (err) {
+      setAdminRewardWithdrawalNotice((err as Error).message);
+    }
+  };
+
+  const fulfillAdminRewardWithdrawal = async (withdrawal: AdminRewardWithdrawalRequest) => {
+    if (!token || !isNateRakelAccount || adminRewardWithdrawalSavingId) return;
+    setAdminRewardWithdrawalNotice("");
+    setAdminRewardWithdrawalSavingId(withdrawal.id);
+    try {
+      const result = await api<{ withdrawal: AdminRewardWithdrawalRequest }>(`/admin/reward-withdrawals/${withdrawal.id}/fulfill`, {
+        method: "POST"
+      }, token);
+      setAdminRewardWithdrawals((current) => current.map((existing) => (
+        existing.id === result.withdrawal.id ? result.withdrawal : existing
+      )));
+      setAdminRewardWithdrawalNotice("Withdrawal marked fulfilled and balance deducted.");
+      if (user?.id === result.withdrawal.userId) {
+        await refresh(token);
+      }
+    } catch (err) {
+      setAdminRewardWithdrawalNotice((err as Error).message);
+    } finally {
+      setAdminRewardWithdrawalSavingId(null);
     }
   };
 
@@ -5320,6 +5410,66 @@ function App() {
                 </table>
               </div>
               {adminPrizeNotice && <p className={adminPrizeNotice.includes("saved") || adminPrizeNotice.includes("refreshed") ? "success" : "error"}>{adminPrizeNotice}</p>}
+              <div className="admin-subsection">
+                <div>
+                  <strong>Reward Withdrawals</strong>
+                  <span>Pending withdrawal requests are paid only when marked fulfilled.</span>
+                </div>
+                <div className="notification-actions">
+                  <button className="secondary-action" onClick={refreshAdminRewardWithdrawals}>Refresh withdrawals</button>
+                </div>
+                <div className="user-map-table visitor-table withdrawal-admin-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Requested</th>
+                        <th>Player</th>
+                        <th>Amount</th>
+                        <th>Payout</th>
+                        <th>Phone</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {adminRewardWithdrawals.map((withdrawal) => (
+                        <tr key={withdrawal.id}>
+                          <td>{new Date(withdrawal.requestedAt).toLocaleString()}</td>
+                          <td>
+                            <strong>{withdrawal.displayName ?? withdrawal.username}</strong>
+                            <span>{withdrawal.email ?? withdrawal.username}</span>
+                          </td>
+                          <td>{money(withdrawal.amountCents)}</td>
+                          <td>{withdrawal.payoutMethod} {withdrawal.payoutHandle}</td>
+                          <td>{withdrawal.phoneLast4}</td>
+                          <td>{money(withdrawal.rewardBalanceCents)}</td>
+                          <td>{withdrawal.status}</td>
+                          <td>
+                            {withdrawal.status === "pending" ? (
+                              <button
+                                className="primary"
+                                disabled={adminRewardWithdrawalSavingId === withdrawal.id}
+                                onClick={() => void fulfillAdminRewardWithdrawal(withdrawal)}
+                              >
+                                {adminRewardWithdrawalSavingId === withdrawal.id ? "Saving..." : "Mark fulfilled"}
+                              </button>
+                            ) : (
+                              <span>{withdrawal.completedAt ? new Date(withdrawal.completedAt).toLocaleDateString() : "-"}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                      {adminRewardWithdrawals.length === 0 && (
+                        <tr>
+                          <td colSpan={8}>No reward withdrawal requests yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {adminRewardWithdrawalNotice && <p className={adminRewardWithdrawalNotice.includes("refreshed") || adminRewardWithdrawalNotice.includes("fulfilled") ? "success" : "error"}>{adminRewardWithdrawalNotice}</p>}
+              </div>
             </div>
             )}
             {adminSection === "rewards" && (
@@ -5866,10 +6016,15 @@ function App() {
             <div className="reward-card">
               <span>Reward Balance</span>
               <strong>{user ? money(user.rewardBalanceCents) : "$0.00"}</strong>
-              <button className="withdraw-button" disabled={!canWithdraw}>Withdraw</button>
-              {!canWithdraw && (
-                <small>Available after rewards exceed $20.00, email is verified, and payout details are complete.</small>
+              <button className="withdraw-button" disabled={!canWithdraw || withdrawalRequesting || Boolean(pendingRewardWithdrawal)} onClick={() => void requestRewardWithdrawal()}>
+                {pendingRewardWithdrawal ? "Pending Withdrawal" : withdrawalRequesting ? "Requesting..." : "Withdraw"}
+              </button>
+              {pendingRewardWithdrawal ? (
+                <small>Pending withdrawal: {money(pendingRewardWithdrawal.amountCents)} requested {new Date(pendingRewardWithdrawal.requestedAt).toLocaleDateString()}.</small>
+              ) : !canWithdraw && (
+                <small>Available after rewards reach $20.00, email is verified, and payout details are complete.</small>
               )}
+              {withdrawalNotice && <small className={withdrawalNotice.includes("requested") ? "success" : "error"}>{withdrawalNotice}</small>}
             </div>
             {bonusRewards.length > 0 && (
               <div className="bonus-reward-stack">

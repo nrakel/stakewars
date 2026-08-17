@@ -856,6 +856,79 @@ const rewardFulfilledEmailBody = (input: RewardFulfilledEmailInput) => {
   return { text, html };
 };
 
+type RewardWithdrawalEmailInput = {
+  displayName: string;
+  username: string;
+  email: string | null;
+  amountCents: number;
+  payoutMethod: string;
+  payoutHandle: string;
+  phoneLast4: string;
+  requestedAt: string;
+};
+
+const rewardWithdrawalEmailBody = (input: RewardWithdrawalEmailInput) => {
+  const amount = `$${(input.amountCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const text = [
+    "A StakeWars reward withdrawal was requested.",
+    "",
+    `Player: ${input.displayName} (${input.username})`,
+    `Email: ${input.email ?? "Not provided"}`,
+    `Amount: ${amount}`,
+    `Payout method: ${input.payoutMethod}`,
+    `Payout handle: ${input.payoutHandle}`,
+    `Phone last 4: ${input.phoneLast4}`,
+    `Requested: ${input.requestedAt}`
+  ].join("\n");
+  const html = [
+    "<p>A StakeWars reward withdrawal was requested.</p>",
+    "<ul>",
+    `<li><strong>Player:</strong> ${htmlEscape(input.displayName)} (${htmlEscape(input.username)})</li>`,
+    `<li><strong>Email:</strong> ${htmlEscape(input.email ?? "Not provided")}</li>`,
+    `<li><strong>Amount:</strong> ${htmlEscape(amount)}</li>`,
+    `<li><strong>Payout method:</strong> ${htmlEscape(input.payoutMethod)}</li>`,
+    `<li><strong>Payout handle:</strong> ${htmlEscape(input.payoutHandle)}</li>`,
+    `<li><strong>Phone last 4:</strong> ${htmlEscape(input.phoneLast4)}</li>`,
+    `<li><strong>Requested:</strong> ${htmlEscape(input.requestedAt)}</li>`,
+    "</ul>"
+  ].join("");
+  return { text, html };
+};
+
+type RewardWithdrawalFulfilledEmailInput = {
+  playerName: string;
+  amountCents: number;
+  payoutMethod: string;
+  payoutHandle: string;
+};
+
+const rewardWithdrawalFulfilledEmailBody = (input: RewardWithdrawalFulfilledEmailInput) => {
+  const amount = `$${(input.amountCents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const text = [
+    `Hi ${input.playerName},`,
+    "",
+    "Your StakeWars reward withdrawal has been fulfilled.",
+    "",
+    `Amount: ${amount}`,
+    `Payout method: ${input.payoutMethod}`,
+    `Payout handle: ${input.payoutHandle}`,
+    "",
+    "Thanks for playing StakeWars.",
+    "https://stakewars.ai"
+  ].join("\n");
+  const html = [
+    `<p>Hi ${htmlEscape(input.playerName)},</p>`,
+    "<p>Your StakeWars reward withdrawal has been fulfilled.</p>",
+    "<ul>",
+    `<li><strong>Amount:</strong> ${htmlEscape(amount)}</li>`,
+    `<li><strong>Payout method:</strong> ${htmlEscape(input.payoutMethod)}</li>`,
+    `<li><strong>Payout handle:</strong> ${htmlEscape(input.payoutHandle)}</li>`,
+    "</ul>",
+    "<p>Thanks for playing StakeWars.<br /><a href=\"https://stakewars.ai\">stakewars.ai</a></p>"
+  ].join("");
+  return { text, html };
+};
+
 const verifyEmailSecret = async (userId: string, secret: string) => {
   const pending = await query<{
     id: string;
@@ -3791,6 +3864,173 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
+  router.get("/admin/reward-withdrawals", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const result = await query<{
+        id: string;
+        userId: string;
+        username: string;
+        displayName: string | null;
+        email: string | null;
+        rewardBalanceCents: number;
+        amountCents: number;
+        payoutMethod: "paypal" | "venmo";
+        payoutHandle: string;
+        phoneLast4: string;
+        status: "pending" | "completed" | "canceled";
+        requestedAt: string;
+        completedAt: string | null;
+      }>(
+        `
+          SELECT
+            r.id,
+            u.id AS "userId",
+            u.username,
+            COALESCE(NULLIF(u.display_name, ''), NULLIF(u.full_name, ''), u.username) AS "displayName",
+            u.email,
+            u.reward_balance_cents AS "rewardBalanceCents",
+            r.amount_cents AS "amountCents",
+            r.payout_method AS "payoutMethod",
+            r.payout_handle AS "payoutHandle",
+            r.phone_last4 AS "phoneLast4",
+            r.status,
+            r.requested_at AS "requestedAt",
+            r.completed_at AS "completedAt"
+          FROM reward_withdrawal_request r
+          JOIN app_user u ON u.id = r.user_id
+          WHERE r.status = 'pending'
+             OR r.requested_at >= now() - interval '30 days'
+          ORDER BY
+            CASE WHEN r.status = 'pending' THEN 0 ELSE 1 END,
+            r.requested_at DESC
+          LIMIT 100
+        `
+      );
+      await logAdminAction(req, "admin.reward_withdrawals.view", { rowCount: result.rowCount });
+      res.json({ withdrawals: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/reward-withdrawals/:id/fulfill", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const withdrawalId = z.uuid().parse(req.params.id);
+      const completed = await transaction(async (client) => {
+        const result = await client.query<{
+          id: string;
+          userId: string;
+          username: string;
+          displayName: string | null;
+          email: string | null;
+          rewardBalanceCents: number;
+          amountCents: number;
+          payoutMethod: "paypal" | "venmo";
+          payoutHandle: string;
+          phoneLast4: string;
+          status: "pending" | "completed" | "canceled";
+          requestedAt: string;
+          completedAt: string | null;
+        }>(
+          `
+            SELECT
+              r.id,
+              u.id AS "userId",
+              u.username,
+              COALESCE(NULLIF(u.display_name, ''), NULLIF(u.full_name, ''), u.username) AS "displayName",
+              u.email,
+              u.reward_balance_cents AS "rewardBalanceCents",
+              r.amount_cents AS "amountCents",
+              r.payout_method AS "payoutMethod",
+              r.payout_handle AS "payoutHandle",
+              r.phone_last4 AS "phoneLast4",
+              r.status,
+              r.requested_at AS "requestedAt",
+              r.completed_at AS "completedAt"
+            FROM reward_withdrawal_request r
+            JOIN app_user u ON u.id = r.user_id
+            WHERE r.id = $1
+            FOR UPDATE OF r, u
+          `,
+          [withdrawalId]
+        );
+        const withdrawal = result.rows[0];
+        if (!withdrawal) {
+          throw new WagerValidationError("Withdrawal request not found.", "WITHDRAWAL_NOT_FOUND", 404);
+        }
+        if (withdrawal.status !== "pending") {
+          throw new WagerValidationError("This withdrawal is no longer pending.", "WITHDRAWAL_NOT_PENDING");
+        }
+        if (withdrawal.rewardBalanceCents < withdrawal.amountCents) {
+          throw new WagerValidationError("User reward balance is lower than the pending withdrawal amount.", "WITHDRAWAL_BALANCE_CHANGED");
+        }
+
+        await client.query(
+          "UPDATE app_user SET reward_balance_cents = reward_balance_cents - $2 WHERE id = $1",
+          [withdrawal.userId, withdrawal.amountCents]
+        );
+        const updatedResult = await client.query<typeof withdrawal>(
+          `
+            UPDATE reward_withdrawal_request
+            SET status = 'completed',
+                completed_at = now()
+            WHERE id = $1
+            RETURNING
+              id,
+              $2::uuid AS "userId",
+              $3::text AS username,
+              $4::text AS "displayName",
+              $5::text AS email,
+              ($6::integer - amount_cents) AS "rewardBalanceCents",
+              amount_cents AS "amountCents",
+              payout_method AS "payoutMethod",
+              payout_handle AS "payoutHandle",
+              phone_last4 AS "phoneLast4",
+              status,
+              requested_at AS "requestedAt",
+              completed_at AS "completedAt"
+          `,
+          [
+            withdrawal.id,
+            withdrawal.userId,
+            withdrawal.username,
+            withdrawal.displayName,
+            withdrawal.email,
+            withdrawal.rewardBalanceCents
+          ]
+        );
+        return updatedResult.rows[0];
+      });
+
+      if (completed.email) {
+        const emailBody = rewardWithdrawalFulfilledEmailBody({
+          playerName: completed.displayName ?? completed.username,
+          amountCents: completed.amountCents,
+          payoutMethod: completed.payoutMethod,
+          payoutHandle: completed.payoutHandle
+        });
+        await sendMail({
+          to: [{ email: completed.email, name: completed.displayName ?? undefined }],
+          subject: "Your StakeWars withdrawal has been fulfilled",
+          text: emailBody.text,
+          html: emailBody.html
+        });
+      }
+      await logAdminAction(req, "admin.reward_withdrawal.fulfill", {
+        withdrawalId,
+        userId: completed.userId,
+        amountCents: completed.amountCents
+      });
+      res.json({ withdrawal: completed });
+    } catch (error) {
+      if (error instanceof WagerValidationError) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
+        return;
+      }
+      next(error);
+    }
+  });
+
   router.post("/admin/rewards/:id/fulfill", requireNateRakelAccount, async (req, res, next) => {
     try {
       const rewardId = z.uuid().parse(req.params.id);
@@ -4078,6 +4318,186 @@ export const registerRoutes = (router: Router) => {
             ? "Display name is already taken"
             : "Profile value is already taken"
         });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.get("/me/reward-withdrawals", requireAuth, async (req, res, next) => {
+    try {
+      const result = await query<{
+        id: string;
+        amountCents: number;
+        payoutMethod: "paypal" | "venmo";
+        payoutHandle: string;
+        phoneLast4: string;
+        status: "pending" | "completed" | "canceled";
+        requestedAt: string;
+        completedAt: string | null;
+      }>(
+        `
+          SELECT
+            id,
+            amount_cents AS "amountCents",
+            payout_method AS "payoutMethod",
+            payout_handle AS "payoutHandle",
+            phone_last4 AS "phoneLast4",
+            status,
+            requested_at AS "requestedAt",
+            completed_at AS "completedAt"
+          FROM reward_withdrawal_request
+          WHERE user_id = $1
+          ORDER BY requested_at DESC
+          LIMIT 10
+        `,
+        [req.user!.id]
+      );
+      res.json({
+        withdrawals: result.rows,
+        pendingWithdrawal: result.rows.find((withdrawal) => withdrawal.status === "pending") ?? null
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/me/reward-withdrawals", requireAuth, async (req, res, next) => {
+    try {
+      const withdrawal = await transaction(async (client) => {
+        const existingPending = await client.query<{ id: string }>(
+          "SELECT id FROM reward_withdrawal_request WHERE user_id = $1 AND status = 'pending' LIMIT 1",
+          [req.user!.id]
+        );
+        if ((existingPending.rowCount ?? 0) > 0) {
+          throw new WagerValidationError("You already have a pending withdrawal request.", "WITHDRAWAL_PENDING");
+        }
+
+        const userResult = await client.query<{
+          id: string;
+          username: string;
+          displayName: string | null;
+          email: string | null;
+          emailVerified: boolean;
+          rewardBalanceCents: number;
+          payoutMethod: "none" | "paypal" | "venmo";
+          payoutHandle: string | null;
+          phoneLast4: string | null;
+          role: "player" | "admin" | "system";
+        }>(
+          `
+            SELECT
+              id,
+              username,
+              COALESCE(NULLIF(display_name, ''), NULLIF(full_name, ''), username) AS "displayName",
+              email,
+              email_verified AS "emailVerified",
+              reward_balance_cents AS "rewardBalanceCents",
+              payout_method AS "payoutMethod",
+              payout_handle AS "payoutHandle",
+              phone_last4 AS "phoneLast4",
+              role
+            FROM app_user
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [req.user!.id]
+        );
+        const user = userResult.rows[0];
+        if (!user) {
+          throw new WagerValidationError("User not found.", "USER_NOT_FOUND", 404);
+        }
+        if (!user.emailVerified) {
+          throw new WagerValidationError("Verify your email before requesting a withdrawal.", "EMAIL_NOT_VERIFIED");
+        }
+        if (user.rewardBalanceCents < 2000) {
+          throw new WagerValidationError("Withdrawal requires at least $20.00 in rewards.", "WITHDRAWAL_MINIMUM_NOT_MET");
+        }
+        if (user.payoutMethod === "none" || !user.payoutHandle || !user.phoneLast4) {
+          throw new WagerValidationError("Complete payout method, payout handle, and phone last 4 before requesting a withdrawal.", "PAYOUT_DETAILS_REQUIRED");
+        }
+
+        const requestResult = await client.query<{
+          id: string;
+          amountCents: number;
+          payoutMethod: "paypal" | "venmo";
+          payoutHandle: string;
+          phoneLast4: string;
+          status: "pending" | "completed" | "canceled";
+          requestedAt: string;
+          completedAt: string | null;
+        }>(
+          `
+            INSERT INTO reward_withdrawal_request (
+              id,
+              user_id,
+              amount_cents,
+              payout_method,
+              payout_handle,
+              phone_last4
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING
+              id,
+              amount_cents AS "amountCents",
+              payout_method AS "payoutMethod",
+              payout_handle AS "payoutHandle",
+              phone_last4 AS "phoneLast4",
+              status,
+              requested_at AS "requestedAt",
+              completed_at AS "completedAt"
+          `,
+          [randomUUID(), user.id, user.rewardBalanceCents, user.payoutMethod, user.payoutHandle, user.phoneLast4]
+        );
+
+        return {
+          request: requestResult.rows[0],
+          user
+        };
+      });
+
+      const email = rewardWithdrawalEmailBody({
+        displayName: withdrawal.user.displayName ?? withdrawal.user.username,
+        username: withdrawal.user.username,
+        email: withdrawal.user.email,
+        amountCents: withdrawal.request.amountCents,
+        payoutMethod: withdrawal.request.payoutMethod,
+        payoutHandle: withdrawal.request.payoutHandle,
+        phoneLast4: withdrawal.request.phoneLast4,
+        requestedAt: new Date(withdrawal.request.requestedAt).toLocaleString("en-US", { timeZone: "America/Chicago" })
+      });
+      try {
+        await sendMail({
+          to: [{ email: "support@stakewars.ai", name: "StakeWars Support" }],
+          subject: "StakeWars reward withdrawal requested",
+          text: email.text,
+          html: email.html
+        });
+      } catch (mailError) {
+        console.error("Reward withdrawal notification email failed", mailError);
+      }
+
+      const refreshed = await query<{
+        id: string;
+        username: string;
+        fullName: string | null;
+        email: string | null;
+        emailVerified: boolean;
+        displayName: string | null;
+        rewardBalanceCents: number;
+        payoutMethod: "none" | "paypal" | "venmo";
+        payoutHandle: string | null;
+        phoneLast4: string | null;
+        role: "player" | "admin" | "system";
+      }>(
+        `SELECT ${sessionUserSelect} FROM app_user WHERE id = $1`,
+        [req.user!.id]
+      );
+      const user = refreshed.rows[0];
+      res.json({ request: withdrawal.request, user, token: signToken(user) });
+    } catch (error) {
+      if (error instanceof WagerValidationError) {
+        res.status(error.statusCode).json({ error: error.message, code: error.code });
         return;
       }
       next(error);

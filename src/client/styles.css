@@ -1011,12 +1011,36 @@ textarea {
   min-width: 760px;
 }
 
+.admin-subsection {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid #edf0ed;
+}
+
+.admin-subsection > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
 .eligibility-table table {
   min-width: 1120px;
 }
 
 .reward-admin-table table {
   min-width: 1280px;
+}
+
+.withdrawal-admin-table table {
+  min-width: 1040px;
+}
+
+.withdrawal-admin-table td span {
+  display: block;
+  color: #65736d;
+  font-size: 0.76rem;
+  margin-top: 2px;
 }
 
 .reward-admin-table td small {
