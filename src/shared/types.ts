@@ -16,6 +16,25 @@ export type SessionUser = {
   role: "player" | "admin" | "system";
 };
 
+export type RewardAward = {
+  id: string;
+  weekStart: string;
+  rank: number;
+  sharePercent: number;
+  rewardCents: number;
+  firstPlaceBonus: string | null;
+  bonusOptions: string[];
+  bonusSelection: string | null;
+  shippingName: string | null;
+  shippingAddressLine1: string | null;
+  shippingAddressLine2: string | null;
+  shippingCity: string | null;
+  shippingRegion: string | null;
+  shippingPostalCode: string | null;
+  shippingCountry: string | null;
+  bonusFulfillmentSubmittedAt: string | null;
+};
+
 export type GameLine = {
   id: string;
   sport: SportKey;

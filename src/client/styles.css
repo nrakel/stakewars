@@ -891,6 +891,27 @@ textarea {
   font-size: 0.8rem;
 }
 
+.bonus-reward-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.bonus-reward-card {
+  align-items: stretch;
+}
+
+.bonus-reward-card strong {
+  color: #14201c;
+}
+
+.bonus-reward-grid {
+  width: 100%;
+}
+
+.bonus-reward-card .notification-actions {
+  justify-content: flex-end;
+}
+
 .withdraw-button {
   width: fit-content;
   min-height: 38px;

@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowDown, ArrowLeft, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, SessionUser, SettledBet, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
+import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
@@ -57,6 +57,17 @@ type SlipLeg = {
   awayTeam?: string;
   homeTeam?: string;
   marketKey?: GameLine["marketKey"];
+};
+
+type BonusFulfillmentForm = {
+  bonusSelection: string;
+  shippingName: string;
+  shippingAddressLine1: string;
+  shippingAddressLine2: string;
+  shippingCity: string;
+  shippingRegion: string;
+  shippingPostalCode: string;
+  shippingCountry: string;
 };
 
 type LineMoveNotice = {
@@ -1622,6 +1633,10 @@ function App() {
   const [payoutMethod, setPayoutMethod] = useState<SessionUser["payoutMethod"]>("none");
   const [payoutHandle, setPayoutHandle] = useState("");
   const [phoneLast4, setPhoneLast4] = useState("");
+  const [rewardAwards, setRewardAwards] = useState<RewardAward[]>([]);
+  const [bonusFulfillmentForms, setBonusFulfillmentForms] = useState<Record<string, BonusFulfillmentForm>>({});
+  const [bonusFulfillmentNotice, setBonusFulfillmentNotice] = useState("");
+  const [bonusFulfillmentSavingId, setBonusFulfillmentSavingId] = useState<string | null>(null);
   const [lineupGame, setLineupGame] = useState<GameCard | null>(null);
   const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [isStandalone, setIsStandalone] = useState(false);
@@ -1753,12 +1768,13 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
         api<ReferralInfo>("/me/referral", {}, authToken),
-        api<SurvivorState>("/survivor", {}, authToken).catch(() => null)
+        api<SurvivorState>("/survivor", {}, authToken).catch(() => null),
+        api<{ rewards: RewardAward[] }>("/me/rewards", {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1768,6 +1784,24 @@ function App() {
       setPayoutMethod(me.user.payoutMethod);
       setPayoutHandle(me.user.payoutHandle ?? "");
       setPhoneLast4(me.user.phoneLast4 ?? "");
+      setRewardAwards(rewardResult.rewards);
+      setBonusFulfillmentForms((current) => {
+        const next = { ...current };
+        for (const reward of rewardResult.rewards) {
+          if (!reward.firstPlaceBonus || next[reward.id]) continue;
+          next[reward.id] = {
+            bonusSelection: reward.bonusSelection ?? reward.bonusOptions[0] ?? "",
+            shippingName: reward.shippingName ?? me.user.fullName ?? me.user.displayName ?? "",
+            shippingAddressLine1: reward.shippingAddressLine1 ?? "",
+            shippingAddressLine2: reward.shippingAddressLine2 ?? "",
+            shippingCity: reward.shippingCity ?? "",
+            shippingRegion: reward.shippingRegion ?? "",
+            shippingPostalCode: reward.shippingPostalCode ?? "",
+            shippingCountry: reward.shippingCountry ?? "United States"
+          };
+        }
+        return next;
+      });
       setBankroll(me.bankroll);
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
@@ -2382,6 +2416,7 @@ function App() {
     && payoutHandle.trim().length >= 2
     && /^[0-9]{4}$/.test(phoneLast4)
   );
+  const bonusRewards = rewardAwards.filter((award) => Boolean(award.firstPlaceBonus));
   const lockedAiPicks = aiPicks.filter((pick) => Boolean(pick.lockedAt));
   const projectedAiPicks = aiPicks.filter((pick) => !pick.lockedAt);
   const qualifiedLeaderboardRows = leaderboard.filter((row) => row.role !== "system" && row.rank <= 3 && row.eligible);
@@ -2914,6 +2949,51 @@ function App() {
       setNotice((err as Error).message);
     } finally {
       setAccountSaving(false);
+    }
+  };
+
+  const updateBonusFulfillmentForm = (awardId: string, patch: Partial<BonusFulfillmentForm>) => {
+    setBonusFulfillmentForms((current) => ({
+      ...current,
+      [awardId]: Object.assign({
+        bonusSelection: "",
+        shippingName: "",
+        shippingAddressLine1: "",
+        shippingAddressLine2: "",
+        shippingCity: "",
+        shippingRegion: "",
+        shippingPostalCode: "",
+        shippingCountry: "United States"
+      }, current[awardId] ?? {}, patch)
+    }));
+  };
+
+  const saveBonusFulfillment = async (award: RewardAward) => {
+    if (!token || bonusFulfillmentSavingId) return;
+    const form = bonusFulfillmentForms[award.id];
+    if (!form) return;
+    setBonusFulfillmentNotice("");
+    setBonusFulfillmentSavingId(award.id);
+    try {
+      const result = await api<{ reward: RewardAward }>(`/me/rewards/${award.id}/bonus-fulfillment`, {
+        method: "PUT",
+        body: JSON.stringify({
+          bonusSelection: form.bonusSelection.trim(),
+          shippingName: form.shippingName.trim(),
+          shippingAddressLine1: form.shippingAddressLine1.trim(),
+          shippingAddressLine2: form.shippingAddressLine2.trim() || null,
+          shippingCity: form.shippingCity.trim(),
+          shippingRegion: form.shippingRegion.trim(),
+          shippingPostalCode: form.shippingPostalCode.trim(),
+          shippingCountry: form.shippingCountry.trim()
+        })
+      }, token);
+      setRewardAwards((current) => current.map((existing) => existing.id === result.reward.id ? result.reward : existing));
+      setBonusFulfillmentNotice("Reward choice and shipping details saved.");
+    } catch (err) {
+      setBonusFulfillmentNotice((err as Error).message);
+    } finally {
+      setBonusFulfillmentSavingId(null);
     }
   };
 
@@ -5640,6 +5720,80 @@ function App() {
                 <small>Available after rewards exceed $20.00, email is verified, and payout details are complete.</small>
               )}
             </div>
+            {bonusRewards.length > 0 && (
+              <div className="bonus-reward-stack">
+                {bonusRewards.map((award) => {
+                  const form = bonusFulfillmentForms[award.id] ?? {
+                    bonusSelection: award.bonusSelection ?? award.bonusOptions[0] ?? "",
+                    shippingName: award.shippingName ?? fullName ?? displayName ?? "",
+                    shippingAddressLine1: award.shippingAddressLine1 ?? "",
+                    shippingAddressLine2: award.shippingAddressLine2 ?? "",
+                    shippingCity: award.shippingCity ?? "",
+                    shippingRegion: award.shippingRegion ?? "",
+                    shippingPostalCode: award.shippingPostalCode ?? "",
+                    shippingCountry: award.shippingCountry ?? "United States"
+                  };
+                  return (
+                    <div className="notification-card bonus-reward-card" key={award.id}>
+                      <div>
+                        <strong>Special Reward</strong>
+                        <span>
+                          {award.firstPlaceBonus}
+                          {award.bonusFulfillmentSubmittedAt ? ` • Saved ${new Date(award.bonusFulfillmentSubmittedAt).toLocaleDateString()}` : ""}
+                        </span>
+                      </div>
+                      <div className="account-grid bonus-reward-grid">
+                        <label>
+                          Reward choice
+                          <select
+                            value={form.bonusSelection}
+                            onChange={(event) => updateBonusFulfillmentForm(award.id, { bonusSelection: event.target.value })}
+                          >
+                            {award.bonusOptions.map((option) => (
+                              <option key={option} value={option}>{option}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label>
+                          Ship to name
+                          <input value={form.shippingName} maxLength={120} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingName: event.target.value })} />
+                        </label>
+                        <label>
+                          Address line 1
+                          <input value={form.shippingAddressLine1} maxLength={160} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingAddressLine1: event.target.value })} />
+                        </label>
+                        <label>
+                          Address line 2
+                          <input value={form.shippingAddressLine2} maxLength={160} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingAddressLine2: event.target.value })} />
+                        </label>
+                        <label>
+                          City
+                          <input value={form.shippingCity} maxLength={100} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingCity: event.target.value })} />
+                        </label>
+                        <label>
+                          State / Region
+                          <input value={form.shippingRegion} maxLength={80} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingRegion: event.target.value })} />
+                        </label>
+                        <label>
+                          ZIP / Postal code
+                          <input value={form.shippingPostalCode} maxLength={20} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingPostalCode: event.target.value })} />
+                        </label>
+                        <label>
+                          Country
+                          <input value={form.shippingCountry} maxLength={80} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingCountry: event.target.value })} />
+                        </label>
+                      </div>
+                      <div className="notification-actions">
+                        <button className="primary" type="button" disabled={bonusFulfillmentSavingId === award.id} onClick={() => void saveBonusFulfillment(award)}>
+                          {bonusFulfillmentSavingId === award.id ? "Saving..." : "Save reward details"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {bonusFulfillmentNotice && <p className={bonusFulfillmentNotice.includes("saved") ? "success" : "error"}>{bonusFulfillmentNotice}</p>}
+              </div>
+            )}
             <div className="notification-card referral-card">
               <div>
                 <strong>Referral</strong>

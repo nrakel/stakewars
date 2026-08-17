@@ -71,6 +71,17 @@ const profileSchema = z.object({
   }
 });
 
+const bonusFulfillmentSchema = z.object({
+  bonusSelection: z.string().trim().min(1).max(80),
+  shippingName: z.string().trim().min(2).max(120),
+  shippingAddressLine1: z.string().trim().min(2).max(160),
+  shippingAddressLine2: z.string().trim().max(160).nullable(),
+  shippingCity: z.string().trim().min(2).max(100),
+  shippingRegion: z.string().trim().min(2).max(80),
+  shippingPostalCode: z.string().trim().min(3).max(20),
+  shippingCountry: z.string().trim().min(2).max(80)
+});
+
 const placeWagerSchema = z.object({
   kind: z.enum(["straight", "parlay", "round_robin"]),
   stakeCents: z.number().int().positive().max(100_000_000),
@@ -720,6 +731,29 @@ const sessionUserSelect = `
   phone_last4 AS "phoneLast4",
   role
 `;
+
+const bonusOptionsFromText = (bonus: string | null) => {
+  if (!bonus) {
+    return [];
+  }
+  const trimmed = bonus.trim();
+  const withoutPrefix = trimmed.replace(/^.*?\b(?:wins?|gets?|receives?)\s+(?:a\s+|an\s+)?/i, "");
+  const options = withoutPrefix
+    .split(/\s+or\s+|\s*\/\s*|,/i)
+    .map((option) => option.trim().replace(/^(?:a|an)\s+/i, ""))
+    .filter(Boolean);
+  if (options.length <= 1) {
+    return [trimmed];
+  }
+  const firstOptionParts = options[0].split(/\s+/);
+  const sharedPrefix = firstOptionParts.length > 1 ? firstOptionParts.slice(0, -1).join(" ") : "";
+  return options.map((option, index) => {
+    if (index === 0 || !sharedPrefix || option.toLowerCase().startsWith(`${sharedPrefix.toLowerCase()} `)) {
+      return option;
+    }
+    return `${sharedPrefix} ${option}`;
+  });
+};
 
 const verifyEmailSecret = async (userId: string, secret: string) => {
   const pending = await query<{
@@ -2586,6 +2620,153 @@ export const registerRoutes = (router: Router) => {
     try {
       const entry = await transaction((client) => ensureWeeklyEntry(client, req.user!.id));
       res.json({ user: req.user, bankroll: entry });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/me/rewards", requireAuth, async (req, res, next) => {
+    try {
+      const result = await query<{
+        id: string;
+        weekStart: string;
+        rank: number;
+        sharePercent: number;
+        rewardCents: number;
+        firstPlaceBonus: string | null;
+        bonusSelection: string | null;
+        shippingName: string | null;
+        shippingAddressLine1: string | null;
+        shippingAddressLine2: string | null;
+        shippingCity: string | null;
+        shippingRegion: string | null;
+        shippingPostalCode: string | null;
+        shippingCountry: string | null;
+        bonusFulfillmentSubmittedAt: string | null;
+      }>(
+        `
+          SELECT
+            id,
+            week_starts_on::text AS "weekStart",
+            rank,
+            share_percent AS "sharePercent",
+            reward_cents AS "rewardCents",
+            first_place_bonus AS "firstPlaceBonus",
+            bonus_selection AS "bonusSelection",
+            shipping_name AS "shippingName",
+            shipping_address_line1 AS "shippingAddressLine1",
+            shipping_address_line2 AS "shippingAddressLine2",
+            shipping_city AS "shippingCity",
+            shipping_region AS "shippingRegion",
+            shipping_postal_code AS "shippingPostalCode",
+            shipping_country AS "shippingCountry",
+            bonus_fulfillment_submitted_at AS "bonusFulfillmentSubmittedAt"
+          FROM weekly_reward_award
+          WHERE user_id = $1
+          ORDER BY week_starts_on DESC, rank ASC
+        `,
+        [req.user!.id]
+      );
+      res.json({
+        rewards: result.rows.map((award) => ({
+          ...award,
+          bonusOptions: bonusOptionsFromText(award.firstPlaceBonus)
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.put("/me/rewards/:id/bonus-fulfillment", requireAuth, async (req, res, next) => {
+    try {
+      const rewardId = z.uuid().parse(req.params.id);
+      const input = bonusFulfillmentSchema.parse(req.body);
+      const existing = await query<{ firstPlaceBonus: string | null }>(
+        "SELECT first_place_bonus AS \"firstPlaceBonus\" FROM weekly_reward_award WHERE id = $1 AND user_id = $2",
+        [rewardId, req.user!.id]
+      );
+      const award = existing.rows[0];
+      if (!award) {
+        res.status(404).json({ error: "Reward not found" });
+        return;
+      }
+      const options = bonusOptionsFromText(award.firstPlaceBonus);
+      if (options.length === 0) {
+        res.status(400).json({ error: "This reward does not have a selectable bonus item." });
+        return;
+      }
+      if (!options.some((option) => option.toLowerCase() === input.bonusSelection.toLowerCase())) {
+        res.status(400).json({ error: "Select one of the available reward options." });
+        return;
+      }
+
+      const result = await query<{
+        id: string;
+        weekStart: string;
+        rank: number;
+        sharePercent: number;
+        rewardCents: number;
+        firstPlaceBonus: string | null;
+        bonusSelection: string | null;
+        shippingName: string | null;
+        shippingAddressLine1: string | null;
+        shippingAddressLine2: string | null;
+        shippingCity: string | null;
+        shippingRegion: string | null;
+        shippingPostalCode: string | null;
+        shippingCountry: string | null;
+        bonusFulfillmentSubmittedAt: string | null;
+      }>(
+        `
+          UPDATE weekly_reward_award
+          SET bonus_selection = $3,
+              shipping_name = $4,
+              shipping_address_line1 = $5,
+              shipping_address_line2 = $6,
+              shipping_city = $7,
+              shipping_region = $8,
+              shipping_postal_code = $9,
+              shipping_country = $10,
+              bonus_fulfillment_submitted_at = now()
+          WHERE id = $1 AND user_id = $2
+          RETURNING
+            id,
+            week_starts_on::text AS "weekStart",
+            rank,
+            share_percent AS "sharePercent",
+            reward_cents AS "rewardCents",
+            first_place_bonus AS "firstPlaceBonus",
+            bonus_selection AS "bonusSelection",
+            shipping_name AS "shippingName",
+            shipping_address_line1 AS "shippingAddressLine1",
+            shipping_address_line2 AS "shippingAddressLine2",
+            shipping_city AS "shippingCity",
+            shipping_region AS "shippingRegion",
+            shipping_postal_code AS "shippingPostalCode",
+            shipping_country AS "shippingCountry",
+            bonus_fulfillment_submitted_at AS "bonusFulfillmentSubmittedAt"
+        `,
+        [
+          rewardId,
+          req.user!.id,
+          input.bonusSelection,
+          input.shippingName,
+          input.shippingAddressLine1,
+          input.shippingAddressLine2?.trim() || null,
+          input.shippingCity,
+          input.shippingRegion,
+          input.shippingPostalCode,
+          input.shippingCountry
+        ]
+      );
+      const updated = result.rows[0];
+      res.json({
+        reward: {
+          ...updated,
+          bonusOptions: options
+        }
+      });
     } catch (error) {
       next(error);
     }
