@@ -12,7 +12,13 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, getTodayRedditLockStatus, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
-import { dailyAiParlayBankrollFraction, dailyAiStraightBankrollFraction, dailyAiWagerMinConfidence } from "./ai.js";
+import {
+  dailyAiHighBankrollStraightBankrollFraction,
+  dailyAiParlayBankrollFraction,
+  dailyAiReducedStraightBankrollThresholdCents,
+  dailyAiStraightBankrollFraction,
+  dailyAiWagerMinConfidence
+} from "./ai.js";
 import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
 import type { DailyAiPick, DailyChineParlay } from "../shared/types.js";
 import {
@@ -5221,7 +5227,12 @@ export const registerRoutes = (router: Router) => {
                     AND au.role = 'system'
                     AND adb.bankroll_date = (now() AT TIME ZONE 'America/Chicago')::date
                     AND adb.straight_wager_stake_cents IS NOT NULL
-                    AND floor(adb.starting_balance_cents * $3::numeric) - (
+                    AND floor(adb.starting_balance_cents * (
+                      CASE
+                        WHEN adb.starting_balance_cents > $3::integer THEN LEAST($4::numeric, $5::numeric)
+                        ELSE $5::numeric
+                      END
+                    )) - (
                       SELECT COALESCE(sum(w2.stake_cents), 0)
                       FROM wager w2
                       WHERE w2.user_id = au.id
@@ -5244,7 +5255,13 @@ export const registerRoutes = (router: Router) => {
           FROM ranked
           ORDER BY "lockedAt" DESC NULLS LAST, confidence DESC NULLS LAST, score DESC NULLS LAST, "startsAt" ASC
         `,
-        [dailyAiWagerMinConfidence, config.aiUsername, dailyAiStraightBankrollFraction]
+        [
+          dailyAiWagerMinConfidence,
+          config.aiUsername,
+          dailyAiReducedStraightBankrollThresholdCents,
+          dailyAiHighBankrollStraightBankrollFraction,
+          dailyAiStraightBankrollFraction
+        ]
       );
       const chineParlay = (await query<DailyChineParlay>(
         `

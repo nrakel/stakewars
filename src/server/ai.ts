@@ -2144,6 +2144,8 @@ const teamKeyForPick = (pick: Pick<CandidateLine, "selected_team">) => pick.sele
 
 export const dailyAiWagerMinConfidence = 0.7;
 export const dailyAiStraightBankrollFraction = 0.6;
+export const dailyAiReducedStraightBankrollThresholdCents = 500_000;
+export const dailyAiHighBankrollStraightBankrollFraction = 0.4;
 export const dailyAiMaxStraightWagerBankrollFraction = 0.2;
 export const dailyAiParlayBankrollFraction = 0.1;
 const dailyAiRoundRobinEnabled = false;
@@ -2179,6 +2181,13 @@ const aiRoundRobinCandidateRejectionReason = (candidate: ScoredCandidate) => {
   }
   return null;
 };
+
+export const dailyAiStraightBankrollFractionForStartingBankroll = (
+  startingBankrollCents: number,
+  configuredFraction = dailyAiStraightBankrollFraction
+) => startingBankrollCents > dailyAiReducedStraightBankrollThresholdCents
+  ? Math.min(configuredFraction, dailyAiHighBankrollStraightBankrollFraction)
+  : configuredFraction;
 
 const expectedRoundRobinRoi = (candidates: ScoredCandidate[], maxLegs = candidates.length, minLegs = 2) => {
   if (candidates.length < minLegs || maxLegs < minLegs || maxLegs > candidates.length) {
@@ -2572,7 +2581,11 @@ export const generateAiPicks = async ({
         newStraightWagerSlotKeys.add(gameKey);
       }
     }
-    const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * aiStraightBankrollFraction);
+    const effectiveDailyStraightBankrollFraction = dailyAiStraightBankrollFractionForStartingBankroll(
+      dailyStartingBankrollCents,
+      aiStraightBankrollFraction
+    );
+    const dailyStraightBudgetCents = Math.floor(dailyStartingBankrollCents * effectiveDailyStraightBankrollFraction);
     const maxStraightStakeCents = Math.floor(dailyStartingBankrollCents * dailyAiMaxStraightWagerBankrollFraction);
     const remainingDailyStraightBudgetCents = Math.max(0, dailyStraightBudgetCents - existingStraightStakeCents);
     const straightBufferSlots = 1;
@@ -2980,6 +2993,7 @@ export const generateAiPicks = async ({
         skippedReason: dailyParlayWagerId ? null : dailyParlaySkippedReason
       },
       dailyStraight: {
+        bankrollFraction: effectiveDailyStraightBankrollFraction,
         budgetCents: dailyStraightBudgetCents,
         remainingBudgetCents: remainingDailyStraightBudgetCents,
         maxStakeCents: maxStraightStakeCents,
