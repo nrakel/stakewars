@@ -1,4 +1,5 @@
 import { transaction } from "./db.js";
+import { awardWeeklyRewardsIfFinal, type WeeklyRewardAwardResult } from "./weeklyRewards.js";
 import type pg from "pg";
 
 type MlbScheduleGame = {
@@ -926,6 +927,7 @@ const settleWagersForFinals = async ({
       startsOn: string;
       candidates: MatchCandidateSummary[];
     }> = [];
+    const affectedWeeklyEntryIds = new Set<string>();
     const wagers = new Map<string, PendingLeg[]>();
 
     for (const leg of pending.rows) {
@@ -971,6 +973,7 @@ const settleWagersForFinals = async ({
         );
         if ((updated.rowCount ?? 0) > 0) {
           settledLegsPartial.push({ wagerId, legId: leg.leg_id, outcome: leg.outcome });
+          affectedWeeklyEntryIds.add(leg.weekly_entry_id);
         }
       }
 
@@ -997,6 +1000,7 @@ const settleWagersForFinals = async ({
             [firstLeg.stake_cents, firstLeg.weekly_entry_id]
           );
           settled.push({ wagerId, kind: firstLeg.kind, status: "lost", balanceDeltaCents: 0 });
+          affectedWeeklyEntryIds.add(firstLeg.weekly_entry_id);
         }
         continue;
       }
@@ -1016,6 +1020,7 @@ const settleWagersForFinals = async ({
 
           await client.query("UPDATE wager SET status = $1, potential_payout_cents = $2 WHERE id = $3", [status, roundRobin.payoutCents, wagerId]);
           settled.push({ wagerId, kind: firstLeg.kind, status, balanceDeltaCents: roundRobin.payoutDeltaCents });
+          affectedWeeklyEntryIds.add(firstLeg.weekly_entry_id);
         }
         continue;
       }
@@ -1053,6 +1058,23 @@ const settleWagersForFinals = async ({
       );
 
       settled.push({ wagerId, kind: firstLeg.kind, status, balanceDeltaCents });
+      affectedWeeklyEntryIds.add(firstLeg.weekly_entry_id);
+    }
+
+    const weeklyRewards: WeeklyRewardAwardResult[] = [];
+    if (affectedWeeklyEntryIds.size > 0) {
+      const affectedWeeks = await client.query<{ week_start: string }>(
+        `
+          SELECT DISTINCT week_starts_on::text AS week_start
+          FROM weekly_entry
+          WHERE id = ANY($1::uuid[])
+        `,
+        [[...affectedWeeklyEntryIds]]
+      );
+
+      for (const row of affectedWeeks.rows) {
+        weeklyRewards.push(await awardWeeklyRewardsIfFinal(client, row.week_start));
+      }
     }
 
     return {
@@ -1062,6 +1084,7 @@ const settleWagersForFinals = async ({
       settled,
       settledLegsPartial,
       settledRoundRobinWays,
+      weeklyRewards,
       unmatched
     };
   });
