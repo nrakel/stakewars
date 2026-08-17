@@ -1686,6 +1686,8 @@ function App() {
   const [adminPrizeNotice, setAdminPrizeNotice] = useState("");
   const [adminRewards, setAdminRewards] = useState<AdminRewardAward[]>([]);
   const [adminRewardsNotice, setAdminRewardsNotice] = useState("");
+  const [adminRewardFulfillmentMessages, setAdminRewardFulfillmentMessages] = useState<Record<string, string>>({});
+  const [adminRewardFulfillmentSavingId, setAdminRewardFulfillmentSavingId] = useState<string | null>(null);
   const [chineModelAudit, setChineModelAudit] = useState<ChineModelAudit | null>(null);
   const [chineModelAuditNotice, setChineModelAuditNotice] = useState("");
   const [supportOpen, setSupportOpen] = useState(false);
@@ -3420,6 +3422,34 @@ function App() {
       setAdminRewardsNotice("Rewards refreshed.");
     } catch (err) {
       setAdminRewardsNotice((err as Error).message);
+    }
+  };
+
+  const fulfillAdminReward = async (award: AdminRewardAward) => {
+    if (!token || !isNateRakelAccount || adminRewardFulfillmentSavingId) return;
+    const message = (adminRewardFulfillmentMessages[award.id] ?? "").trim();
+    if (!message) {
+      setAdminRewardsNotice("Enter a fulfillment message before marking the reward fulfilled.");
+      return;
+    }
+    setAdminRewardsNotice("");
+    setAdminRewardFulfillmentSavingId(award.id);
+    try {
+      const result = await api<{ reward: AdminRewardAward }>(`/admin/rewards/${award.id}/fulfill`, {
+        method: "POST",
+        body: JSON.stringify({ message })
+      }, token);
+      setAdminRewards((current) => current.map((existing) => existing.id === result.reward.id ? result.reward : existing));
+      setAdminRewardFulfillmentMessages((current) => {
+        const next = { ...current };
+        delete next[award.id];
+        return next;
+      });
+      setAdminRewardsNotice("Reward marked fulfilled and email sent.");
+    } catch (err) {
+      setAdminRewardsNotice((err as Error).message);
+    } finally {
+      setAdminRewardFulfillmentSavingId(null);
     }
   };
 
@@ -5296,7 +5326,7 @@ function App() {
             <div className="notification-card reward-admin-card">
               <div>
                 <strong>Special Reward Fulfillment</strong>
-                <span>Read-only fulfillment view for weekly first-place bonus rewards.</span>
+                <span>Review reward selections, shipping details, and mark special rewards fulfilled.</span>
               </div>
               <div className="notification-actions">
                 <button className="secondary-action" onClick={refreshAdminRewards}>Refresh rewards</button>
@@ -5312,6 +5342,8 @@ function App() {
                       <th>Size</th>
                       <th>Shipping</th>
                       <th>Saved</th>
+                      <th>Status</th>
+                      <th>Fulfillment</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5337,18 +5369,48 @@ function App() {
                             {addressLines.length > 0 ? addressLines.map((line) => <small key={line}>{line}</small>) : "Pending"}
                           </td>
                           <td>{award.bonusFulfillmentSubmittedAt ? new Date(award.bonusFulfillmentSubmittedAt).toLocaleString() : "Pending"}</td>
+                          <td>
+                            {award.bonusFulfilledAt ? (
+                              <>
+                                <strong>Fulfilled</strong>
+                                <small>{new Date(award.bonusFulfilledAt).toLocaleString()}</small>
+                                {award.bonusFulfillmentMessage && <small>{award.bonusFulfillmentMessage}</small>}
+                              </>
+                            ) : award.bonusSelection ? "Ready" : "Waiting on player"}
+                          </td>
+                          <td>
+                            {award.bonusFulfilledAt ? "-" : (
+                              <div className="reward-fulfillment-actions">
+                                <textarea
+                                  rows={3}
+                                  maxLength={2000}
+                                  value={adminRewardFulfillmentMessages[award.id] ?? ""}
+                                  placeholder="Personal message, shipping notes, tracking information..."
+                                  disabled={!award.bonusSelection}
+                                  onChange={(event) => setAdminRewardFulfillmentMessages((current) => ({ ...current, [award.id]: event.target.value }))}
+                                />
+                                <button
+                                  className="primary"
+                                  disabled={!award.bonusSelection || adminRewardFulfillmentSavingId === award.id}
+                                  onClick={() => void fulfillAdminReward(award)}
+                                >
+                                  {adminRewardFulfillmentSavingId === award.id ? "Sending..." : "Mark fulfilled"}
+                                </button>
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
                     {adminRewards.length === 0 && (
                       <tr>
-                        <td colSpan={7}>No special reward awards found yet.</td>
+                        <td colSpan={9}>No special reward awards found yet.</td>
                       </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-              {adminRewardsNotice && <p className={adminRewardsNotice.includes("refreshed") ? "success" : "error"}>{adminRewardsNotice}</p>}
+              {adminRewardsNotice && <p className={adminRewardsNotice.includes("refreshed") || adminRewardsNotice.includes("fulfilled") ? "success" : "error"}>{adminRewardsNotice}</p>}
             </div>
             )}
             {adminSection === "support" && (
@@ -5824,20 +5886,25 @@ function App() {
                     shippingCountry: award.shippingCountry ?? "United States"
                   };
                   const selectedBonusRequiresSize = /\bpolo\b/i.test(form.bonusSelection);
+                  const rewardFulfilled = Boolean(award.bonusFulfilledAt);
                   return (
                     <div className="notification-card bonus-reward-card" key={award.id}>
                       <div>
                         <strong>Special Reward</strong>
                         <span>
                           {award.firstPlaceBonus}
-                          {award.bonusFulfillmentSubmittedAt ? ` • Saved ${new Date(award.bonusFulfillmentSubmittedAt).toLocaleDateString()}` : ""}
+                          {award.bonusFulfilledAt
+                            ? ` • Fulfilled ${new Date(award.bonusFulfilledAt).toLocaleDateString()}`
+                            : award.bonusFulfillmentSubmittedAt ? ` • Saved ${new Date(award.bonusFulfillmentSubmittedAt).toLocaleDateString()}` : ""}
                         </span>
+                        {award.bonusFulfillmentMessage && <small>{award.bonusFulfillmentMessage}</small>}
                       </div>
                       <div className="account-grid bonus-reward-grid">
                         <label>
                           Reward choice
                           <select
                             value={form.bonusSelection}
+                            disabled={rewardFulfilled}
                             onChange={(event) => updateBonusFulfillmentForm(award.id, { bonusSelection: event.target.value })}
                           >
                             {award.bonusOptions.map((option) => (
@@ -5850,6 +5917,7 @@ function App() {
                             Polo size
                             <select
                               value={form.bonusSize}
+                              disabled={rewardFulfilled}
                               onChange={(event) => updateBonusFulfillmentForm(award.id, { bonusSize: event.target.value })}
                             >
                               <option value="">Select size</option>
@@ -5861,38 +5929,40 @@ function App() {
                         )}
                         <label>
                           Ship to name
-                          <input value={form.shippingName} maxLength={120} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingName: event.target.value })} />
+                          <input value={form.shippingName} maxLength={120} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingName: event.target.value })} />
                         </label>
                         <label>
                           Address line 1
-                          <input value={form.shippingAddressLine1} maxLength={160} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingAddressLine1: event.target.value })} />
+                          <input value={form.shippingAddressLine1} maxLength={160} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingAddressLine1: event.target.value })} />
                         </label>
                         <label>
                           Address line 2
-                          <input value={form.shippingAddressLine2} maxLength={160} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingAddressLine2: event.target.value })} />
+                          <input value={form.shippingAddressLine2} maxLength={160} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingAddressLine2: event.target.value })} />
                         </label>
                         <label>
                           City
-                          <input value={form.shippingCity} maxLength={100} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingCity: event.target.value })} />
+                          <input value={form.shippingCity} maxLength={100} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingCity: event.target.value })} />
                         </label>
                         <label>
                           State / Region
-                          <input value={form.shippingRegion} maxLength={80} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingRegion: event.target.value })} />
+                          <input value={form.shippingRegion} maxLength={80} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingRegion: event.target.value })} />
                         </label>
                         <label>
                           ZIP / Postal code
-                          <input value={form.shippingPostalCode} maxLength={20} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingPostalCode: event.target.value })} />
+                          <input value={form.shippingPostalCode} maxLength={20} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingPostalCode: event.target.value })} />
                         </label>
                         <label>
                           Country
-                          <input value={form.shippingCountry} maxLength={80} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingCountry: event.target.value })} />
+                          <input value={form.shippingCountry} maxLength={80} disabled={rewardFulfilled} onChange={(event) => updateBonusFulfillmentForm(award.id, { shippingCountry: event.target.value })} />
                         </label>
                       </div>
-                      <div className="notification-actions">
-                        <button className="primary" type="button" disabled={bonusFulfillmentSavingId === award.id} onClick={() => void saveBonusFulfillment(award)}>
-                          {bonusFulfillmentSavingId === award.id ? "Saving..." : "Save reward details"}
-                        </button>
-                      </div>
+                      {!rewardFulfilled && (
+                        <div className="notification-actions">
+                          <button className="primary" type="button" disabled={bonusFulfillmentSavingId === award.id} onClick={() => void saveBonusFulfillment(award)}>
+                            {bonusFulfillmentSavingId === award.id ? "Saving..." : "Save reward details"}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}

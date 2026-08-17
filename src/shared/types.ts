@@ -34,6 +34,8 @@ export type RewardAward = {
   shippingPostalCode: string | null;
   shippingCountry: string | null;
   bonusFulfillmentSubmittedAt: string | null;
+  bonusFulfilledAt: string | null;
+  bonusFulfillmentMessage: string | null;
 };
 
 export type GameLine = {

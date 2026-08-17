@@ -1016,11 +1016,21 @@ textarea {
 }
 
 .reward-admin-table table {
-  min-width: 1040px;
+  min-width: 1280px;
 }
 
 .reward-admin-table td small {
   display: block;
+}
+
+.reward-fulfillment-actions {
+  display: grid;
+  gap: 8px;
+  min-width: 260px;
+}
+
+.reward-fulfillment-actions textarea {
+  min-height: 76px;
 }
 
 .user-map-table th,
