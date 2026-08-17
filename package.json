@@ -61,6 +61,8 @@
     "push:pregame:prod": "node dist/scripts/send-pregame-push.js",
     "mail:test": "tsx scripts/send-test-email.ts",
     "mail:test:prod": "node dist/scripts/send-test-email.js",
+    "mail:reward-test": "tsx scripts/send-reward-confirmation-email.ts",
+    "mail:reward-test:prod": "node dist/scripts/send-reward-confirmation-email.js",
     "nightly": "tsx scripts/nightly-automation.ts",
     "nightly:prod": "node dist/scripts/nightly-automation.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
