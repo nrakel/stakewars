@@ -257,6 +257,155 @@ const centralDate = (date = new Date()) => {
   return `${values.year}-${values.month}-${values.day}`;
 };
 
+const markdownEscape = (value: string) => value.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
+
+const podcastDateTime = (value: string | Date | null | undefined) => {
+  if (!value) return "N/A";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  return `${date.toLocaleString("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  })} CT`;
+};
+
+const centsText = (cents: number | null | undefined) => {
+  if (cents == null) return "N/A";
+  return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
+const featureLabel = (key: string) => key
+  .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+  .replace(/\bOps\b/g, "OPS")
+  .replace(/\bObp\b/g, "OBP")
+  .replace(/\bSlg\b/g, "SLG")
+  .replace(/\bEra\b/g, "ERA")
+  .replace(/\bFip\b/g, "FIP")
+  .replace(/\bSwx FIP\b/g, "swxFIP")
+  .replace(/\bSw FIP\b/g, "swFIP")
+  .replace(/\bSiera\b/g, "SIERA")
+  .replace(/\bHr\/9\b/g, "HR/9")
+  .replace(/\bIl\b/g, "IL")
+  .replace(/\bMlb\b/g, "MLB");
+
+const featureValueText = (value: unknown): string => {
+  if (value == null || value === "") return "N/A";
+  if (typeof value === "number") return Number.isInteger(value) ? value.toLocaleString("en-US") : value.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.map(featureValueText).join(", ");
+  if (typeof value === "object") return JSON.stringify(value);
+  return String(value);
+};
+
+type PodcastPickRow = {
+  id: string;
+  selectedTeam: string;
+  publishedFor: string;
+  score: number | string | null;
+  confidence: number | string | null;
+  reasons: string[] | null;
+  features: Record<string, unknown> | null;
+  explanation: string | null;
+  lockedAt: string | null;
+  wagerId: string | null;
+  modelVersion: string | null;
+  lockedOddsAmerican: number | null;
+  lockedSpread: string | null;
+  lockedLineCapturedAt: string | null;
+  closingOddsAmerican: number | null;
+  closingSpread: string | null;
+  closingCapturedAt: string | null;
+  wagerStatus: string | null;
+  stakeCents: number | null;
+  potentialReturnCents: number | null;
+  sport: string;
+  league: string;
+  startsAt: string;
+  homeTeam: string;
+  awayTeam: string;
+  spread: string;
+  oddsAmerican: number;
+  marketKey: string;
+};
+
+const buildPodcastMarkdown = (date: string, picks: PodcastPickRow[]) => {
+  const generatedAt = podcastDateTime(new Date());
+  const lines = [
+    `# StakeWars Chine Podcast Prep - ${date}`,
+    "",
+    `Generated: ${generatedAt}`,
+    `Picks found: ${picks.length}`,
+    "",
+    "Use this as a prep file for podcast notes. It includes the stored Chine pick, wager state, model explanation, reasons, and all captured model features for each game.",
+    ""
+  ];
+
+  if (picks.length === 0) {
+    lines.push("No Chine picks were found for this date.");
+    return lines.join("\n");
+  }
+
+  picks.forEach((pick, index) => {
+    const confidence = pick.confidence == null ? "N/A" : `${Math.round(Number(pick.confidence) * 100)}%`;
+    const score = pick.score == null ? "N/A" : Number(pick.score).toFixed(4);
+    const features = pick.features ?? {};
+    const edge = featureValueText(features.edge);
+    const fairProbability = featureValueText(features.fairProbability);
+    const impliedProbability = featureValueText(features.impliedProbability);
+    const pickLine = pick.marketKey === "h2h"
+      ? `${pick.selectedTeam} ML (${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican})`
+      : `${pick.selectedTeam} ${pick.spread} (${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican})`;
+
+    lines.push(
+      `## ${index + 1}. ${pick.awayTeam} at ${pick.homeTeam}`,
+      "",
+      `- Sport/League: ${pick.sport} / ${pick.league}`,
+      `- Start: ${podcastDateTime(pick.startsAt)}`,
+      `- Pick: ${pickLine}`,
+      `- Confidence: ${confidence}`,
+      `- Model score: ${score}`,
+      `- Model edge: ${edge}`,
+      `- Fair probability: ${fairProbability}`,
+      `- Implied probability: ${impliedProbability}`,
+      `- Wager status: ${pick.wagerId ? pick.wagerStatus ?? "pending" : "not wagered"}`,
+      `- Stake: ${centsText(pick.stakeCents)}`,
+      `- Potential return: ${centsText(pick.potentialReturnCents)}`,
+      `- Locked at: ${podcastDateTime(pick.lockedAt)}`,
+      `- Current line: spread ${pick.spread}, odds ${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican}`,
+      `- Locked line: spread ${pick.lockedSpread ?? "N/A"}, odds ${pick.lockedOddsAmerican == null ? "N/A" : `${pick.lockedOddsAmerican > 0 ? "+" : ""}${pick.lockedOddsAmerican}`}`,
+      `- Closing line: spread ${pick.closingSpread ?? "N/A"}, odds ${pick.closingOddsAmerican == null ? "N/A" : `${pick.closingOddsAmerican > 0 ? "+" : ""}${pick.closingOddsAmerican}`}`,
+      `- Model version: ${pick.modelVersion ?? "N/A"}`,
+      "",
+      "### Chine Explanation",
+      "",
+      pick.explanation?.trim() || "No generated explanation was stored for this pick.",
+      "",
+      "### Model Reasons",
+      ""
+    );
+    const reasons = pick.reasons ?? [];
+    if (reasons.length > 0) {
+      reasons.forEach((reason) => lines.push(`- ${reason}`));
+    } else {
+      lines.push("- No reason labels were stored.");
+    }
+
+    lines.push("", "### Captured Model Features", "", "| Feature | Value |", "|---|---|");
+    Object.entries(features)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .forEach(([key, value]) => {
+        lines.push(`| ${markdownEscape(featureLabel(key))} | ${markdownEscape(featureValueText(value))} |`);
+      });
+    lines.push("");
+  });
+
+  return lines.join("\n");
+};
+
 const yyyyMmDd = (date: Date) => date.toISOString().slice(0, 10);
 
 const addDays = (date: string, days: number) => {
@@ -3766,6 +3915,58 @@ export const registerRoutes = (router: Router) => {
         settledPicks: audit.summary[0]?.picks ?? 0
       });
       res.json(audit);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/podcast", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const date = optionalDateParam.parse(typeof req.query.date === "string" ? req.query.date : undefined) ?? centralDate();
+      const result = await query<PodcastPickRow>(
+        `
+          SELECT
+            p.id,
+            p.selected_team AS "selectedTeam",
+            p.published_for::text AS "publishedFor",
+            p.score,
+            p.confidence,
+            p.reasons,
+            p.features,
+            p.explanation,
+            p.locked_at AS "lockedAt",
+            p.wager_id AS "wagerId",
+            p.model_version AS "modelVersion",
+            p.locked_odds_american AS "lockedOddsAmerican",
+            p.locked_spread::text AS "lockedSpread",
+            p.locked_line_captured_at AS "lockedLineCapturedAt",
+            p.closing_odds_american AS "closingOddsAmerican",
+            p.closing_spread::text AS "closingSpread",
+            p.closing_captured_at AS "closingCapturedAt",
+            w.status::text AS "wagerStatus",
+            w.stake_cents AS "stakeCents",
+            w.potential_payout_cents AS "potentialReturnCents",
+            gl.sport,
+            gl.league,
+            gl.starts_at AS "startsAt",
+            gl.home_team AS "homeTeam",
+            gl.away_team AS "awayTeam",
+            gl.spread::text AS spread,
+            gl.odds_american AS "oddsAmerican",
+            gl.market_key AS "marketKey"
+          FROM ai_pick p
+          JOIN game_line gl ON gl.id = p.game_line_id
+          LEFT JOIN wager w ON w.id = p.wager_id
+          WHERE p.published_for = $1::date
+          ORDER BY p.confidence DESC NULLS LAST, p.score DESC NULLS LAST, gl.starts_at ASC
+        `,
+        [date]
+      );
+      const body = buildPodcastMarkdown(date, result.rows);
+      await logAdminAction(req, "admin.podcast.download", { date, picks: result.rowCount });
+      res.setHeader("content-type", "text/markdown; charset=utf-8");
+      res.setHeader("content-disposition", `attachment; filename="stakewars-chine-podcast-${date}.md"`);
+      res.send(body);
     } catch (error) {
       next(error);
     }

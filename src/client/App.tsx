@@ -8,7 +8,7 @@ import "./styles.css";
 
 type AuthMode = "login" | "register";
 type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
-type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "rewards" | "model" | "reddit" | "users";
+type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "rewards" | "model" | "podcast" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
 type LeaderboardTab = "weekly" | "confidence" | "survivor";
@@ -1716,6 +1716,9 @@ function App() {
   const [adminRewardFulfillmentSavingId, setAdminRewardFulfillmentSavingId] = useState<string | null>(null);
   const [chineModelAudit, setChineModelAudit] = useState<ChineModelAudit | null>(null);
   const [chineModelAuditNotice, setChineModelAuditNotice] = useState("");
+  const [podcastDate, setPodcastDate] = useState(() => centralDate());
+  const [podcastNotice, setPodcastNotice] = useState("");
+  const [podcastGenerating, setPodcastGenerating] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportCategory, setSupportCategory] = useState<SupportCategory | "">("");
   const [supportMessage, setSupportMessage] = useState("");
@@ -3445,6 +3448,40 @@ function App() {
       setChineModelAuditNotice("Chine model audit refreshed.");
     } catch (err) {
       setChineModelAuditNotice((err as Error).message);
+    }
+  };
+
+  const generatePodcastFile = async () => {
+    if (!token || !isNateRakelAccount || podcastGenerating) return;
+    setPodcastNotice("");
+    setPodcastGenerating(true);
+    try {
+      const response = await fetch(`/api/admin/podcast?date=${encodeURIComponent(podcastDate || centralDate())}`, {
+        headers: {
+          authorization: `Bearer ${token}`
+        }
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? "Podcast file generation failed.");
+      }
+      const blob = await response.blob();
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] ?? `stakewars-chine-podcast-${podcastDate || centralDate()}.md`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setPodcastNotice("Podcast file generated.");
+    } catch (err) {
+      setPodcastNotice((err as Error).message);
+    } finally {
+      setPodcastGenerating(false);
     }
   };
 
@@ -5251,6 +5288,7 @@ function App() {
                 ["prizes", "Prizes"],
                 ["rewards", "Rewards"],
                 ["model", "Chine Model"],
+                ["podcast", "Podcast"],
                 ["reddit", "Reddit"],
                 ["users", "Users"]
               ] as Array<[AdminSection, string]>).map(([section, label]) => (
@@ -5789,6 +5827,27 @@ function App() {
                 <ModelAuditTable title="Top Heuristic Reasons" rows={(chineModelAudit?.reasons ?? []).slice(0, 30)} />
               </div>
               {chineModelAuditNotice && <p className={chineModelAuditNotice.includes("refreshed") ? "success" : "error"}>{chineModelAuditNotice}</p>}
+            </div>
+            )}
+            {adminSection === "podcast" && (
+            <div className="notification-card podcast-admin-card">
+              <div>
+                <strong>Podcast</strong>
+                <span>Generate a daily Markdown prep file with Chine&apos;s picks and detailed game-by-game model analysis.</span>
+              </div>
+              <div className="reddit-editor podcast-editor">
+                <label>
+                  Pick date
+                  <input type="date" value={podcastDate} onChange={(event) => setPodcastDate(event.target.value)} />
+                </label>
+                <div className="notification-actions">
+                  <button className="primary" disabled={podcastGenerating || !podcastDate} onClick={generatePodcastFile}>
+                    <Download size={16} /> {podcastGenerating ? "Generating..." : "Generate podcast file"}
+                  </button>
+                </div>
+              </div>
+              <small className="muted">The file includes selected team, odds, start time, confidence, score, wager status, model explanation, reason labels, and every captured model feature for each pick.</small>
+              {podcastNotice && <p className={podcastNotice.includes("generated") ? "success" : "error"}>{podcastNotice}</p>}
             </div>
             )}
             {adminSection === "reddit" && canManageReddit && (
