@@ -639,6 +639,64 @@ const normalizeMlbTeamName = (team: string) =>
 const providerEventBase = (providerEventId: string | null | undefined) =>
   providerEventId?.split(":")[0]?.split("|")[0] ?? null;
 
+const footballTeamAliases: Record<string, string> = {
+  "miami fl": "miami florida",
+  "miami florida hurricanes": "miami florida",
+  "miami oh": "miami ohio",
+  "miami oh redhawks": "miami ohio",
+  "massachusetts": "umass",
+  "massachusetts minutemen": "umass",
+  "umass minutemen": "umass",
+  "u albany": "albany",
+  "ualbany": "albany",
+  "albany great danes": "albany",
+  "buffalo bulls": "buffalo",
+  "rutgers scarlet knights": "rutgers",
+  "wake forest demon deacons": "wake forest",
+  "delaware fighting blue hens": "delaware",
+  "delaware fightin blue hens": "delaware",
+  "colorado buffaloes": "colorado",
+  "georgia tech yellow jackets": "georgia tech",
+  "minnesota golden gophers": "minnesota",
+  "west virginia mountaineers": "west virginia",
+  "wv mountaineers": "west virginia",
+  "connecticut": "uconn",
+  "uconn huskies": "uconn",
+  "usc trojans": "usc",
+  "pittsburgh panthers": "pittsburgh",
+  "cincinnati bearcats": "cincinnati",
+  "houston cougars": "houston"
+};
+
+const normalizeFootballTeamKey = (team: string) => {
+  const normalized = team
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\bst\.?\b/g, "state")
+    .replace(/\bu\s+/g, "u")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+  return footballTeamAliases[normalized] ?? normalized;
+};
+
+const footballEventKey = (row: {
+  sport: string;
+  startsAt: Date;
+  awayTeam: string;
+  homeTeam: string;
+}) => {
+  const roundedStart = new Date(row.startsAt);
+  roundedStart.setUTCMinutes(Math.floor(roundedStart.getUTCMinutes() / 5) * 5, 0, 0);
+  return [
+    row.sport,
+    roundedStart.toISOString(),
+    normalizeFootballTeamKey(row.awayTeam),
+    normalizeFootballTeamKey(row.homeTeam)
+  ].join(":");
+};
+
 const gameEventKey = (row: {
   providerEventId: string | null;
   sport: string;
@@ -646,8 +704,10 @@ const gameEventKey = (row: {
   awayTeam: string;
   homeTeam: string;
   marketKey?: string;
-}) => providerEventBase(row.providerEventId)
-  ?? `${row.sport}:${row.startsAt.toISOString()}:${row.awayTeam}:${row.homeTeam}`;
+}) => row.sport === "NFL" || row.sport === "NCAAF"
+  ? footballEventKey(row)
+  : providerEventBase(row.providerEventId)
+    ?? `${row.sport}:${row.startsAt.toISOString()}:${row.awayTeam}:${row.homeTeam}`;
 
 const findMlbPitcherFallback = (
   game: { startsAt: string; awayTeam: string; homeTeam: string },

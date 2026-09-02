@@ -103,6 +103,154 @@ type NormalizedLine = {
 
 const unique = <T>(values: T[]) => [...new Set(values)];
 
+const nflTeamNames = [
+  "Arizona Cardinals",
+  "Atlanta Falcons",
+  "Baltimore Ravens",
+  "Buffalo Bills",
+  "Carolina Panthers",
+  "Chicago Bears",
+  "Cincinnati Bengals",
+  "Cleveland Browns",
+  "Dallas Cowboys",
+  "Denver Broncos",
+  "Detroit Lions",
+  "Green Bay Packers",
+  "Houston Texans",
+  "Indianapolis Colts",
+  "Jacksonville Jaguars",
+  "Kansas City Chiefs",
+  "Las Vegas Raiders",
+  "Los Angeles Chargers",
+  "Los Angeles Rams",
+  "Miami Dolphins",
+  "Minnesota Vikings",
+  "New England Patriots",
+  "New Orleans Saints",
+  "New York Giants",
+  "New York Jets",
+  "Philadelphia Eagles",
+  "Pittsburgh Steelers",
+  "San Francisco 49ers",
+  "Seattle Seahawks",
+  "Tampa Bay Buccaneers",
+  "Tennessee Titans",
+  "Washington Commanders"
+];
+
+const nflTeamNameSet = new Set(nflTeamNames);
+
+const ncaafTeamAliases: Record<string, string> = {
+  "miami fl": "miami florida",
+  "miami florida hurricanes": "miami florida",
+  "miami oh": "miami ohio",
+  "miami oh redhawks": "miami ohio",
+  "massachusetts": "umass",
+  "massachusetts minutemen": "umass",
+  "umass minutemen": "umass",
+  "u albany": "albany",
+  "ualbany": "albany",
+  "albany great danes": "albany",
+  "buffalo bulls": "buffalo",
+  "rutgers scarlet knights": "rutgers",
+  "wake forest demon deacons": "wake forest",
+  "delaware fighting blue hens": "delaware",
+  "delaware fightin blue hens": "delaware",
+  "colorado buffaloes": "colorado",
+  "georgia tech yellow jackets": "georgia tech",
+  "minnesota golden gophers": "minnesota",
+  "west virginia mountaineers": "west virginia",
+  "wv mountaineers": "west virginia",
+  "connecticut": "uconn",
+  "uconn huskies": "uconn",
+  "usc trojans": "usc",
+  "pittsburgh panthers": "pittsburgh",
+  "cincinnati bearcats": "cincinnati",
+  "houston cougars": "houston"
+};
+
+const normalizeFootballTeamKey = (team: string) =>
+  team
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\bst\.?\b/g, "state")
+    .replace(/\bu\s+/g, "u")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+
+const ncaafTeamKey = (team: string, batchAliases?: Map<string, string>) => {
+  const normalized = normalizeFootballTeamKey(team);
+  return batchAliases?.get(normalized) ?? ncaafTeamAliases[normalized] ?? normalized;
+};
+
+const ncaafDisplayNames: Record<string, string> = {
+  "umass": "UMass",
+  "uconn": "UConn",
+  "usc": "USC",
+  "uab": "UAB",
+  "utsa": "UTSA",
+  "utrgv": "UTRGV"
+};
+
+const toDisplayName = (key: string) =>
+  ncaafDisplayNames[key] ?? key.replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+const ncaafDisplayName = (team: string) => toDisplayName(ncaafTeamKey(team));
+
+export const footballEventIdentity = (
+  sport: LocalSport,
+  event: Pick<ParlayEvent, "canonical_event_id" | "id" | "sport_key" | "commence_time" | "away_team" | "home_team">,
+  batchAliases?: Map<string, string>
+) => {
+  const startKey = eventStartKey(event.commence_time);
+  if (sport === "NCAAF") {
+    return [event.sport_key, startKey, ncaafTeamKey(event.away_team, batchAliases), ncaafTeamKey(event.home_team, batchAliases)].join("|");
+  }
+  return [
+    event.sport_key,
+    event.canonical_event_id ?? event.id,
+    startKey,
+    normalizeFootballTeamKey(event.away_team),
+    normalizeFootballTeamKey(event.home_team)
+  ].join("|");
+};
+
+export const isExpectedSportEvent = (sport: LocalSport, event: ParlayEvent) => {
+  const expected = sports.find((item) => item.local === sport)?.parlay;
+  if (event.sport_key !== expected) {
+    return false;
+  }
+  if (sport === "NFL") {
+    return nflTeamNameSet.has(event.away_team) && nflTeamNameSet.has(event.home_team);
+  }
+  if (sport === "NCAAF") {
+    return !nflTeamNameSet.has(event.away_team) && !nflTeamNameSet.has(event.home_team);
+  }
+  return true;
+};
+
+const buildNcaafBatchAliases = (eventGroups: ParlayEvent[][]) => {
+  const names = unique(eventGroups.flatMap((events) =>
+    events.flatMap((event) => [
+      ncaafTeamAliases[normalizeFootballTeamKey(event.away_team)] ?? normalizeFootballTeamKey(event.away_team),
+      ncaafTeamAliases[normalizeFootballTeamKey(event.home_team)] ?? normalizeFootballTeamKey(event.home_team)
+    ])
+  )).sort((left, right) => left.length - right.length);
+
+  const aliases = new Map<string, string>();
+  for (const name of names) {
+    const shorterPrefix = names.find((candidate) =>
+      candidate !== name
+      && name.startsWith(`${candidate} `)
+      && candidate.length >= 4
+    );
+    aliases.set(name, shorterPrefix ?? name);
+  }
+  return aliases;
+};
+
 const mlbBookmakerFallbacks = () => unique([
   ...config.parlayBookmakers,
   ...config.parlayMlbBookmakers,
@@ -133,7 +281,8 @@ const hasCompleteMarket = (
   outcomes: ParlayOutcome[] | undefined,
   event: ParlayEvent,
   marketKey: MarketKey,
-  requireStandardMlbRunline = false
+  requireStandardMlbRunline = false,
+  sport?: LocalSport
 ) => {
   if (!outcomes) {
     return false;
@@ -149,9 +298,13 @@ const hasCompleteMarket = (
     );
   }
 
+  const teamMatches = (outcome: ParlayOutcome, team: string) =>
+    outcome.name === team
+    || (sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(team));
+
   const sides = [event.away_team, event.home_team].map((team) =>
     outcomes.find((outcome) =>
-      outcome.name === team
+      teamMatches(outcome, team)
       && typeof outcome.price === "number"
       && (marketKey === "h2h" || typeof outcome.point === "number")
     )
@@ -187,9 +340,15 @@ const median = (values: number[]) => {
     : sorted[middle];
 };
 
-const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent) => {
-  const away = outcomes.find((outcome) => outcome.name === event.away_team);
-  const home = outcomes.find((outcome) => outcome.name === event.home_team);
+const eventTeamOutcome = (outcomes: ParlayOutcome[], team: string, sport?: LocalSport) =>
+  outcomes.find((outcome) =>
+    outcome.name === team
+    || (sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(team))
+  );
+
+const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent, sport?: LocalSport) => {
+  const away = eventTeamOutcome(outcomes, event.away_team, sport);
+  const home = eventTeamOutcome(outcomes, event.home_team, sport);
   if (typeof away?.price !== "number" || typeof home?.price !== "number") {
     return false;
   }
@@ -198,9 +357,9 @@ const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent) => {
   return impliedSum >= 0.94 && impliedSum <= 1.25;
 };
 
-const moneylineDeviation = (outcomes: ParlayOutcome[], event: ParlayEvent, consensus: Map<string, number>) => {
+const moneylineDeviation = (outcomes: ParlayOutcome[], event: ParlayEvent, consensus: Map<string, number>, sport?: LocalSport) => {
   return Math.max(...[event.away_team, event.home_team].map((team) => {
-    const outcome = outcomes.find((item) => item.name === team);
+    const outcome = eventTeamOutcome(outcomes, team, sport);
     const teamConsensus = consensus.get(team);
     if (typeof outcome?.price !== "number" || teamConsensus === undefined) {
       return Number.POSITIVE_INFINITY;
@@ -215,7 +374,10 @@ const eventStartKey = (commenceTime: string) => {
   return date.toISOString().replace(/[:.]/g, "");
 };
 
-const eventIdentity = (event: ParlayEvent) => {
+const eventIdentity = (event: ParlayEvent, sport?: LocalSport, batchAliases?: Map<string, string>) => {
+  if (sport === "NFL" || sport === "NCAAF") {
+    return footballEventIdentity(sport, event, batchAliases);
+  }
   const startKey = eventStartKey(event.commence_time);
   const teamKey = (team: string) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return [
@@ -226,16 +388,17 @@ const eventIdentity = (event: ParlayEvent) => {
   ].join("|");
 };
 
-const eventMergeKey = (event: ParlayEvent) => {
-  return eventIdentity(event);
+const eventMergeKey = (event: ParlayEvent, sport?: LocalSport, batchAliases?: Map<string, string>) => {
+  return eventIdentity(event, sport, batchAliases);
 };
 
-const mergeEvents = (eventGroups: ParlayEvent[][]) => {
+const mergeEvents = (eventGroups: ParlayEvent[][], sport?: LocalSport) => {
   const merged = new Map<string, ParlayEvent>();
+  const batchAliases = sport === "NCAAF" ? buildNcaafBatchAliases(eventGroups) : undefined;
 
   for (const events of eventGroups) {
     for (const event of events) {
-      const key = eventMergeKey(event);
+      const key = eventMergeKey(event, sport, batchAliases);
       const existing = merged.get(key);
       if (!existing) {
         merged.set(key, { ...event, bookmakers: [...(event.bookmakers ?? [])] });
@@ -262,23 +425,24 @@ const findPreferredMarket = (
   marketKey: MarketKey,
   bookmakerPriority: string[],
   requireStandardMlbRunline = false,
-  requireTwoWayH2hHold = true
+  requireTwoWayH2hHold = true,
+  sport?: LocalSport
 ) => {
   const completeMarkets = (event.bookmakers ?? []).flatMap((bookmaker) => {
     const market = bookmaker.markets.find((item) => item.key === marketKey);
     const outcomes = market?.outcomes.filter((outcome) => typeof outcome.price === "number") ?? [];
-    return hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline)
+    return hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport)
       ? [{ bookmaker, outcomes }]
       : [];
   });
 
   if (marketKey === "h2h" && requireTwoWayH2hHold) {
-    const saneMarkets = completeMarkets.filter(({ outcomes }) => h2hHoldIsReasonable(outcomes, event));
+    const saneMarkets = completeMarkets.filter(({ outcomes }) => h2hHoldIsReasonable(outcomes, event, sport));
     if (saneMarkets.length >= 2) {
       const consensus = new Map([event.away_team, event.home_team].map((team) => [
         team,
         median(saneMarkets.map(({ outcomes }) => {
-          const outcome = outcomes.find((item) => item.name === team)!;
+          const outcome = eventTeamOutcome(outcomes, team, sport)!;
           return impliedProbability(outcome.price as number);
         }))
       ]));
@@ -287,9 +451,9 @@ const findPreferredMarket = (
         const rightIndex = bookmakerPriority.indexOf(right.bookmaker.key);
         return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
       });
-      const preferred = byPriority.find(({ outcomes }) => moneylineDeviation(outcomes, event, consensus) <= 0.08);
+      const preferred = byPriority.find(({ outcomes }) => moneylineDeviation(outcomes, event, consensus, sport) <= 0.08);
       return preferred ?? saneMarkets.sort((left, right) =>
-        moneylineDeviation(left.outcomes, event, consensus) - moneylineDeviation(right.outcomes, event, consensus)
+        moneylineDeviation(left.outcomes, event, consensus, sport) - moneylineDeviation(right.outcomes, event, consensus, sport)
       )[0];
     }
 
@@ -304,7 +468,7 @@ const findPreferredMarket = (
     const bookmaker = event.bookmakers?.find((book) => book.key === key);
     const market = bookmaker?.markets.find((item) => item.key === marketKey);
     const outcomes = market?.outcomes.filter((outcome) => typeof outcome.price === "number") ?? [];
-    if (bookmaker && hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline)) {
+    if (bookmaker && hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport)) {
       return { bookmaker, outcomes };
     }
   }
@@ -312,7 +476,7 @@ const findPreferredMarket = (
   for (const bookmaker of event.bookmakers ?? []) {
     const market = bookmaker.markets.find((item) => item.key === marketKey);
     const outcomes = market?.outcomes.filter((outcome) => typeof outcome.price === "number") ?? [];
-    if (hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline)) {
+    if (hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport)) {
       return { bookmaker, outcomes };
     }
   }
@@ -323,62 +487,90 @@ const findPreferredMarket = (
 const normalizeSpreads = (
   event: ParlayEvent,
   bookmakerPriority: string[],
+  sport: LocalSport,
   requireStandardMlbRunline: boolean
 ): NormalizedLine[] => {
-  const spread = findPreferredMarket(event, "spreads", bookmakerPriority, requireStandardMlbRunline);
+  const spread = findPreferredMarket(event, "spreads", bookmakerPriority, requireStandardMlbRunline, true, sport);
   if (!spread) {
     return [];
   }
-  const eventId = eventIdentity(event);
+  const eventId = eventIdentity(event, sport);
+  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team) : event.away_team;
+  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team) : event.home_team;
 
   return spread.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
-      [event.home_team, event.away_team].includes(outcome.name)
+      (
+        [event.home_team, event.away_team].includes(outcome.name)
+        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name) === ncaafTeamKey(team)))
+      )
       && typeof outcome.point === "number"
       && typeof outcome.price === "number"
     )
-    .map((outcome) => ({
-      providerEventId: `${eventId}:${spread.bookmaker.key}:spreads:${outcome.name}`,
+    .map((outcome) => {
+      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(awayTeam)
+        ? awayTeam
+        : sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(event.home_team)
+          ? homeTeam
+          : outcome.name;
+      return {
+      providerEventId: `${eventId}:${spread.bookmaker.key}:spreads:${selectedTeam}`,
       startsAt: event.commence_time,
-      homeTeam: event.home_team,
-      awayTeam: event.away_team,
-      selectedTeam: outcome.name,
+      homeTeam,
+      awayTeam,
+      selectedTeam,
       spread: outcome.point!,
       oddsAmerican: outcome.price,
       marketKey: "spreads" as const
-    }));
+    };
+    });
 };
 
-const normalizeMoneylines = (event: ParlayEvent, bookmakerPriority: string[]): NormalizedLine[] => {
-  const moneyline = findPreferredMarket(event, "h2h", bookmakerPriority, false, !event.sport_key.startsWith("soccer_"));
+const normalizeMoneylines = (event: ParlayEvent, bookmakerPriority: string[], sport: LocalSport): NormalizedLine[] => {
+  const moneyline = findPreferredMarket(event, "h2h", bookmakerPriority, false, !event.sport_key.startsWith("soccer_"), sport);
   if (!moneyline) {
     return [];
   }
-  const eventId = eventIdentity(event);
+  const eventId = eventIdentity(event, sport);
+  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team) : event.away_team;
+  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team) : event.home_team;
 
   return moneyline.outcomes
     .filter((outcome): outcome is PricedOutcome =>
-      ([event.home_team, event.away_team].includes(outcome.name) || (event.sport_key.startsWith("soccer_") && outcome.name === "Draw"))
+      (
+        [event.home_team, event.away_team].includes(outcome.name)
+        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name) === ncaafTeamKey(team)))
+        || (event.sport_key.startsWith("soccer_") && outcome.name === "Draw")
+      )
       && typeof outcome.price === "number"
     )
-    .map((outcome) => ({
-      providerEventId: `${eventId}:${moneyline.bookmaker.key}:h2h:${outcome.name}`,
+    .map((outcome) => {
+      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(awayTeam)
+        ? awayTeam
+        : sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(event.home_team)
+          ? homeTeam
+          : outcome.name;
+      return {
+      providerEventId: `${eventId}:${moneyline.bookmaker.key}:h2h:${selectedTeam}`,
       startsAt: event.commence_time,
-      homeTeam: event.home_team,
-      awayTeam: event.away_team,
-      selectedTeam: outcome.name,
+      homeTeam,
+      awayTeam,
+      selectedTeam,
       spread: 0,
       oddsAmerican: outcome.price,
       marketKey: "h2h" as const
-    }));
+    };
+    });
 };
 
-const normalizeTotals = (event: ParlayEvent, bookmakerPriority: string[]): NormalizedLine[] => {
-  const total = findPreferredMarket(event, "totals", bookmakerPriority, false, false);
+const normalizeTotals = (event: ParlayEvent, bookmakerPriority: string[], sport: LocalSport): NormalizedLine[] => {
+  const total = findPreferredMarket(event, "totals", bookmakerPriority, false, false, sport);
   if (!total) {
     return [];
   }
-  const eventId = eventIdentity(event);
+  const eventId = eventIdentity(event, sport);
+  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team) : event.away_team;
+  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team) : event.home_team;
 
   return total.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
@@ -389,8 +581,8 @@ const normalizeTotals = (event: ParlayEvent, bookmakerPriority: string[]): Norma
     .map((outcome) => ({
       providerEventId: `${eventId}:${total.bookmaker.key}:totals:${outcome.name}:${outcome.point}`,
       startsAt: event.commence_time,
-      homeTeam: event.home_team,
-      awayTeam: event.away_team,
+      homeTeam,
+      awayTeam,
       selectedTeam: outcome.name,
       spread: outcome.point,
       oddsAmerican: outcome.price,
@@ -400,17 +592,18 @@ const normalizeTotals = (event: ParlayEvent, bookmakerPriority: string[]): Norma
 
 const normalizeMarkets = (
   event: ParlayEvent,
+  sport: LocalSport,
   includeMoneyline: boolean,
   includeTotals: boolean,
   bookmakerPriority: string[],
   requireStandardMlbRunline = false
 ) => {
-  const lines = normalizeSpreads(event, bookmakerPriority, requireStandardMlbRunline);
+  const lines = normalizeSpreads(event, bookmakerPriority, sport, requireStandardMlbRunline);
   if (includeMoneyline) {
-    lines.push(...normalizeMoneylines(event, bookmakerPriority));
+    lines.push(...normalizeMoneylines(event, bookmakerPriority, sport));
   }
   if (includeTotals) {
-    lines.push(...normalizeTotals(event, bookmakerPriority));
+    lines.push(...normalizeTotals(event, bookmakerPriority, sport));
   }
 
   return lines;
@@ -466,7 +659,7 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
     }
 
     return {
-      events: mergeEvents(eventGroups),
+      events: mergeEvents(eventGroups, sport),
       bookmakerPriority,
       bookmakerFetches
     };
@@ -491,7 +684,7 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
   }
 
   return {
-    events: mergeEvents(eventGroups),
+    events: mergeEvents(eventGroups, sport),
     bookmakerPriority,
     bookmakerFetches
   };
@@ -563,9 +756,9 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
     if (includeMoneyline) requestedMarkets.push("h2h");
     if (includeTotals) requestedMarkets.push("totals");
     const fetched = await fetchMergedSportOdds(sport.local, sport.parlay, requestedMarkets);
-    const events = fetched.events.filter((event) => !isDerivativeSoccerEvent(event));
+    const events = fetched.events.filter((event) => isExpectedSportEvent(sport.local, event) && !isDerivativeSoccerEvent(event));
     const lines = events.flatMap((event) =>
-      normalizeMarkets(event, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB")
+      normalizeMarkets(event, sport.local, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB")
     );
 
     await transaction(async (client) => {
@@ -610,7 +803,7 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
 
     summary.imported += lines.length;
     summary.skippedEvents += events.filter((event) =>
-      normalizeMarkets(event, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB").length === 0
+      normalizeMarkets(event, sport.local, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB").length === 0
     ).length;
     summary.sports.push({ sport: sport.local, events: events.length, imported: lines.length });
   }
