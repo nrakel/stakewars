@@ -892,6 +892,9 @@ const lineButtonTeamLabel = (sport: string, team?: string | null) => {
   return team;
 };
 
+const lineCardTeamLabel = (sport: string, team: string) =>
+  sport === "NCAAF" ? ncaafTeamShortName(team) : team;
+
 const LegStatusIcon = ({ status }: { status: string }) => {
   if (status === "won") {
     return <Check className="leg-status-icon won" size={16} aria-label="Won leg" />;
@@ -4771,12 +4774,12 @@ function App() {
                     </div>
                     <div className="game-card-matchup">
                       <div>
-                        <strong>{game.awayTeam}</strong>
+                        <strong title={game.awayTeam}>{lineCardTeamLabel(game.sport, game.awayTeam)}</strong>
                         {game.sport === "MLB" && <span title={pitcherLine(game.awayProbablePitcher)}>{pitcherLine(game.awayProbablePitcher)}</span>}
                       </div>
                       <span className="versus">@</span>
                       <div>
-                        <strong>{game.homeTeam}</strong>
+                        <strong title={game.homeTeam}>{lineCardTeamLabel(game.sport, game.homeTeam)}</strong>
                         {game.sport === "MLB" && <span title={pitcherLine(game.homeProbablePitcher)}>{pitcherLine(game.homeProbablePitcher)}</span>}
                       </div>
                     </div>
