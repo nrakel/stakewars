@@ -792,6 +792,106 @@ const nflTeamShortNames: Record<string, string> = {
 
 const nflTeamShortName = (team: string) => nflTeamShortNames[team] ?? team;
 
+const ncaafMascotSuffixes = [
+  "Aggies",
+  "Bearcats",
+  "Bears",
+  "Beavers",
+  "Bison",
+  "Black Bears",
+  "Black Knights",
+  "Blazers",
+  "Blue Devils",
+  "Bobcats",
+  "Boilermakers",
+  "Braves",
+  "Broncos",
+  "Bruins",
+  "Buccaneers",
+  "Buckeyes",
+  "Buffaloes",
+  "Bulldogs",
+  "Cardinal",
+  "Cardinals",
+  "Chanticleers",
+  "Colonels",
+  "Commodores",
+  "Cougars",
+  "Cowboys",
+  "Crimson Tide",
+  "Cyclones",
+  "Demon Deacons",
+  "Dukes",
+  "Eagles",
+  "Falcons",
+  "Fighting Illini",
+  "Fightin Blue Hens",
+  "Flames",
+  "Gamecocks",
+  "Golden Eagles",
+  "Golden Flashes",
+  "Golden Gophers",
+  "Golden Hurricane",
+  "Governors",
+  "Great Danes",
+  "Green Wave",
+  "Hawkeyes",
+  "Hoosiers",
+  "Hurricanes",
+  "Huskies",
+  "Jayhawks",
+  "Longhorns",
+  "Mean Green",
+  "Midshipmen",
+  "Miners",
+  "Minutemen",
+  "Monarchs",
+  "Mountaineers",
+  "Nittany Lions",
+  "Orange",
+  "Owls",
+  "Paladins",
+  "Panthers",
+  "Penguins",
+  "Pirates",
+  "Rams",
+  "Razorbacks",
+  "Rebels",
+  "Red Wolves",
+  "Redhawks",
+  "Roadrunners",
+  "Rockets",
+  "Scarlet Knights",
+  "Sharks",
+  "Sooners",
+  "Spartans",
+  "Sun Devils",
+  "Tigers",
+  "Trojans",
+  "Utes",
+  "Vaqueros",
+  "Vandals",
+  "Volunteers",
+  "Warriors",
+  "Wildcats",
+  "Wolves",
+  "Yellow Jackets",
+  "Zips"
+].sort((left, right) => right.length - left.length);
+
+const ncaafTeamShortName = (team: string) => {
+  const suffix = ncaafMascotSuffixes.find((name) => team.endsWith(` ${name}`));
+  return suffix ? team.slice(0, -suffix.length).trim() : team;
+};
+
+const lineButtonTeamLabel = (sport: string, team?: string | null) => {
+  if (!team) return "";
+  if (sport === "MLB") return teamAbbreviation(team);
+  if (sport === "NFL") return nflTeamShortName(team);
+  if (sport === "NCAAF") return ncaafTeamShortName(team);
+  return team;
+};
+
 const LegStatusIcon = ({ status }: { status: string }) => {
   if (status === "won") {
     return <Check className="leg-status-icon won" size={16} aria-label="Won leg" />;
@@ -2701,7 +2801,7 @@ function App() {
 
   const marketLabel = (market: GameMarket, side?: GameMarketSide | null) => {
     if (market.marketKey === "h2h" && side?.team === "Draw") return "Draw";
-    const teamLabel = side?.team && market.sport === "MLB" ? teamAbbreviation(side.team) : side?.team;
+    const teamLabel = lineButtonTeamLabel(market.sport, side?.team);
     if (market.marketKey === "h2h" && teamLabel) return `${teamLabel} Moneyline`;
     if (market.marketKey === "totals") return "Total";
     return `${teamLabel ? `${teamLabel} ` : ""}${market.sport === "MLB" ? "Run Line" : "Spread"}`;
