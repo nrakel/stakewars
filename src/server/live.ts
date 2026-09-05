@@ -3,7 +3,7 @@ import { query, transaction } from "./db.js";
 import { sendLiveGameNotifications, type LiveStateChange } from "./liveNotifications.js";
 import type { SportKey } from "../shared/types.js";
 
-type LiveSport = "MLB" | "EPL" | "WORLDCUP";
+type LiveSport = "MLB" | "NCAAF" | "EPL" | "WORLDCUP";
 
 type ParlayLiveMatch = {
   match_id?: string | number;
@@ -159,6 +159,32 @@ type EspnSoccerEvent = {
   }>;
 };
 
+type EspnFootballEvent = {
+  id: string;
+  date?: string;
+  status?: {
+    type?: {
+      state?: string;
+      completed?: boolean;
+      description?: string;
+      detail?: string;
+      shortDetail?: string;
+      name?: string;
+    };
+  };
+  competitions?: Array<{
+    competitors?: Array<{
+      homeAway?: "home" | "away";
+      score?: string;
+      team?: {
+        displayName?: string;
+        name?: string;
+        shortDisplayName?: string;
+      };
+    }>;
+  }>;
+};
+
 type MlbLiveFeed = {
   liveData?: {
     boxscore?: {
@@ -224,6 +250,7 @@ export type LiveGameState = {
 
 const liveSports: Record<LiveSport, string> = {
   MLB: "baseball_mlb",
+  NCAAF: "americanfootball_ncaaf",
   EPL: "soccer_epl",
   WORLDCUP: "soccer_fifa_world_cup"
 };
@@ -231,6 +258,11 @@ const liveSports: Record<LiveSport, string> = {
 const espnSoccerLeagues: Partial<Record<LiveSport, string>> = {
   EPL: "eng.1",
   WORLDCUP: "fifa.world"
+};
+
+const espnFetchHeaders = {
+  "accept": "*/*",
+  "user-agent": "curl/8.0.1"
 };
 
 const normalizeTeam = (team: string) =>
@@ -582,6 +614,50 @@ const normalizeEspnSoccerEvent = async (sport: Extract<LiveSport, "EPL" | "WORLD
   };
 };
 
+const normalizeEspnFootballEvent = async (sport: Extract<LiveSport, "NCAAF">, event: EspnFootballEvent): Promise<NormalizedLiveMatch | null> => {
+  const competition = event.competitions?.[0];
+  const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+  const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+  const awayTeam = firstString(away?.team?.displayName, away?.team?.name, away?.team?.shortDisplayName);
+  const homeTeam = firstString(home?.team?.displayName, home?.team?.name, home?.team?.shortDisplayName);
+  if (!event.id || !awayTeam || !homeTeam) {
+    return null;
+  }
+
+  const startsAt = event.date ? new Date(event.date) : null;
+  const safeStartsAt = startsAt && Number.isFinite(startsAt.getTime()) ? startsAt : null;
+  const status = event.status?.type;
+  const isLive = status?.state === "in";
+
+  return {
+    matchId: `espn:${sport.toLowerCase()}:${event.id}`,
+    provider: "espn-scoreboard",
+    sport,
+    eventKey: await findEventKey(sport, awayTeam, homeTeam, safeStartsAt),
+    startsAt: safeStartsAt,
+    awayTeam,
+    homeTeam,
+    awayScore: numberOrNull(away?.score),
+    homeScore: numberOrNull(home?.score),
+    period: status?.shortDetail ?? status?.detail ?? null,
+    gameStatus: status?.description ?? status?.detail ?? status?.name ?? null,
+    description: status?.detail ?? null,
+    lastPlay: null,
+    batter: null,
+    pitcher: null,
+    balls: null,
+    strikes: null,
+    outs: null,
+    pitcherPitches: null,
+    batterHits: null,
+    batterAtBats: null,
+    inPlay: isLive,
+    lastEventAt: isLive ? new Date() : null,
+    bases: {},
+    payload: event
+  };
+};
+
 
 const centralDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -717,13 +793,28 @@ const fetchEspnSoccerLive = async (sport: Extract<LiveSport, "EPL" | "WORLDCUP">
   const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/soccer/${league}/scoreboard`);
   url.searchParams.set("dates", centralDate().replace(/-/g, ""));
 
-  const response = await fetch(url);
+  const response = await fetch(url, { headers: espnFetchHeaders });
   if (!response.ok) {
     const body = await response.text();
     throw new Error(`ESPN soccer live ${sport} failed with ${response.status}: ${body.slice(0, 240)}`);
   }
 
   const body = await response.json() as { events?: EspnSoccerEvent[] };
+  return body.events ?? [];
+};
+
+const fetchEspnFootballLive = async (sport: Extract<LiveSport, "NCAAF">) => {
+  const url = new URL("https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard");
+  url.searchParams.set("limit", "300");
+  url.searchParams.set("dates", centralDate().replace(/-/g, ""));
+
+  const response = await fetch(url, { headers: espnFetchHeaders });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`ESPN football live ${sport} failed with ${response.status}: ${body.slice(0, 240)}`);
+  }
+
+  const body = await response.json() as { events?: EspnFootballEvent[] };
   return body.events ?? [];
 };
 
@@ -956,11 +1047,16 @@ const refreshLiveSport = async (sport: LiveSport) => {
     ? (await Promise.all(soccerEvents.map((event) => normalizeEspnSoccerEvent(sport, event))))
       .filter((match): match is NonNullable<typeof match> => Boolean(match))
     : [];
-  const primaryNormalized = [...mlbNormalized, ...soccerNormalized];
+  const footballEvents = sport === "NCAAF" ? await fetchEspnFootballLive(sport) : [];
+  const footballNormalized = sport === "NCAAF"
+    ? (await Promise.all(footballEvents.map((event) => normalizeEspnFootballEvent(sport, event))))
+      .filter((match): match is NonNullable<typeof match> => Boolean(match))
+    : [];
+  const primaryNormalized = [...mlbNormalized, ...soccerNormalized, ...footballNormalized];
 
   let matches: ParlayLiveMatch[] = [];
   let liveEvents: ParlayLiveEvent[] = [];
-  if (shouldFetchParlayLive(primaryNormalized)) {
+  if (sport !== "NCAAF" && shouldFetchParlayLive(primaryNormalized)) {
     matches = await fetchLivePoints(sport);
     liveEvents = await fetchParlayLiveEvents(sport);
   }
@@ -987,6 +1083,7 @@ const refreshLiveSport = async (sport: LiveSport) => {
     parlaySkipped: matches.length === 0 && liveEvents.length === 0,
     mlbFetched: mlbGames.length,
     soccerFetched: soccerEvents.length,
+    footballFetched: footballEvents.length,
     imported: normalized.length,
     recent,
     notifications: notifications.length
@@ -1004,6 +1101,7 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
     parlayLiveFetched: results.reduce((sum, result) => sum + result.parlayLiveFetched, 0),
     mlbFetched: results.reduce((sum, result) => sum + result.mlbFetched, 0),
     soccerFetched: results.reduce((sum, result) => sum + result.soccerFetched, 0),
+    footballFetched: results.reduce((sum, result) => sum + result.footballFetched, 0),
     imported: results.reduce((sum, result) => sum + result.imported, 0),
     recent: results.reduce((sum, result) => sum + result.recent, 0),
     notifications: results.reduce((sum, result) => sum + result.notifications, 0)
@@ -1011,6 +1109,8 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
 };
 
 export const refreshLiveMlb = async () => refreshLiveSports(["MLB"]);
+
+export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NCAAF"]);
 
 export const getLiveStates = async (sport: SportKey) => {
   const result = await query<{
@@ -1058,7 +1158,7 @@ export const getLiveStates = async (sport: SportKey) => {
         WHERE sport = $1
           AND (
             ($1 = 'MLB' AND provider = 'mlb-stats-api')
-            OR ($1 IN ('EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
+            OR ($1 IN ('NCAAF', 'EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
           )
           AND in_play = true
           AND (

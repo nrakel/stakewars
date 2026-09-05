@@ -1861,12 +1861,13 @@ function App() {
 
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
-    const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult] = await Promise.all([
+    const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult, liveNcaafResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
       api<LeaderboardResponse>(leaderboardPath, {}, authToken),
       api<{ picks: DailyAiPick[]; parlay: DailyChineParlay | null }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
-      api<{ games: LiveGameState[] }>("/live/epl")
+      api<{ games: LiveGameState[] }>("/live/epl"),
+      api<{ games: LiveGameState[] }>("/live/ncaaf")
     ]);
     setLines(lineResult.lines);
     setSlip((current) => {
@@ -1910,7 +1911,7 @@ function App() {
     }
     setAiPicks(aiResult.picks);
     setDailyChineParlay(aiResult.parlay);
-    setLiveGames([...liveMlbResult.games, ...liveEplResult.games]);
+    setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveNcaafResult.games]);
     if (authToken) {
       const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
@@ -4977,7 +4978,7 @@ function App() {
               <Radio size={20} />
               <h2>{scoreboardSport} live box scores</h2>
             </div>
-            {scoreboardSport === "MLB" || scoreboardSport === "EPL" ? (
+            {scoreboardSport === "MLB" || scoreboardSport === "EPL" || scoreboardSport === "NCAAF" ? (
               <div className="live-list scoreboard-grid">
                 {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => (
                   <article className="live-game" key={game.matchId}>

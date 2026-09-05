@@ -53,6 +53,8 @@
     "settle:mlb:prod": "node dist/scripts/settle-mlb.js",
     "settle:nfl": "tsx scripts/settle-nfl.ts",
     "settle:nfl:prod": "node dist/scripts/settle-nfl.js",
+    "settle:ncaaf": "tsx scripts/settle-ncaaf.ts",
+    "settle:ncaaf:prod": "node dist/scripts/settle-ncaaf.js",
     "settle:nfl-scheduled": "tsx scripts/settle-nfl-scheduled.ts",
     "settle:nfl-scheduled:prod": "node dist/scripts/settle-nfl-scheduled.js",
     "settle:soccer": "tsx scripts/settle-soccer.ts",

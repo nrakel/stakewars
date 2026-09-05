@@ -69,7 +69,7 @@ type PendingLeg = {
   spread: string;
   odds_american: number;
   leg_status: WagerOutcome | "pending";
-  sport: "MLB" | "NFL" | "EPL" | "WORLDCUP";
+  sport: "MLB" | "NFL" | "NCAAF" | "EPL" | "WORLDCUP";
   market_key: "h2h" | "spreads" | "totals";
   starts_at: string;
   starts_on: string;
@@ -163,7 +163,7 @@ type EspnScoreboardResponse = {
 
 const espnLeagueForSport = (sport: "EPL" | "WORLDCUP") => sport === "EPL" ? "eng.1" : "fifa.world";
 
-const espnFootballLeagueForSport = (sport: "NFL") => sport.toLowerCase();
+const espnFootballLeagueForSport = (sport: "NFL" | "NCAAF") => sport === "NCAAF" ? "college-football" : sport.toLowerCase();
 
 const aliasKey = (sport: string | null | undefined, provider: string | null | undefined, team: string) =>
   `${sport ?? "*"}:${provider ?? "*"}:${team}`;
@@ -191,8 +191,54 @@ const builtInCanonicalTeamName = (normalized: string) => {
     .trim();
 };
 
+const ncaafMascotSuffixes = [
+  "golden lions",
+  "scarlet knights",
+  "demon deacons",
+  "crimson tide",
+  "fighting irish",
+  "mean green",
+  "yellow jackets",
+  "mountaineers",
+  "spartans",
+  "rockets",
+  "eagles",
+  "tigers",
+  "bulldogs",
+  "wildcats",
+  "cougars",
+  "panthers",
+  "aggies",
+  "zips",
+  "knights",
+  "boilermakers",
+  "sycamores",
+  "seminoles",
+  "bison",
+  "gamecocks",
+  "minutemen",
+  "hoosiers",
+  "beavers",
+  "lobos",
+  "miners",
+  "sooners",
+  "trojans"
+].sort((left, right) => right.length - left.length);
+
+const stripNcaafMascotSuffix = (normalized: string) => {
+  for (const suffix of ncaafMascotSuffixes) {
+    const suffixText = ` ${suffix}`;
+    if (normalized.endsWith(suffixText) && normalized.length > suffixText.length + 2) {
+      return normalized.slice(0, -suffixText.length).trim();
+    }
+  }
+  return normalized;
+};
+
 const normalizeTeamName = (team: string, sport?: string, provider?: string, aliases?: TeamAliasMap) => {
-  const normalized = builtInCanonicalTeamName(baseNormalizeTeamName(team));
+  const normalized = sport === "NCAAF"
+    ? stripNcaafMascotSuffix(builtInCanonicalTeamName(baseNormalizeTeamName(team)))
+    : builtInCanonicalTeamName(baseNormalizeTeamName(team));
   if (!aliases) {
     return normalized;
   }
@@ -310,7 +356,7 @@ export const fetchSoccerFinals = async (sport: "EPL" | "WORLDCUP", startDate: st
   return finals;
 };
 
-export const fetchFootballFinals = async (sport: "NFL", startDate: string, endDate: string) => {
+export const fetchFootballFinals = async (sport: "NFL" | "NCAAF", startDate: string, endDate: string) => {
   const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${espnFootballLeagueForSport(sport)}/scoreboard`);
   url.searchParams.set("limit", "300");
   url.searchParams.set("dates", espnDatesParam(startDate, endDate));
@@ -1122,4 +1168,12 @@ export const settleNflWagers = async (
 ) => {
   const finals = await fetchFootballFinals("NFL", startDate, endDate);
   return settleWagersForFinals({ startDate, endDate, sports: ["NFL"], finals });
+};
+
+export const settleNcaafWagers = async (
+  startDate = yyyyMmDd(new Date(Date.now() - 10 * 24 * 60 * 60 * 1000)),
+  endDate = yyyyMmDd(new Date())
+) => {
+  const finals = await fetchFootballFinals("NCAAF", startDate, endDate);
+  return settleWagersForFinals({ startDate, endDate, sports: ["NCAAF"], finals });
 };
