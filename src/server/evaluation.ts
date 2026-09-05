@@ -297,6 +297,9 @@ const contextFromTeamForm = (teamForm: TeamFormSnapshot | null): MlbHeuristicCon
     previousOddsAmerican: null,
     lineMovementAmerican: null,
     lineMovementImplied: null,
+    openingSpread: null,
+    previousSpread: null,
+    lineMovementSpread: null,
     lineSnapshotCount: null
   };
 };

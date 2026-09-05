@@ -9,6 +9,10 @@ type MlbScheduleResponse = {
   }>;
 };
 
+type ParlayEvent = {
+  commence_time: string;
+};
+
 const centralDate = (date = new Date()) => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Chicago",
@@ -34,35 +38,88 @@ const fetchMlbGamesForCentralDate = async (targetDate: string) => {
     .sort((left, right) => left.getTime() - right.getTime());
 };
 
+const fetchNcaafGamesForCentralDate = async (targetDate: string) => {
+  if (!process.env.PARLAY_API_KEY) {
+    return [];
+  }
+
+  const base = (process.env.PARLAY_API_BASE_URL ?? "https://parlay-api.com/v1").replace(/\/$/, "");
+  const from = new Date(`${targetDate}T00:00:00Z`);
+  from.setUTCDate(from.getUTCDate() - 1);
+  const to = new Date(`${targetDate}T00:00:00Z`);
+  to.setUTCDate(to.getUTCDate() + 2);
+  const url = new URL(`${base}/sports/americanfootball_ncaaf/events`);
+  url.searchParams.set("commenceTimeFrom", from.toISOString());
+  url.searchParams.set("commenceTimeTo", to.toISOString());
+  url.searchParams.set("dateFormat", "iso");
+
+  const response = await fetch(url, {
+    headers: { "X-API-Key": process.env.PARLAY_API_KEY }
+  });
+  if (!response.ok) {
+    throw new Error(`NCAAF schedule failed with ${response.status}`);
+  }
+
+  return ((await response.json()) as ParlayEvent[])
+    .map((event) => new Date(event.commence_time))
+    .filter((date) => Number.isFinite(date.getTime()) && centralDate(date) === targetDate)
+    .sort((left, right) => left.getTime() - right.getTime());
+};
+
 const run = async () => {
   const now = new Date();
   const todayCentral = centralDate(now);
-  const games = await fetchMlbGamesForCentralDate(todayCentral);
+  const [mlbGames, ncaafGames] = await Promise.all([
+    fetchMlbGamesForCentralDate(todayCentral),
+    fetchNcaafGamesForCentralDate(todayCentral)
+  ]);
 
-  if (!games.length) {
+  if (!mlbGames.length && !ncaafGames.length) {
     return {
       status: "skipped",
-      reason: "no MLB games found for today",
+      reason: "no MLB or NCAAF games found for today",
       todayCentral
     };
   }
 
-  const picks = await generateAiPicks({
-    sport: "MLB",
-    maxPicks: 5,
-    placeWagers: true,
-    marketKey: "h2h",
-    forDate: todayCentral,
-    sortBy: "confidence",
-    uniqueGames: true
-  });
+  const sports = [];
+  if (mlbGames.length) {
+    sports.push({
+      sport: "MLB",
+      firstStart: mlbGames[0].toISOString(),
+      lastStart: mlbGames[mlbGames.length - 1].toISOString(),
+      picks: await generateAiPicks({
+        sport: "MLB",
+        maxPicks: 5,
+        placeWagers: true,
+        marketKey: "h2h",
+        forDate: todayCentral,
+        sortBy: "confidence",
+        uniqueGames: true
+      })
+    });
+  }
+  if (ncaafGames.length) {
+    sports.push({
+      sport: "NCAAF",
+      firstStart: ncaafGames[0].toISOString(),
+      lastStart: ncaafGames[ncaafGames.length - 1].toISOString(),
+      picks: await generateAiPicks({
+        sport: "NCAAF",
+        maxPicks: 5,
+        placeWagers: true,
+        marketKey: "spreads",
+        forDate: todayCentral,
+        sortBy: "confidence",
+        uniqueGames: true
+      })
+    });
+  }
 
   return {
     status: "checked",
     todayCentral,
-    firstPitch: games[0].toISOString(),
-    lastPitch: games[games.length - 1].toISOString(),
-    picks
+    sports
   };
 };
 

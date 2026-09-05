@@ -8,7 +8,7 @@ const args = new Map(process.argv.slice(2).map((arg) => {
 
 try {
   const result = await generateAiPicks({
-    sport: (args.get("sport") ?? "MLB") as "MLB",
+    sport: (args.get("sport") ?? "MLB") as "MLB" | "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF",
     maxPicks: Number(args.get("max") ?? 3),
     stakeCents: Math.round(Number(args.get("stake") ?? 100) * 100),
     placeWagers: args.get("place-wagers") !== "false" && args.get("no-place-wagers") !== "true",
