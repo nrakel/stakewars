@@ -4879,6 +4879,22 @@ export const registerRoutes = (router: Router) => {
         context: Record<string, unknown> | null;
       }>(
         `
+          WITH active_lines AS (
+            SELECT *
+            FROM (
+              SELECT
+                gl.*,
+                row_number() OVER (
+                  PARTITION BY gl.sport
+                  ORDER BY gl.starts_at ASC, gl.provider_event_id ASC NULLS LAST, gl.market_key ASC, gl.id ASC
+                ) AS sport_row_number
+              FROM game_line gl
+              WHERE gl.is_active = true
+                AND gl.starts_at > now()
+                AND gl.sport <> 'WORLDCUP'
+            ) ranked
+            WHERE sport_row_number <= 240
+          )
           SELECT
             gl.id,
             gl.provider_event_id AS "providerEventId",
@@ -4902,7 +4918,7 @@ export const registerRoutes = (router: Router) => {
             NULLIF(mgc.home_pitcher_stats #>> '{season,losses}', '')::numeric AS "homePitcherLosses",
             NULLIF(mgc.home_pitcher_stats #>> '{season,era}', '')::numeric AS "homePitcherEra",
             mgc.context
-          FROM game_line gl
+          FROM active_lines gl
           LEFT JOIN LATERAL (
             SELECT *
             FROM mlb_game_context candidate
@@ -4913,9 +4929,7 @@ export const registerRoutes = (router: Router) => {
             ORDER BY abs(extract(epoch from candidate.starts_at - gl.starts_at)) ASC
             LIMIT 1
           ) mgc ON true
-          WHERE gl.is_active = true AND gl.starts_at > now() AND gl.sport <> 'WORLDCUP'
           ORDER BY gl.starts_at ASC
-          LIMIT 100
         `
       );
       const lineIds = result.rows.map((row) => row.id);
