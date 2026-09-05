@@ -332,6 +332,8 @@ export type NflConfidenceState = {
     seasonWinnerPrizeCents: number;
     seasonRunnerUpPrizeCents: number;
     seasonThirdPlacePrizeCents: number;
+    registeredPlayers: number;
+    prizePoolCents: number;
   };
   entry: {
     id: string;
@@ -373,6 +375,8 @@ export type SurvivorState = {
     season: number;
     status: "active" | "completed" | "archived";
     startsOn: string;
+    registeredPlayers: number;
+    prizePoolCents: number;
   };
   currentWeekStart: string;
   entry: SurvivorEntry | null;

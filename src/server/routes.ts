@@ -424,6 +424,8 @@ const currentSurvivorWeekStart = (pool: { startsOn: string }) => {
   return weekStart < pool.startsOn ? pool.startsOn : weekStart;
 };
 
+const contestPrizePerRegisteredPlayerCents = 3_000;
+
 const getActiveSurvivorPool = async () => {
   const result = await query<{
     id: string;
@@ -471,6 +473,37 @@ const getActiveNflConfidencePool = async () => {
     `
   );
   return result.rows[0] ?? null;
+};
+
+const countContestEntries = async (tableName: "nfl_confidence_entry" | "survivor_entry", poolId: string) => {
+  const result = await query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM ${tableName} WHERE pool_id = $1`,
+    [poolId]
+  );
+  return Number(result.rows[0]?.count ?? 0);
+};
+
+const nflConfidencePoolWithDynamicPrize = async (pool: NonNullable<Awaited<ReturnType<typeof getActiveNflConfidencePool>>>) => {
+  const registeredPlayers = await countContestEntries("nfl_confidence_entry", pool.id);
+  const prizePoolCents = registeredPlayers * contestPrizePerRegisteredPlayerCents;
+  return {
+    ...pool,
+    seasonWinnerPrizeCents: Math.round(prizePoolCents * 0.6),
+    seasonRunnerUpPrizeCents: Math.round(prizePoolCents * 0.25),
+    seasonThirdPlacePrizeCents: Math.round(prizePoolCents * 0.15),
+    registeredPlayers,
+    prizePoolCents
+  };
+};
+
+const survivorPoolWithDynamicPrize = async (pool: NonNullable<Awaited<ReturnType<typeof getActiveSurvivorPool>>>) => {
+  const registeredPlayers = await countContestEntries("survivor_entry", pool.id);
+  const prizePoolCents = registeredPlayers * contestPrizePerRegisteredPlayerCents;
+  return {
+    ...pool,
+    registeredPlayers,
+    prizePoolCents
+  };
 };
 
 type EspnNflScoreboardResponse = {
@@ -1959,6 +1992,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active NFL Confidence pool is available." });
         return;
       }
+      const displayPool = await nflConfidencePoolWithDynamicPrize(pool);
       let week = await currentNflConfidenceWeek(pool);
       await ensureNflConfidenceWeekGames(pool, week);
 
@@ -2144,7 +2178,7 @@ export const registerRoutes = (router: Router) => {
         .sort((left, right) => right.seasonPoints - left.seasonPoints || right.weekPoints - left.weekPoints || (left.displayName || left.username).localeCompare(right.displayName || right.username));
 
       res.json({
-        pool,
+        pool: displayPool,
         entry,
         currentWeek: week,
         games: games.map((game) => ({
@@ -2452,6 +2486,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active Survivor pool is available." });
         return;
       }
+      const displayPool = await survivorPoolWithDynamicPrize(pool);
       const weekStart = currentSurvivorWeekStart(pool);
       const weekEnd = addDays(weekStart, 7);
 
@@ -2615,7 +2650,7 @@ export const registerRoutes = (router: Router) => {
 
       const currentPick = currentPickResult.rows[0] ?? null;
       res.json({
-        pool,
+        pool: displayPool,
         currentWeekStart: weekStart,
         entry: entry ? {
           ...entry,
@@ -2806,6 +2841,7 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "No active Survivor pool is available." });
         return;
       }
+      const displayPool = await survivorPoolWithDynamicPrize(pool);
       const weekStart = currentSurvivorWeekStart(pool);
       const standingsResult = await query<{
         entryId: string;
@@ -2855,7 +2891,7 @@ export const registerRoutes = (router: Router) => {
       );
       await logAdminAction(req, "admin.survivor.view", { rowCount: standingsResult.rowCount });
       res.json({
-        pool,
+        pool: displayPool,
         currentWeekStart: weekStart,
         standings: standingsResult.rows.map((row) => ({
           entryId: row.entryId,
@@ -5346,7 +5382,7 @@ export const registerRoutes = (router: Router) => {
           const seasonStandings = [...weeklyStandings]
             .sort((left, right) => right.seasonPoints - left.seasonPoints || right.weekPoints - left.weekPoints || left.displayName.localeCompare(right.displayName));
           return {
-            pool: nflConfidencePool,
+            pool: await nflConfidencePoolWithDynamicPrize(nflConfidencePool),
             currentWeek: week,
             weeklyStandings,
             seasonStandings
@@ -5403,7 +5439,7 @@ export const registerRoutes = (router: Router) => {
             [survivorPool.id, weekStart]
           );
           return {
-            pool: survivorPool,
+            pool: await survivorPoolWithDynamicPrize(survivorPool),
             currentWeekStart: weekStart,
             standings: standings.rows.map((row) => ({
               userId: row.userId,

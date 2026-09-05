@@ -1203,11 +1203,12 @@ function RulesContent() {
         <h2>NFL Survivor</h2>
         <p>NFL Survivor is independent from the weekly StakeWars bankroll contest. Each active player may pick one NFL team per week. If that team wins, the player advances. If that team loses, ties, or the player misses the weekly pick, the player is eliminated.</p>
         <p>A team can only be used once per Survivor pool. Picks may be changed until that selected team's kickoff, then they lock. Other players' current-week picks stay hidden until kickoff.</p>
+        <p>The Survivor prize pool is $30 per registered Survivor player.</p>
       </section>
       <section id="nfl-confidence-rules">
         <h2>NFL Confidence</h2>
         <p>NFL Confidence is independent from the weekly StakeWars bankroll contest. Each active player picks the winner of every NFL game for the week, then assigns each pick a unique confidence value. Correct picks earn the assigned confidence points. Incorrect picks earn zero points.</p>
-        <p>Weekly prizes are awarded after the conclusion of Monday Night Football. Ties at the top roll over the weekly prize. Season-long prizes are awarded after the NFL regular season based on total confidence points.</p>
+        <p>The NFL Confidence season-long prize pool is $30 per registered NFL Confidence player and is paid 60%, 25%, and 15% to first, second, and third place. Weekly prizes are awarded after the conclusion of Monday Night Football. Ties at the top roll over the weekly prize. Season-long prizes are awarded after the NFL regular season based on total confidence points.</p>
         <p>If a player misses the Thursday game pick, that game is scored as a loss and confidence value 5 is removed from that player's available values. If a player does not make picks before the first Sunday kickoff, the week is locked with no points awarded.</p>
       </section>
       <section>
@@ -3819,6 +3820,11 @@ function App() {
                 <strong>{weekRangeLabel(survivorState.currentWeekStart)}</strong>
               </div>
               <div className="metric-card">
+                <span>Prize Pool</span>
+                <strong>{money(survivorState.pool.prizePoolCents)}</strong>
+                <small>{survivorState.pool.registeredPlayers} registered × $30</small>
+              </div>
+              <div className="metric-card">
                 <span>Current pick</span>
                 <strong>{currentPick ? currentPick.selectedTeam : "No pick"}</strong>
                 {currentPick && <small>{currentPickLocked ? "Locked" : "Editable until kickoff"} • {shortDateTime(currentPick.startsAt)}</small>}
@@ -3909,7 +3915,7 @@ function App() {
               <div className="confidence-prize-chart" aria-label="NFL Confidence season-long prizes">
                 <div className="confidence-prize-heading">
                   <strong>Season-long prizes</strong>
-                  <span>Weekly prize: {money(state.pool.weeklyPrizeCents)}</span>
+                  <span>Pool: {money(state.pool.prizePoolCents)} from {state.pool.registeredPlayers} registered player{state.pool.registeredPlayers === 1 ? "" : "s"} • Weekly prize: {money(state.pool.weeklyPrizeCents)}</span>
                 </div>
                 <div className="confidence-prize-podium">
                   {seasonPrizes.map((prize) => (
@@ -5114,6 +5120,8 @@ function App() {
                   </div>
                 </div>
                 <div className="contest-prize-strip">
+                  <strong>Season pool: {money(nflConfidenceLeaderboard.pool.prizePoolCents)}</strong>
+                  <span>{nflConfidenceLeaderboard.pool.registeredPlayers} registered player{nflConfidenceLeaderboard.pool.registeredPlayers === 1 ? "" : "s"} × $30.</span>
                   <strong>Weekly prize: {money(nflConfidenceLeaderboard.pool.weeklyPrizeCents)}</strong>
                   <span>Paid after Monday Night Football concludes.</span>
                   <strong>Season prizes: 1st {money(nflConfidenceSeasonPrizes[0] ?? 0)} • 2nd {money(nflConfidenceSeasonPrizes[1] ?? 0)} • 3rd {money(nflConfidenceSeasonPrizes[2] ?? 0)}</strong>
@@ -5196,6 +5204,10 @@ function App() {
 	                    <h2>NFL Survivor</h2>
 	                    <span>{survivorLeaderboard.pool.season} pool • Current week {weekRangeLabel(survivorLeaderboard.currentWeekStart)}</span>
 	                  </div>
+	                </div>
+	                <div className="contest-prize-strip">
+	                  <strong>Prize pool: {money(survivorLeaderboard.pool.prizePoolCents)}</strong>
+	                  <span>{survivorLeaderboard.pool.registeredPlayers} registered player{survivorLeaderboard.pool.registeredPlayers === 1 ? "" : "s"} × $30.</span>
 	                </div>
 	                <div className="user-map-table contest-table">
 	                  <table>
