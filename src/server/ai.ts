@@ -235,6 +235,83 @@ type FootballTeamGame = {
   won: boolean;
 };
 
+type NhlTeamGame = {
+  startsOn: string;
+  team: string;
+  isHome: boolean;
+  goalsFor: number;
+  goalsAgainst: number;
+  won: boolean;
+  earnedPoint: boolean;
+};
+
+type NhlHeuristicContext = {
+  selectedGamesPlayed: number | null;
+  opponentGamesPlayed: number | null;
+  selectedWinPct: number | null;
+  opponentWinPct: number | null;
+  winPctDiff: number | null;
+  selectedPointPct: number | null;
+  opponentPointPct: number | null;
+  pointPctDiff: number | null;
+  selectedRegulationWinPct: number | null;
+  opponentRegulationWinPct: number | null;
+  regulationWinPctDiff: number | null;
+  selectedGoalsForPerGame: number | null;
+  opponentGoalsForPerGame: number | null;
+  goalsForPerGameDiff: number | null;
+  selectedGoalsAgainstPerGame: number | null;
+  opponentGoalsAgainstPerGame: number | null;
+  goalsAgainstPerGameDiff: number | null;
+  selectedGoalDiffPerGame: number | null;
+  opponentGoalDiffPerGame: number | null;
+  goalDiffPerGameDiff: number | null;
+  selectedRecentPointPct: number | null;
+  opponentRecentPointPct: number | null;
+  recentPointPctDiff: number | null;
+  selectedRecentGoalDiffPerGame: number | null;
+  opponentRecentGoalDiffPerGame: number | null;
+  recentGoalDiffPerGameDiff: number | null;
+  selectedVenuePointPct: number | null;
+  opponentVenuePointPct: number | null;
+  venuePointPctDiff: number | null;
+  selectedVenueGoalDiffPerGame: number | null;
+  opponentVenueGoalDiffPerGame: number | null;
+  venueGoalDiffPerGameDiff: number | null;
+  selectedRestDays: number | null;
+  opponentRestDays: number | null;
+  restDaysDiff: number | null;
+  selectedBackToBack: boolean;
+  opponentBackToBack: boolean;
+  selectedStreak: number | null;
+  opponentStreak: number | null;
+  dataCompleteness: number;
+} & MarketMovementContext;
+
+type NhlStandingsTeam = {
+  teamName?: { default?: string };
+  gamesPlayed?: number;
+  wins?: number;
+  points?: number;
+  winPctg?: number;
+  pointPctg?: number;
+  regulationWinPctg?: number;
+  goalFor?: number;
+  goalAgainst?: number;
+  goalDifferential?: number;
+  l10GamesPlayed?: number;
+  l10Points?: number;
+  l10GoalDifferential?: number;
+  homeGamesPlayed?: number;
+  homePoints?: number;
+  homeGoalDifferential?: number;
+  roadGamesPlayed?: number;
+  roadPoints?: number;
+  roadGoalDifferential?: number;
+  streakCode?: string;
+  streakCount?: number;
+};
+
 type MlbStoredContext = {
   starts_at: Date;
   starts_on?: string;
@@ -302,10 +379,17 @@ type FootballHeuristicContext = {
   projectedMargin: number;
   listedSpread: number;
   projectedMarginVsSpread: number;
+  selectedPriorSeasonPowerRating: number | null;
+  opponentPriorSeasonPowerRating: number | null;
+  priorSeasonPowerRatingDiff: number | null;
+  selectedPriorSeasonWinPct: number | null;
+  opponentPriorSeasonWinPct: number | null;
+  selectedPriorSeasonMarginPerGame: number | null;
+  opponentPriorSeasonMarginPerGame: number | null;
+  qbStarterQuality: number | null;
   qbContinuity: number | null;
   offensiveLineContinuity: number | null;
   returningProduction: number | null;
-  coachingContinuity: number | null;
   coordinatorContinuity: number | null;
   trenchMismatch: number | null;
   passingMismatch: number | null;
@@ -356,6 +440,9 @@ const confidenceBucket = (confidence: number): ConfidenceBucket => {
   return "<60%";
 };
 
+const isFootballSpreadSport = (sport: CandidateLine["sport"]) => sport === "NFL" || sport === "NCAAF";
+const isNhlMoneyline = (line: CandidateLine) => line.sport === "NHL" && line.market_key === "h2h";
+
 const defaultConfidenceCalibration = new Map<ConfidenceBucket, number>([
   ["80%+", -0.018],
   ["75-79.9%", 0.006],
@@ -380,7 +467,7 @@ const stableProviderMatchId = (providerEventId: string | null) => {
   return matchId || null;
 };
 
-const eventKey = (line: CandidateLine) => {
+export const eventKey = (line: CandidateLine) => {
   return stableProviderMatchId(line.provider_event_id)
     ?? `${line.sport}:${line.starts_at.toISOString()}:${line.away_team}:${line.home_team}:${line.market_key}`;
 };
@@ -458,6 +545,60 @@ const footballFormForGames = (games: FootballTeamGame[], limit: number) => {
     pointsForPerGame: pointsFor / selected.length,
     pointsAgainstPerGame: pointsAgainst / selected.length,
     marginPerGame: (pointsFor - pointsAgainst) / selected.length
+  };
+};
+
+const nhlFormForGames = (games: NhlTeamGame[], limit: number) => {
+  const selected = games.slice(-limit);
+  if (!selected.length) return null;
+  const goalsFor = selected.reduce((sum, game) => sum + game.goalsFor, 0);
+  const goalsAgainst = selected.reduce((sum, game) => sum + game.goalsAgainst, 0);
+  return {
+    games: selected.length,
+    winPct: selected.filter((game) => game.won).length / selected.length,
+    pointPct: selected.filter((game) => game.earnedPoint).length / selected.length,
+    goalsForPerGame: goalsFor / selected.length,
+    goalsAgainstPerGame: goalsAgainst / selected.length,
+    goalDiffPerGame: (goalsFor - goalsAgainst) / selected.length
+  };
+};
+
+const perGame = (value: number | null | undefined, games: number | null | undefined) =>
+  value === null || value === undefined || !games ? null : value / games;
+
+const pointsPct = (points: number | null | undefined, games: number | null | undefined) =>
+  points === null || points === undefined || !games ? null : points / (games * 2);
+
+const normalizeTeamName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const fetchNhlStandings = async () => {
+  try {
+    const response = await fetch("https://api-web.nhle.com/v1/standings/now", {
+      signal: AbortSignal.timeout(8000)
+    });
+    if (!response.ok) return [];
+    const body = await response.json() as { standings?: NhlStandingsTeam[] };
+    return body.standings ?? [];
+  } catch {
+    return [];
+  }
+};
+
+const footballPriorSeasonPowerForGames = (games: FootballTeamGame[]) => {
+  const selected = games.slice(-17);
+  const form = footballFormForGames(selected, selected.length);
+  if (!form) {
+    return null;
+  }
+
+  const winPctComponent = (form.winPct - 0.5) * 12;
+  const marginComponent = form.marginPerGame * 1.35;
+  const powerRating = clamp(winPctComponent + marginComponent, -24, 24);
+  return {
+    games: form.games,
+    winPct: form.winPct,
+    marginPerGame: form.marginPerGame,
+    powerRating
   };
 };
 
@@ -598,7 +739,7 @@ const buildExplanationData = (pick: PublishedAiPick) => {
     startsAt: pick.startsAt,
     pick: pick.selectedTeam,
     opponent,
-    market: pick.marketKey === "h2h" ? "moneyline" : pick.sport === "NCAAF" ? "spread" : "runline",
+    market: pick.marketKey === "h2h" ? "moneyline" : isFootballSpreadSport(pick.sport) ? "spread" : "runline",
     line: pick.marketKey === "h2h" ? formattedOdds(pick.oddsAmerican) : `${pick.spread} (${formattedOdds(pick.oddsAmerican)})`,
     confidence: rounded(pick.confidence, 4),
     modelEdge: rounded(pick.edge, 4),
@@ -646,8 +787,23 @@ const fallbackNcaafExplanation = (pick: Omit<PublishedAiPick, "id" | "explanatio
     ncaafComparisonFact(pick.selectedTeam, opponent, pick.features.selectedPointsForPerGame3, pick.features.opponentPointsForPerGame3, "Recent offense"),
     ncaafComparisonFact(pick.selectedTeam, opponent, pick.features.selectedPointsAgainstPerGame3, pick.features.opponentPointsAgainstPerGame3, "Recent defense", true),
     ncaafComparisonFact(pick.selectedTeam, opponent, pick.features.selectedVenueMarginPerGame, pick.features.opponentVenueMarginPerGame, "Venue split margin"),
+    ncaafComparisonFact(pick.selectedTeam, opponent, pick.features.selectedPriorSeasonPowerRating, pick.features.opponentPriorSeasonPowerRating, "Prior-season power rating"),
     ncaafComparisonFact(pick.selectedTeam, opponent, pick.features.selectedRestDays, pick.features.opponentRestDays, "Rest days")
   ].filter(hasExplanationFact).slice(0, 4);
+  return [lead, ...facts.map(explanationBullet)].join("\n");
+};
+
+const fallbackNhlExplanation = (pick: Omit<PublishedAiPick, "id" | "explanation" | "stakeCents" | "locked" | "wagerId" | "gameLineId">) => {
+  const opponent = pick.selectedTeam === pick.awayTeam ? pick.homeTeam : pick.awayTeam;
+  const confidence = formatPct(pick.confidence);
+  const lead = `Chine prefers ${pick.selectedTeam} on the moneyline at ${formattedOdds(pick.oddsAmerican)}${confidence ? ` with ${confidence} confidence` : ""}.`;
+  const facts = [
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedPointPct, pick.features.opponentPointPct, "Season points percentage"),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedGoalDiffPerGame, pick.features.opponentGoalDiffPerGame, "Goal differential per game"),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedRecentPointPct, pick.features.opponentRecentPointPct, "Recent points percentage"),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedRecentGoalDiffPerGame, pick.features.opponentRecentGoalDiffPerGame, "Recent goal differential per game"),
+    comparisonFact(pick.selectedTeam, opponent, pick.features.selectedVenuePointPct, pick.features.opponentVenuePointPct, "Home/road points percentage")
+  ].filter(hasExplanationFact).slice(0, 3);
   return [lead, ...facts.map(explanationBullet)].join("\n");
 };
 
@@ -679,7 +835,7 @@ const generateOpenAiExplanation = async (pick: PublishedAiPick) => {
                   "Use only the supplied data. Do not invent player names, injuries, pitch counts, innings, odds, or statistics.",
                   "Explain why the model prefers the pick, not why it is guaranteed to win.",
                   "When MLB hitter split or confirmed lineup data is available, include at least one lineup strength or batter-vs-pitcher-handedness detail.",
-                  "When NCAAF projected margin, recent scoring margin, rest, venue, or market movement data is available, include at least one concrete spread-related detail.",
+                  "When football projected margin, recent scoring margin, rest, venue, or market movement data is available, include at least one concrete spread-related detail.",
                   "Use this format after the opening sentence: bullet fact on one line, then 'Edge: Team' on the next line. Mention specific stats when they are available.",
                   "Do not include markdown tables, betting advice disclaimers, or phrases like 'lock' or 'sure thing'."
                 ].join(" ")
@@ -1271,7 +1427,7 @@ const buildConfidenceCalibration = async (client: pg.PoolClient, targetDate: str
   return calibration;
 };
 
-const scoreNcaafSpreadLine = (
+const scoreFootballSpreadLine = (
   line: CandidateLine,
   eventMarketCounts: Map<string, number>,
   context: FootballHeuristicContext | null,
@@ -1280,7 +1436,6 @@ const scoreNcaafSpreadLine = (
   const implied = impliedProbability(line.odds_american);
   const spreadValue = Number(line.spread);
   const reasons: string[] = [];
-  const appliedCaps: string[] = [];
 
   if (line.market_key !== "spreads") {
     return {
@@ -1296,16 +1451,15 @@ const scoreNcaafSpreadLine = (
         edge: 0,
         isMoneyline: line.market_key === "h2h",
         modelVersion: options.modelVersion,
-        modelProfile: "ncaaf-spread-v1",
-        rejectedReason: "NCAAF Chine model is spread-only"
+        modelProfile: "football-spread-v1",
+        rejectedReason: `${line.sport} Chine model is spread-only`
       },
-      reasons: ["NCAAF spread-only model rejects non-spread market"]
+      reasons: [`${line.sport} spread-only model rejects non-spread market`]
     };
   }
 
   const atsEdgePoints = context?.projectedMarginVsSpread ?? 0;
   let fair = implied + clamp(atsEdgePoints / 30, -0.18, 0.18);
-  let confidenceCap = context?.earlySeasonRosterUncertainty ? 0.78 : 0.84;
 
   if ((context?.projectedMarginVsSpread ?? 0) >= 4) {
     fair += 0.045;
@@ -1348,6 +1502,20 @@ const scoreNcaafSpreadLine = (
   } else if ((context?.trenchMismatch ?? 0) <= -10) {
     fair -= 0.018;
     reasons.push("Offensive/defensive trench mismatch concern");
+  }
+
+  if ((context?.priorSeasonPowerRatingDiff ?? 0) >= 6) {
+    fair += 0.022;
+    reasons.push("Prior-season power rating edge");
+  } else if ((context?.priorSeasonPowerRatingDiff ?? 0) >= 3) {
+    fair += 0.012;
+    reasons.push("Prior-season profile edge");
+  } else if ((context?.priorSeasonPowerRatingDiff ?? 0) <= -6) {
+    fair -= 0.022;
+    reasons.push("Prior-season power rating concern");
+  } else if ((context?.priorSeasonPowerRatingDiff ?? 0) <= -3) {
+    fair -= 0.012;
+    reasons.push("Prior-season profile concern");
   }
 
   if ((context?.venueMarginPerGameDiff ?? 0) >= 7) {
@@ -1401,35 +1569,29 @@ const scoreNcaafSpreadLine = (
 
   if ((context?.largeSpreadFavoriteBehavior ?? 0) < 0) {
     fair -= Math.abs(context?.largeSpreadFavoriteBehavior ?? 0) / 100;
-    confidenceCap = Math.min(confidenceCap, 0.76);
-    appliedCaps.push("large favorite spread variance");
     reasons.push("Large-spread favorite behavior penalty");
   }
 
   if (context?.earlySeasonRosterUncertainty) {
     fair -= 0.012;
-    appliedCaps.push("early-season roster uncertainty");
     reasons.push("Early-season roster uncertainty");
   }
 
   if ((context?.dataCompleteness ?? 0) < 0.3) {
     fair -= 0.04;
-    confidenceCap = Math.min(confidenceCap, 0.66);
-    appliedCaps.push("thin NCAAF data");
-    reasons.push("Limited data for NCAAF matchup");
+    reasons.push(`Limited data for ${line.sport} matchup`);
   }
 
   if ((context?.dataCompleteness ?? 0) < 0.5 && Math.abs(spreadValue) >= 28) {
     fair -= 0.025;
-    confidenceCap = Math.min(confidenceCap, 0.64);
-    appliedCaps.push("large spread with thin data");
     reasons.push("Large spread requires stronger supporting data");
   }
 
   fair = clamp(fair, 0.02, 0.9);
   const edge = fair - implied;
-  const uncalibratedConfidence = clamp(fair + Math.max(edge, 0) * 1.2, 0.1, 0.86);
-  const confidence = clamp(uncalibratedConfidence, 0.1, confidenceCap);
+  const uncalibratedConfidence = 0.5 + (fair - 0.5) * 0.75 + Math.max(edge, 0) * 0.25;
+  const displayConfidence = clamp(uncalibratedConfidence, 0.1, 0.99);
+  const confidence = displayConfidence;
   const score = edge * 100 + confidence * 10 + Math.max(atsEdgePoints, 0) * 0.35;
 
   return {
@@ -1449,27 +1611,161 @@ const scoreNcaafSpreadLine = (
       spread: spreadValue,
       marketCompleteness: eventMarketCounts.get(eventKey(line)) ?? 1,
       modelVersion: options.modelVersion,
-      modelProfile: "ncaaf-spread-v1",
-      confidenceBucket: confidenceBucket(uncalibratedConfidence),
+      modelProfile: "football-spread-v1",
+      confidenceBucket: confidenceBucket(displayConfidence),
       confidenceCalibrationAdjustment: 0,
       uncalibratedConfidence,
-      confidenceCap,
-      appliedConfidenceCaps: appliedCaps.join(", ") || null,
+      confidenceCap: null,
+      appliedConfidenceCaps: null,
       decimalOdds: americanToDecimal(line.odds_american),
       ...context
     },
-    reasons: reasons.length ? reasons : ["NCAAF spread model projection"]
+    reasons: reasons.length ? reasons : [`${line.sport} spread model projection`]
+  };
+};
+
+export const scoreNhlMoneyline = (
+  line: CandidateLine,
+  eventMarketCounts: Map<string, number>,
+  context: NhlHeuristicContext | null,
+  options: ScoreOptions = { modelVersion }
+): ScoredCandidate => {
+  const implied = impliedProbability(line.odds_american);
+  const reasons: string[] = [];
+
+  if (!isNhlMoneyline(line)) {
+    return {
+      ...line,
+      score: -100,
+      confidence: 0.1,
+      impliedProbability: implied,
+      fairProbability: implied,
+      edge: 0,
+      features: {
+        impliedProbability: implied,
+        fairProbability: implied,
+        edge: 0,
+        modelVersion: options.modelVersion,
+        modelProfile: "nhl-moneyline-v1",
+        rejectedReason: "NHL Chine model is moneyline-only"
+      },
+      reasons: ["NHL moneyline-only model rejects non-moneyline market"]
+    };
+  }
+
+  let fair = implied;
+  const pointPctDiff = context?.pointPctDiff ?? 0;
+  const goalDiff = context?.goalDiffPerGameDiff ?? 0;
+  const recentPointPctDiff = context?.recentPointPctDiff ?? 0;
+  const recentGoalDiff = context?.recentGoalDiffPerGameDiff ?? 0;
+  const venuePointPctDiff = context?.venuePointPctDiff ?? 0;
+  const venueGoalDiff = context?.venueGoalDiffPerGameDiff ?? 0;
+
+  fair += clamp(pointPctDiff * 0.12, -0.055, 0.055);
+  fair += clamp(goalDiff * 0.022, -0.05, 0.05);
+  fair += clamp(recentPointPctDiff * 0.055, -0.025, 0.025);
+  fair += clamp(recentGoalDiff * 0.011, -0.025, 0.025);
+  fair += clamp(venuePointPctDiff * 0.035, -0.018, 0.018);
+  fair += clamp(venueGoalDiff * 0.007, -0.014, 0.014);
+
+  if (line.selected_team === line.home_team) {
+    fair += 0.018;
+    reasons.push("Home-ice advantage");
+  } else {
+    fair -= 0.006;
+    reasons.push("Road-team adjustment");
+  }
+  if (pointPctDiff >= 0.12) reasons.push("Season points-percentage edge");
+  else if (pointPctDiff <= -0.12) reasons.push("Season points-percentage concern");
+  if (goalDiff >= 0.65) reasons.push("Season goal-differential edge");
+  else if (goalDiff <= -0.65) reasons.push("Season goal-differential concern");
+  if (recentPointPctDiff >= 0.15 || recentGoalDiff >= 0.75) reasons.push("Recent form edge");
+  else if (recentPointPctDiff <= -0.15 || recentGoalDiff <= -0.75) reasons.push("Recent form concern");
+  if (venuePointPctDiff >= 0.15 || venueGoalDiff >= 0.75) reasons.push("Home/road split edge");
+  else if (venuePointPctDiff <= -0.15 || venueGoalDiff <= -0.75) reasons.push("Home/road split concern");
+
+  if (context?.selectedBackToBack && !context.opponentBackToBack) {
+    fair -= 0.022;
+    reasons.push("Back-to-back fatigue concern");
+  } else if (!context?.selectedBackToBack && context?.opponentBackToBack) {
+    fair += 0.018;
+    reasons.push("Rest advantage against back-to-back opponent");
+  } else if ((context?.restDaysDiff ?? 0) >= 2) {
+    fair += 0.008;
+    reasons.push("Rest advantage");
+  } else if ((context?.restDaysDiff ?? 0) <= -2) {
+    fair -= 0.01;
+    reasons.push("Rest disadvantage");
+  }
+
+  if ((context?.selectedStreak ?? 0) >= 3) {
+    fair += 0.006;
+    reasons.push("Positive current streak");
+  } else if ((context?.selectedStreak ?? 0) <= -3) {
+    fair -= 0.006;
+    reasons.push("Negative current streak");
+  }
+
+  if ((context?.lineSnapshotCount ?? 0) >= 2) {
+    const movement = context?.lineMovementImplied ?? 0;
+    fair += clamp(movement * 0.12, -0.006, 0.006);
+    if (movement >= 0.02) reasons.push("Modest market support");
+    else if (movement <= -0.02) reasons.push("Market movement against pick");
+  }
+
+  const completeness = context?.dataCompleteness ?? 0;
+  if (completeness < 0.45) {
+    fair = implied + (fair - implied) * 0.4;
+    reasons.push("Limited early-season NHL sample");
+  } else if (completeness < 0.7) {
+    fair = implied + (fair - implied) * 0.72;
+  }
+
+  fair = clamp(fair, 0.08, 0.88);
+  const edge = fair - implied;
+  const uncalibratedConfidence = 0.5 + (fair - 0.5) * 0.72 + Math.max(edge, 0) * 0.2;
+  const confidence = clamp(uncalibratedConfidence, 0.1, 0.9);
+  const score = edge * 100 + confidence * 10;
+
+  return {
+    ...line,
+    score,
+    confidence,
+    impliedProbability: implied,
+    fairProbability: fair,
+    edge,
+    features: {
+      impliedProbability: implied,
+      fairProbability: fair,
+      edge,
+      isHome: line.selected_team === line.home_team,
+      isFavorite: line.odds_american < 0,
+      isMoneyline: true,
+      marketCompleteness: eventMarketCounts.get(eventKey(line)) ?? 1,
+      modelVersion: options.modelVersion,
+      modelProfile: "nhl-moneyline-v1",
+      confidenceBucket: confidenceBucket(confidence),
+      confidenceCalibrationAdjustment: 0,
+      uncalibratedConfidence,
+      confidenceCap: 0.9,
+      decimalOdds: americanToDecimal(line.odds_american),
+      ...context
+    },
+    reasons: reasons.length ? reasons : ["NHL moneyline price and team-strength projection"]
   };
 };
 
 export const scoreLine = (
   line: CandidateLine,
   eventMarketCounts: Map<string, number>,
-  heuristicContext: MlbHeuristicContext | FootballHeuristicContext | null = null,
+  heuristicContext: MlbHeuristicContext | FootballHeuristicContext | NhlHeuristicContext | null = null,
   options: ScoreOptions = { modelVersion }
 ): ScoredCandidate => {
-  if (line.sport === "NCAAF") {
-    return scoreNcaafSpreadLine(line, eventMarketCounts, heuristicContext as FootballHeuristicContext | null, options);
+  if (isFootballSpreadSport(line.sport)) {
+    return scoreFootballSpreadLine(line, eventMarketCounts, heuristicContext as FootballHeuristicContext | null, options);
+  }
+  if (line.sport === "NHL") {
+    return scoreNhlMoneyline(line, eventMarketCounts, heuristicContext as NhlHeuristicContext | null, options);
   }
 
   const context = heuristicContext as MlbHeuristicContext | null;
@@ -2381,11 +2677,154 @@ const buildMlbContexts = async (client: pg.PoolClient, lines: CandidateLine[]) =
   return contexts;
 };
 
-const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
-  const footballLines = lines.filter((line) => line.sport === "NCAAF");
+export const buildNhlContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
+  const nhlLines = lines.filter((line) => line.sport === "NHL");
+  if (!nhlLines.length) return new Map<string, NhlHeuristicContext>();
+
+  const dates = nhlLines.map((line) => dateOnly(line.starts_at)).sort();
+  const historyStart = new Date(`${dates[0]}T00:00:00Z`);
+  historyStart.setUTCDate(historyStart.getUTCDate() - 45);
+  const teams = [...new Set(nhlLines.flatMap((line) => [line.away_team, line.home_team]))];
+  const results = await client.query<{
+    starts_on: string;
+    away_team: string;
+    home_team: string;
+    away_score: number;
+    home_score: number;
+  }>(
+    `
+      SELECT starts_on::text, away_team, home_team, away_score, home_score
+      FROM game_result
+      WHERE sport = 'NHL'
+        AND starts_on BETWEEN $1::date AND $2::date
+        AND (away_team = ANY($3::text[]) OR home_team = ANY($3::text[]))
+      ORDER BY starts_on ASC, starts_at ASC NULLS LAST
+    `,
+    [dateOnly(historyStart), dates.at(-1), teams]
+  );
+  const [standings, movements] = await Promise.all([
+    fetchNhlStandings(),
+    buildMarketMovements(client, nhlLines, "NHL")
+  ]);
+
+  const history = new Map<string, NhlTeamGame[]>();
+  for (const game of results.rows) {
+    history.set(game.away_team, [...(history.get(game.away_team) ?? []), {
+      startsOn: game.starts_on, team: game.away_team, isHome: false,
+      goalsFor: game.away_score, goalsAgainst: game.home_score,
+      won: game.away_score > game.home_score, earnedPoint: game.away_score > game.home_score
+    }]);
+    history.set(game.home_team, [...(history.get(game.home_team) ?? []), {
+      startsOn: game.starts_on, team: game.home_team, isHome: true,
+      goalsFor: game.home_score, goalsAgainst: game.away_score,
+      won: game.home_score > game.away_score, earnedPoint: game.home_score > game.away_score
+    }]);
+  }
+
+  const standingsByTeam = new Map(standings
+    .filter((team) => team.teamName?.default)
+    .map((team) => [normalizeTeamName(team.teamName!.default!), team]));
+  const contexts = new Map<string, NhlHeuristicContext>();
+
+  for (const line of nhlLines) {
+    const startsOn = dateOnly(line.starts_at);
+    const selectedTeam = line.selected_team;
+    const opponentTeam = selectedTeam === line.away_team ? line.home_team : line.away_team;
+    const selectedIsHome = selectedTeam === line.home_team;
+    const selectedStanding = standingsByTeam.get(normalizeTeamName(selectedTeam));
+    const opponentStanding = standingsByTeam.get(normalizeTeamName(opponentTeam));
+    const selectedHistory = (history.get(selectedTeam) ?? []).filter((game) => game.startsOn < startsOn);
+    const opponentHistory = (history.get(opponentTeam) ?? []).filter((game) => game.startsOn < startsOn);
+    const selectedRecent = nhlFormForGames(selectedHistory, 10);
+    const opponentRecent = nhlFormForGames(opponentHistory, 10);
+    const selectedLast = selectedHistory.at(-1);
+    const opponentLast = opponentHistory.at(-1);
+    const selectedRestDays = selectedLast ? Math.max(0, daysBetween(selectedLast.startsOn, startsOn) - 1) : null;
+    const opponentRestDays = opponentLast ? Math.max(0, daysBetween(opponentLast.startsOn, startsOn) - 1) : null;
+    const selectedGamesPlayed = selectedStanding?.gamesPlayed ?? null;
+    const opponentGamesPlayed = opponentStanding?.gamesPlayed ?? null;
+    const selectedWinPct = selectedStanding?.winPctg ?? ratioOrNull(selectedStanding?.wins, selectedGamesPlayed);
+    const opponentWinPct = opponentStanding?.winPctg ?? ratioOrNull(opponentStanding?.wins, opponentGamesPlayed);
+    const selectedPointPct = selectedStanding?.pointPctg ?? pointsPct(selectedStanding?.points, selectedGamesPlayed);
+    const opponentPointPct = opponentStanding?.pointPctg ?? pointsPct(opponentStanding?.points, opponentGamesPlayed);
+    const selectedRegulationWinPct = selectedStanding?.regulationWinPctg ?? null;
+    const opponentRegulationWinPct = opponentStanding?.regulationWinPctg ?? null;
+    const selectedGoalsForPerGame = perGame(selectedStanding?.goalFor, selectedGamesPlayed);
+    const opponentGoalsForPerGame = perGame(opponentStanding?.goalFor, opponentGamesPlayed);
+    const selectedGoalsAgainstPerGame = perGame(selectedStanding?.goalAgainst, selectedGamesPlayed);
+    const opponentGoalsAgainstPerGame = perGame(opponentStanding?.goalAgainst, opponentGamesPlayed);
+    const selectedGoalDiffPerGame = perGame(selectedStanding?.goalDifferential, selectedGamesPlayed);
+    const opponentGoalDiffPerGame = perGame(opponentStanding?.goalDifferential, opponentGamesPlayed);
+    const selectedRecentGames = selectedStanding?.l10GamesPlayed ?? selectedRecent?.games ?? null;
+    const opponentRecentGames = opponentStanding?.l10GamesPlayed ?? opponentRecent?.games ?? null;
+    const selectedRecentPointPct = pointsPct(selectedStanding?.l10Points, selectedRecentGames) ?? selectedRecent?.pointPct ?? null;
+    const opponentRecentPointPct = pointsPct(opponentStanding?.l10Points, opponentRecentGames) ?? opponentRecent?.pointPct ?? null;
+    const selectedRecentGoalDiffPerGame = perGame(selectedStanding?.l10GoalDifferential, selectedRecentGames) ?? selectedRecent?.goalDiffPerGame ?? null;
+    const opponentRecentGoalDiffPerGame = perGame(opponentStanding?.l10GoalDifferential, opponentRecentGames) ?? opponentRecent?.goalDiffPerGame ?? null;
+    const selectedVenueGames = selectedIsHome ? selectedStanding?.homeGamesPlayed : selectedStanding?.roadGamesPlayed;
+    const opponentVenueGames = selectedIsHome ? opponentStanding?.roadGamesPlayed : opponentStanding?.homeGamesPlayed;
+    const selectedVenuePoints = selectedIsHome ? selectedStanding?.homePoints : selectedStanding?.roadPoints;
+    const opponentVenuePoints = selectedIsHome ? opponentStanding?.roadPoints : opponentStanding?.homePoints;
+    const selectedVenueGoalDiff = selectedIsHome ? selectedStanding?.homeGoalDifferential : selectedStanding?.roadGoalDifferential;
+    const opponentVenueGoalDiff = selectedIsHome ? opponentStanding?.roadGoalDifferential : opponentStanding?.homeGoalDifferential;
+    const selectedVenuePointPct = pointsPct(selectedVenuePoints, selectedVenueGames);
+    const opponentVenuePointPct = pointsPct(opponentVenuePoints, opponentVenueGames);
+    const selectedVenueGoalDiffPerGame = perGame(selectedVenueGoalDiff, selectedVenueGames);
+    const opponentVenueGoalDiffPerGame = perGame(opponentVenueGoalDiff, opponentVenueGames);
+    const movement = movements.get(line.id);
+    const streakValue = (standing: NhlStandingsTeam | undefined) => {
+      if (!standing?.streakCount || !standing.streakCode) return null;
+      return standing.streakCode.toUpperCase().startsWith("W") ? standing.streakCount : -standing.streakCount;
+    };
+    const dataCompleteness = [
+      selectedPointPct, opponentPointPct, selectedGoalDiffPerGame, opponentGoalDiffPerGame,
+      selectedRecentPointPct, opponentRecentPointPct, selectedVenuePointPct, opponentVenuePointPct
+    ].filter((value) => value !== null && value !== undefined).length / 8;
+
+    contexts.set(line.id, {
+      selectedGamesPlayed, opponentGamesPlayed,
+      selectedWinPct, opponentWinPct, winPctDiff: diffOrNull(selectedWinPct, opponentWinPct),
+      selectedPointPct, opponentPointPct, pointPctDiff: diffOrNull(selectedPointPct, opponentPointPct),
+      selectedRegulationWinPct, opponentRegulationWinPct,
+      regulationWinPctDiff: diffOrNull(selectedRegulationWinPct, opponentRegulationWinPct),
+      selectedGoalsForPerGame, opponentGoalsForPerGame,
+      goalsForPerGameDiff: diffOrNull(selectedGoalsForPerGame, opponentGoalsForPerGame),
+      selectedGoalsAgainstPerGame, opponentGoalsAgainstPerGame,
+      goalsAgainstPerGameDiff: diffOrNull(selectedGoalsAgainstPerGame, opponentGoalsAgainstPerGame),
+      selectedGoalDiffPerGame, opponentGoalDiffPerGame,
+      goalDiffPerGameDiff: diffOrNull(selectedGoalDiffPerGame, opponentGoalDiffPerGame),
+      selectedRecentPointPct, opponentRecentPointPct,
+      recentPointPctDiff: diffOrNull(selectedRecentPointPct, opponentRecentPointPct),
+      selectedRecentGoalDiffPerGame, opponentRecentGoalDiffPerGame,
+      recentGoalDiffPerGameDiff: diffOrNull(selectedRecentGoalDiffPerGame, opponentRecentGoalDiffPerGame),
+      selectedVenuePointPct, opponentVenuePointPct,
+      venuePointPctDiff: diffOrNull(selectedVenuePointPct, opponentVenuePointPct),
+      selectedVenueGoalDiffPerGame, opponentVenueGoalDiffPerGame,
+      venueGoalDiffPerGameDiff: diffOrNull(selectedVenueGoalDiffPerGame, opponentVenueGoalDiffPerGame),
+      selectedRestDays, opponentRestDays, restDaysDiff: diffOrNull(selectedRestDays, opponentRestDays),
+      selectedBackToBack: selectedRestDays === 0,
+      opponentBackToBack: opponentRestDays === 0,
+      selectedStreak: streakValue(selectedStanding), opponentStreak: streakValue(opponentStanding),
+      dataCompleteness,
+      openingOddsAmerican: movement?.openingOddsAmerican ?? null,
+      previousOddsAmerican: movement?.previousOddsAmerican ?? null,
+      lineMovementAmerican: movement?.lineMovementAmerican ?? null,
+      lineMovementImplied: movement?.lineMovementImplied ?? null,
+      openingSpread: movement?.openingSpread ?? null,
+      previousSpread: movement?.previousSpread ?? null,
+      lineMovementSpread: movement?.lineMovementSpread ?? null,
+      lineSnapshotCount: movement?.lineSnapshotCount ?? null
+    });
+  }
+  return contexts;
+};
+
+export const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
+  const footballLines = lines.filter((line) => isFootballSpreadSport(line.sport));
   if (!footballLines.length) {
     return new Map<string, FootballHeuristicContext>();
   }
+  const sports = [...new Set(footballLines.map((line) => line.sport))];
 
   const dates = footballLines.map((line) => dateOnly(line.starts_at)).sort();
   const start = new Date(`${dates[0]}T00:00:00Z`);
@@ -2403,12 +2842,12 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
     `
       SELECT starts_on::text, away_team, home_team, away_score, home_score
       FROM game_result
-      WHERE sport = 'NCAAF'
+      WHERE sport = ANY($4::sport_key[])
         AND starts_on BETWEEN $1::date AND $2::date
         AND (away_team = ANY($3::text[]) OR home_team = ANY($3::text[]))
       ORDER BY starts_on ASC, starts_at ASC NULLS LAST
     `,
-    [dateOnly(start), end, teams]
+    [dateOnly(start), end, teams, sports]
   );
 
   const history = new Map<string, FootballTeamGame[]>();
@@ -2439,7 +2878,9 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
     }]);
   }
 
-  const marketMovements = await buildMarketMovements(client, footballLines, "NCAAF");
+  const marketMovements = sports.length === 1
+    ? await buildMarketMovements(client, footballLines, sports[0])
+    : new Map<string, MarketMovementContext>();
   const contexts = new Map<string, FootballHeuristicContext>();
 
   for (const line of footballLines) {
@@ -2455,6 +2896,9 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
     const opponent3 = footballFormForGames(opponentGames, 3);
     const selected6 = footballFormForGames(selectedGames, 6);
     const opponent6 = footballFormForGames(opponentGames, 6);
+    const selectedPriorSeason = footballPriorSeasonPowerForGames(selectedGames);
+    const opponentPriorSeason = footballPriorSeasonPowerForGames(opponentGames);
+    const priorSeasonPowerRatingDiff = diffOrNull(selectedPriorSeason?.powerRating, opponentPriorSeason?.powerRating);
     const selectedVenue = footballFormForGames(selectedGames.filter((game) => game.isHome === selectedIsHome), 8);
     const opponentVenue = footballFormForGames(opponentGames.filter((game) => game.isHome === opponentIsHome), 8);
     const selectedLast = selectedGames.at(-1);
@@ -2471,6 +2915,7 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
     const shortWeekDisadvantage = selectedRestDays !== null && selectedRestDays < 6 ? -1.25 : 0;
     const letdownSpot = selectedLast && selectedLast.margin >= 28 ? -0.75 : 0;
     const recentPerformance = diffOrNull(selected3?.marginPerGame, opponent3?.marginPerGame);
+    const priorSeasonPowerMargin = clamp((priorSeasonPowerRatingDiff ?? 0) * 0.28, -4.5, 4.5);
     const trenchMismatch = diffOrNull(
       selected3 ? selected3.pointsForPerGame - selected3.pointsAgainstPerGame : null,
       opponent3 ? opponent3.pointsForPerGame - opponent3.pointsAgainstPerGame : null
@@ -2483,7 +2928,7 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
     const baseFormMargin = (recentPerformance ?? diffOrNull(selected6?.marginPerGame, opponent6?.marginPerGame) ?? 0) * 0.32;
     const venueMargin = (diffOrNull(selectedVenue?.marginPerGame, opponentVenue?.marginPerGame) ?? 0) * 0.12;
     const marketMargin = (marketLineMovement ?? 0) * 0.45;
-    const projectedMargin = Number((baseFormMargin + venueMargin + homeFieldAdvantage + restAdvantage + travelDisadvantage + shortWeekDisadvantage + letdownSpot + largeSpreadFavoriteBehavior + marketMargin).toFixed(2));
+    const projectedMargin = Number((priorSeasonPowerMargin + baseFormMargin + venueMargin + homeFieldAdvantage + restAdvantage + travelDisadvantage + shortWeekDisadvantage + letdownSpot + largeSpreadFavoriteBehavior + marketMargin).toFixed(2));
     const projectedMarginVsSpread = Number((projectedMargin + spread).toFixed(2));
     const dataSignals = [
       selected3,
@@ -2492,6 +2937,8 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
       opponent6,
       selectedVenue,
       opponentVenue,
+      selectedPriorSeason,
+      opponentPriorSeason,
       movement && (movement.lineSnapshotCount ?? 0) >= 2 ? movement : null
     ].filter(Boolean).length;
 
@@ -2531,10 +2978,17 @@ const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine
       projectedMargin,
       listedSpread: spread,
       projectedMarginVsSpread,
+      selectedPriorSeasonPowerRating: selectedPriorSeason?.powerRating ?? null,
+      opponentPriorSeasonPowerRating: opponentPriorSeason?.powerRating ?? null,
+      priorSeasonPowerRatingDiff,
+      selectedPriorSeasonWinPct: selectedPriorSeason?.winPct ?? null,
+      opponentPriorSeasonWinPct: opponentPriorSeason?.winPct ?? null,
+      selectedPriorSeasonMarginPerGame: selectedPriorSeason?.marginPerGame ?? null,
+      opponentPriorSeasonMarginPerGame: opponentPriorSeason?.marginPerGame ?? null,
+      qbStarterQuality: null,
       qbContinuity: null,
       offensiveLineContinuity: null,
       returningProduction: null,
-      coachingContinuity: null,
       coordinatorContinuity: null,
       trenchMismatch,
       passingMismatch: null,
@@ -2710,6 +3164,123 @@ const dailyAiRoundRobinMinExpectedRoi = 0.08;
 const dailyAiRoundRobinMinOddsAmerican = -230;
 const dailyAiRoundRobinMaxOddsAmerican = 160;
 
+export const placeDailyAiParlay = async ({
+  forDate = centralDate(),
+  lockWindowMinutes = 60
+}: {
+  forDate?: string;
+  lockWindowMinutes?: number;
+} = {}) => transaction(async (client) => {
+  const aiUser = await client.query<{ id: string }>(
+    "SELECT id FROM app_user WHERE username = $1 AND role = 'system' LIMIT 1",
+    [config.aiUsername]
+  );
+  const userId = aiUser.rows[0]?.id;
+  if (!userId) return { wagerId: null, skippedReason: "system user missing", selectedPicks: 0 };
+
+  const existing = await client.query<{ id: string }>(
+    `
+      SELECT id
+      FROM wager
+      WHERE user_id = $1
+        AND kind = 'parlay'
+        AND (placed_at AT TIME ZONE 'America/Chicago')::date = $2::date
+      ORDER BY placed_at ASC
+      LIMIT 1
+    `,
+    [userId, forDate]
+  );
+  if (existing.rowCount) {
+    return { wagerId: existing.rows[0].id, skippedReason: null, selectedPicks: dailyAiParlayPicks };
+  }
+
+  const candidates = await client.query<CandidateLine & { confidence: number; score: number; edge: number }>(
+    `
+      SELECT
+        gl.id,
+        gl.provider_event_id,
+        gl.sport,
+        gl.starts_at,
+        gl.home_team,
+        gl.away_team,
+        p.selected_team,
+        gl.spread::text,
+        gl.odds_american,
+        gl.market_key,
+        p.confidence::float8 AS confidence,
+        p.score::float8 AS score,
+        COALESCE((p.features->>'edge')::float8, 0) AS edge
+      FROM ai_pick p
+      JOIN game_line gl ON gl.id = p.game_line_id
+      WHERE p.published_for = $1::date
+        AND p.confidence >= $2
+        AND gl.starts_at > now()
+        AND (
+          (gl.sport IN ('NFL', 'NCAAF') AND gl.market_key = 'spreads')
+          OR (gl.sport NOT IN ('NFL', 'NCAAF') AND gl.market_key = 'h2h')
+        )
+      ORDER BY p.confidence DESC, p.score DESC, gl.starts_at ASC
+    `,
+    [forDate, dailyAiWagerMinConfidence]
+  );
+
+  const gameKeys = new Set<string>();
+  const teamKeys = new Set<string>();
+  const selected: ScoredCandidate[] = [];
+  for (const candidate of candidates.rows) {
+    const gameKey = gameKeyForPick(candidate);
+    const teamKey = teamKeyForPick(candidate);
+    if (gameKeys.has(gameKey) || teamKeys.has(teamKey)) continue;
+    gameKeys.add(gameKey);
+    teamKeys.add(teamKey);
+    selected.push({
+      ...candidate,
+      impliedProbability: impliedProbability(candidate.odds_american),
+      fairProbability: impliedProbability(candidate.odds_american) + candidate.edge,
+      features: {},
+      reasons: []
+    });
+    if (selected.length === dailyAiParlayPicks) break;
+  }
+
+  if (selected.length < dailyAiParlayPicks) {
+    return { wagerId: null, skippedReason: `only ${selected.length} wager-eligible picks available`, selectedPicks: selected.length };
+  }
+
+  const lockAt = Math.min(...selected.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000));
+  if (Date.now() < lockAt) {
+    return { wagerId: null, skippedReason: "before parlay lock window", selectedPicks: selected.length };
+  }
+
+  const bankroll = await client.query<{ starting_balance_cents: number }>(
+    `
+      SELECT starting_balance_cents
+      FROM ai_daily_bankroll
+      WHERE user_id = $1 AND bankroll_date = $2::date
+      LIMIT 1
+    `,
+    [userId, forDate]
+  );
+  const startingBalanceCents = bankroll.rows[0]?.starting_balance_cents ?? 0;
+  const stakeCents = Math.max(0, Math.floor(startingBalanceCents * dailyAiParlayBankrollFraction));
+  if (stakeCents <= 0) return { wagerId: null, skippedReason: "parlay stake is zero", selectedPicks: selected.length };
+
+  const wagerId = await placeAiParlayWager(client, userId, selected, stakeCents);
+  return {
+    wagerId,
+    skippedReason: wagerId ? null : "insufficient bankroll for parlay",
+    selectedPicks: selected.length,
+    stakeCents,
+    legs: selected.map((pick) => ({
+      gameLineId: pick.id,
+      sport: pick.sport,
+      selectedTeam: pick.selected_team,
+      startsAt: pick.starts_at.toISOString(),
+      confidence: pick.confidence
+    }))
+  };
+});
+
 const isTruthyFeature = (value: number | string | boolean | null | undefined) => value === true;
 
 const aiRoundRobinCandidateRejectionReason = (candidate: ScoredCandidate) => {
@@ -2862,7 +3433,7 @@ export const generateAiPicks = async ({
         sport,
         today,
         activeModelVersion === modelVersion
-          ? "Transparent heuristic v8 using calibrated MLB confidence, market-specific profiles, MLB starter/lineup context, and NCAAF spread-margin context"
+          ? "Transparent heuristic v8 using calibrated MLB confidence, market-specific profiles, MLB starter/lineup context, and football spread-margin context"
           : "Transparent heuristic using market, recent form, rest, and venue-change features"
       ]
     );
@@ -2886,7 +3457,7 @@ export const generateAiPicks = async ({
           AND starts_at > now()
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $2::date
           AND ($3::text IS NULL OR market_key = $3::text)
-          AND ($1::text <> 'NCAAF' OR market_key = 'spreads')
+          AND ($1::text NOT IN ('NFL', 'NCAAF') OR market_key = 'spreads')
         ORDER BY starts_at ASC, market_key ASC
       `,
       [sport, today, marketKey ?? null]
@@ -2898,14 +3469,17 @@ export const generateAiPicks = async ({
     }
 
     const mlbContexts = await buildMlbContexts(client, activeLines.rows);
+    const nhlContexts = await buildNhlContexts(client, activeLines.rows);
     const footballContexts = await buildFootballContexts(client, activeLines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, today)
       : undefined;
     const scored = activeLines.rows
-      .map((line) => scoreLine(line, eventMarketCounts, line.sport === "NCAAF"
+      .map((line) => scoreLine(line, eventMarketCounts, isFootballSpreadSport(line.sport)
         ? footballContexts.get(line.id) ?? null
-        : mlbContexts.get(line.id) ?? null, {
+        : line.sport === "NHL"
+          ? nhlContexts.get(line.id) ?? null
+          : mlbContexts.get(line.id) ?? null, {
         modelVersion: activeModelVersion,
         confidenceCalibration
       }))
@@ -3121,8 +3695,8 @@ export const generateAiPicks = async ({
             AND p.confidence >= $2
             AND gl.sport = $3
             AND (
-              (gl.sport = 'NCAAF' AND gl.market_key = 'spreads')
-              OR (gl.sport <> 'NCAAF' AND gl.market_key = 'h2h')
+              (gl.sport IN ('NFL', 'NCAAF') AND gl.market_key = 'spreads')
+              OR (gl.sport NOT IN ('NFL', 'NCAAF') AND gl.market_key = 'h2h')
             )
             AND gl.starts_at > now()
         `,
@@ -3229,22 +3803,7 @@ export const generateAiPicks = async ({
       : dailyRoundRobinWays > 0
         ? Math.max(1, Math.floor((dailyStartingBankrollCents * aiRoundRobinBankrollFraction) / dailyRoundRobinWays))
         : 0;
-    const parlayGameKeys = new Set<string>();
-    const parlayTeamKeys = new Set<string>();
-    const parlayPicks = wageringCandidates.reduce<ScoredCandidate[]>((acc, candidate) => {
-      if (acc.length >= dailyAiParlayPicks) {
-        return acc;
-      }
-      const gameKey = gameKeyForPick(candidate);
-      const selectedTeamKey = teamKeyForPick(candidate);
-      if (parlayGameKeys.has(gameKey) || parlayTeamKeys.has(selectedTeamKey)) {
-        return acc;
-      }
-      parlayGameKeys.add(gameKey);
-      parlayTeamKeys.add(selectedTeamKey);
-      acc.push(candidate);
-      return acc;
-    }, []);
+    const parlayPicks: ScoredCandidate[] = [];
     const dailyParlayStakeCents = existingDailyAiParlay?.rowCount
       ? existingDailyAiParlay.rows[0].stake_cents
       : dailyStartingBankrollCents > 0
@@ -3332,43 +3891,8 @@ export const generateAiPicks = async ({
       }
     }
 
-    const shouldLockDailyParlay = parlayPicks.length === dailyAiParlayPicks
-      && now >= new Date(Math.min(...parlayPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))
-      && parlayPicks.every((pick) => now < pick.starts_at);
-    let dailyParlaySkippedReason: string | null = null;
-    if (parlayPicks.length < dailyAiParlayPicks) {
-      dailyParlaySkippedReason = `only ${parlayPicks.length} wager-eligible picks available`;
-    } else if (now < new Date(Math.min(...parlayPicks.map((pick) => pick.starts_at.getTime() - lockWindowMinutes * 60 * 1000)))) {
-      dailyParlaySkippedReason = "before parlay lock window";
-    } else if (!parlayPicks.every((pick) => now < pick.starts_at)) {
-      dailyParlaySkippedReason = "one or more parlay picks already started";
-    } else if (!placeWagers) {
-      dailyParlaySkippedReason = "wager placement disabled";
-    } else if (!aiUser.rowCount) {
-      dailyParlaySkippedReason = "system user missing";
-    } else if (dailyParlayWagerId) {
-      dailyParlaySkippedReason = "parlay already placed";
-    } else if (dailyParlayStakeCents <= 0) {
-      dailyParlaySkippedReason = "parlay stake is zero";
-    }
-
-    if (
-      shouldLockDailyParlay
-      && placeWagers
-      && aiUser.rowCount
-      && !dailyParlayWagerId
-      && dailyParlayStakeCents > 0
-    ) {
-      dailyParlayWagerId = await placeAiParlayWager(
-        client,
-        aiUser.rows[0].id,
-        parlayPicks,
-        dailyParlayStakeCents
-      );
-      if (!dailyParlayWagerId) {
-        dailyParlaySkippedReason = "insufficient bankroll for parlay";
-      }
-    }
+    const shouldLockDailyParlay = false;
+    const dailyParlaySkippedReason = dailyParlayWagerId ? null : "handled after all daily sports are evaluated";
 
     for (const candidate of selected) {
       const lockAt = new Date(candidate.starts_at.getTime() - lockWindowMinutes * 60 * 1000);
@@ -3459,9 +3983,11 @@ export const generateAiPicks = async ({
         startsAt: candidate.starts_at.toISOString(),
         features
       };
-      const explanation = candidate.sport === "NCAAF"
+      const explanation = isFootballSpreadSport(candidate.sport)
         ? fallbackNcaafExplanation(explanationInput)
-        : fallbackAiExplanation(explanationInput);
+        : candidate.sport === "NHL"
+          ? fallbackNhlExplanation(explanationInput)
+          : fallbackAiExplanation(explanationInput);
       const pickResult = await client.query<{ id: string }>(
         `
           INSERT INTO ai_pick (
@@ -3610,7 +4136,7 @@ export const snapshotAiCandidates = async ({
         WHERE is_active = true
           AND sport = $1
           AND starts_at > now()
-          AND ($1::text <> 'NCAAF' OR market_key = 'spreads')
+          AND ($1::text NOT IN ('NFL', 'NCAAF') OR market_key = 'spreads')
         ORDER BY starts_at ASC, market_key ASC
       `,
       [sport]
@@ -3622,13 +4148,16 @@ export const snapshotAiCandidates = async ({
     }
 
     const mlbContexts = await buildMlbContexts(client, activeLines.rows);
+    const nhlContexts = await buildNhlContexts(client, activeLines.rows);
     const footballContexts = await buildFootballContexts(client, activeLines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, today)
       : undefined;
-    const scored = activeLines.rows.map((line) => scoreLine(line, eventMarketCounts, line.sport === "NCAAF"
+    const scored = activeLines.rows.map((line) => scoreLine(line, eventMarketCounts, isFootballSpreadSport(line.sport)
       ? footballContexts.get(line.id) ?? null
-      : mlbContexts.get(line.id) ?? null, {
+      : line.sport === "NHL"
+        ? nhlContexts.get(line.id) ?? null
+        : mlbContexts.get(line.id) ?? null, {
       modelVersion: activeModelVersion,
       confidenceCalibration
     }));

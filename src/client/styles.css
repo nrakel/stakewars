@@ -977,6 +977,12 @@ textarea {
   max-width: 1180px;
 }
 
+.model-audit-sports {
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .model-audit-grid {
   display: grid;
   gap: 16px;
@@ -1146,6 +1152,46 @@ textarea {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
+}
+
+.survivor-champion-award {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 2px solid #ff6900;
+  border-radius: 8px;
+  padding: 18px 20px;
+  background: #17130f;
+  color: #ffffff;
+}
+
+.survivor-champion-award svg {
+  flex: 0 0 auto;
+  color: #ffb020;
+}
+
+.survivor-champion-award div {
+  display: grid;
+  gap: 3px;
+}
+
+.survivor-champion-award span {
+  color: #ffb020;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.survivor-champion-award strong {
+  font-size: 1.35rem;
+}
+
+.survivor-champion-award small {
+  color: #d7d2cc;
+}
+
+.leaderboard-champion-award {
+  margin: 14px 0;
 }
 
 .metric-card {
@@ -2110,12 +2156,73 @@ textarea {
 }
 
 .live-game {
+  position: relative;
   display: grid;
   gap: 8px;
   border: 1px solid #dbe0e6;
   border-radius: 8px;
   padding: 10px;
   background: #fbfcfa;
+}
+
+.score-favorite-button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid #cbd2d9;
+  border-radius: 50%;
+  background: #ffffff;
+  color: #667085;
+  cursor: pointer;
+  z-index: 1;
+}
+
+.score-favorite-button:hover,
+.score-favorite-button:focus-visible {
+  border-color: #ff6900;
+  color: #c45100;
+}
+
+.score-favorite-button.active {
+  border-color: #d5a000;
+  background: #fff7cc;
+  color: #c58b00;
+}
+
+.score-favorite-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.score-favorite-notice {
+  margin: 10px 0 0;
+  color: #475467;
+  font-size: 0.86rem;
+}
+
+.live-game .live-score {
+  padding-right: 38px;
+}
+
+.football-situation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  padding: 7px 10px;
+  border: 1px solid #e2e8e3;
+  border-radius: 6px;
+  background: #f7faf7;
+  color: #26352f;
+}
+
+.football-situation span {
+  font-weight: 900;
 }
 
 .live-score {
@@ -2132,6 +2239,30 @@ textarea {
   white-space: nowrap;
   color: #111827;
   font-weight: 800;
+}
+
+.football-team-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.football-team-label > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.possession-arrow {
+  flex: 0 0 auto;
+  color: #e6b800;
+  filter: drop-shadow(0 0 1px rgb(0 0 0 / 35%));
+}
+
+.possession-arrow.red-zone {
+  color: #d92d20;
 }
 
 .live-score strong {
@@ -2209,6 +2340,76 @@ textarea {
 
 .live-details .last-play {
   color: #43524c;
+}
+
+.football-box-details {
+  border-top: 1px solid #e5e7eb;
+  padding-top: 8px;
+}
+
+.football-box-details summary {
+  color: #111827;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.football-box-score,
+.football-box-team,
+.football-stat-group {
+  display: grid;
+  gap: 10px;
+}
+
+.football-box-score {
+  margin-top: 12px;
+}
+
+.football-box-team {
+  border-top: 2px solid #ff6900;
+  padding-top: 8px;
+}
+
+.football-box-team h3,
+.football-stat-group h4 {
+  margin: 0;
+}
+
+.football-box-team h3 {
+  font-size: 0.92rem;
+}
+
+.football-stat-group h4 {
+  color: #43524c;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+}
+
+.football-stat-scroll {
+  overflow-x: auto;
+}
+
+.football-stat-scroll table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+  font-size: 0.74rem;
+}
+
+.football-stat-scroll th,
+.football-stat-scroll td {
+  border-bottom: 1px solid #edf0ed;
+  padding: 5px 7px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.football-stat-scroll th:first-child,
+.football-stat-scroll td:first-child {
+  left: 0;
+  position: sticky;
+  text-align: left;
+  background: #fbfcfa;
 }
 
 .kind-tabs {
@@ -3400,6 +3601,196 @@ textarea {
   background: #d97706;
 }
 
+.nfl-confidence-chine-card {
+  border-color: #ffb077;
+  background: linear-gradient(180deg, #fffaf5 0%, #ffffff 100%);
+}
+
+.chine-confidence-list {
+  display: grid;
+  gap: 8px;
+}
+
+.chine-confidence-pick {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #f2dcc9;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.chine-confidence-pick > strong {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  border-radius: 999px;
+  background: #ff6900;
+  color: #141414;
+  font-size: 0.82rem;
+  font-weight: 950;
+}
+
+.chine-confidence-pick span {
+  display: block;
+  color: #14201c;
+  font-weight: 950;
+}
+
+.chine-confidence-pick small,
+.chine-confidence-pick em {
+  color: #65736d;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.chine-confidence-pick em {
+  font-style: normal;
+  text-align: right;
+}
+
+.chine-nfl-picks-card {
+  border-color: #ffb077;
+}
+
+.chine-nfl-records {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.chine-nfl-records > div {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.chine-nfl-records small {
+  color: #65736d;
+  font-size: 0.76rem;
+  font-weight: 850;
+}
+
+.chine-nfl-records strong {
+  color: #14201c;
+  font-size: 1.08rem;
+}
+
+.chine-nfl-week-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0 14px;
+}
+
+.chine-nfl-week-tabs button {
+  padding: 8px 12px;
+  border: 1px solid #d5ddd7;
+  border-radius: 6px;
+  background: #fff;
+  color: #14201c;
+  font-weight: 900;
+}
+
+.chine-nfl-week-tabs button.active {
+  border-color: #ff6900;
+  background: #ff6900;
+  color: #111;
+}
+
+.chine-nfl-picks-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chine-nfl-picks-header,
+.chine-nfl-pick-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 110px;
+  align-items: center;
+  gap: 12px;
+}
+
+.chine-nfl-picks-header {
+  padding: 0 12px;
+  color: #65736d;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.chine-nfl-pick-row {
+  padding: 12px;
+  border: 1px solid #f2dcc9;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.chine-nfl-pick-row.confidence-high {
+  border-color: #8bcf9f;
+  background: #f4fff7;
+}
+
+.chine-nfl-pick-row.confidence-medium {
+  border-color: #f0cb63;
+  background: #fffaf0;
+}
+
+.chine-nfl-pick-row.confidence-low {
+  border-color: #ef9a9a;
+  background: #fff6f6;
+}
+
+.chine-nfl-pick-row strong,
+.chine-nfl-pick-row small {
+  display: block;
+}
+
+.chine-nfl-pick-row strong {
+  color: #14201c;
+  font-weight: 950;
+}
+
+.chine-nfl-pick-row small {
+  margin-top: 3px;
+  color: #65736d;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.chine-nfl-confidence {
+  justify-self: end;
+  min-width: 76px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  color: #141414;
+  font-weight: 950;
+  text-align: center;
+}
+
+.chine-nfl-confidence .pick-result {
+  margin-top: 4px;
+}
+
+.confidence-high .chine-nfl-confidence {
+  background: #34c759;
+}
+
+.confidence-medium .chine-nfl-confidence {
+  background: #ffcc00;
+}
+
+.confidence-low .chine-nfl-confidence {
+  background: #ff6b6b;
+}
+
 .nfl-confidence-stepper {
   display: flex;
   flex-wrap: wrap;
@@ -3713,6 +4104,48 @@ textarea {
 
   .nfl-confidence-game-card .confidence-team-short {
     display: inline !important;
+  }
+
+  .chine-confidence-pick {
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+
+  .chine-confidence-pick > strong {
+    min-height: 34px;
+    font-size: 0.74rem;
+  }
+
+  .chine-confidence-pick small,
+  .chine-confidence-pick em {
+    font-size: 0.68rem;
+    line-height: 1.25;
+  }
+
+  .chine-confidence-pick em {
+    grid-column: 2;
+    text-align: left;
+  }
+
+  .chine-nfl-picks-header {
+    display: none;
+  }
+
+  .chine-nfl-pick-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .chine-nfl-pick-row > div:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .chine-nfl-confidence {
+    align-self: center;
+    min-width: 64px;
+    padding: 7px 8px;
+    font-size: 0.86rem;
   }
 
   .tower-wager-grid,

@@ -41,6 +41,31 @@ type ParlayEvent = {
   bookmakers?: ParlayBookmaker[];
 };
 
+type EspnFootballScoreboardResponse = {
+  events?: Array<{
+    id: string;
+    date: string;
+    competitions?: Array<{
+      competitors?: Array<{
+        homeAway?: "home" | "away";
+        team?: {
+          displayName?: string;
+          name?: string;
+          shortDisplayName?: string;
+          abbreviation?: string;
+        };
+      }>;
+    }>;
+  }>;
+};
+
+type CanonicalFootballEvent = {
+  id: string;
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+};
+
 const sports: Array<{ local: LocalSport; parlay: string; league: string }> = [
   { local: "MLB", parlay: "baseball_mlb", league: "MLB" },
   { local: "NHL", parlay: "icehockey_nhl", league: "NHL" },
@@ -65,20 +90,20 @@ const soccerBookmakerFallbacks = () => unique([
   "bovada"
 ].filter(Boolean));
 
-const isRegularSeasonWindow = (sport: LocalSport, date = new Date()) => {
+export const isRegularSeasonWindow = (sport: LocalSport, date = new Date()) => {
   const month = date.getUTCMonth() + 1;
   const day = date.getUTCDate();
   const monthDay = month * 100 + day;
 
   switch (sport) {
     case "MLB":
-      return monthDay >= 320 && monthDay <= 930;
+      return monthDay >= 320 && monthDay <= 1115;
     case "NFL":
       return monthDay >= 801 || monthDay <= 110;
     case "NBA":
       return monthDay >= 1015 || monthDay <= 415;
     case "NHL":
-      return monthDay >= 1001 || monthDay <= 420;
+      return monthDay >= 915 || monthDay <= 420;
     case "NCAAMB":
       return monthDay >= 1101 || monthDay <= 315;
     case "NCAAF":
@@ -141,10 +166,16 @@ const nflTeamNames = [
 const nflTeamNameSet = new Set(nflTeamNames);
 
 const ncaafTeamAliases: Record<string, string> = {
+  "brigham young": "byu",
+  "byu cougars": "byu",
   "miami fl": "miami florida",
   "miami florida hurricanes": "miami florida",
   "miami oh": "miami ohio",
   "miami oh redhawks": "miami ohio",
+  "louisiana state": "lsu",
+  "lsu tigers": "lsu",
+  "texas christian": "tcu",
+  "tcu horned frogs": "tcu",
   "massachusetts": "umass",
   "massachusetts minutemen": "umass",
   "umass minutemen": "umass",
@@ -166,7 +197,128 @@ const ncaafTeamAliases: Record<string, string> = {
   "usc trojans": "usc",
   "pittsburgh panthers": "pittsburgh",
   "cincinnati bearcats": "cincinnati",
-  "houston cougars": "houston"
+  "houston cougars": "houston",
+  "central florida": "ucf",
+  "ucf knights": "ucf",
+  "southern methodist": "smu",
+  "smu mustangs": "smu",
+  "florida state seminoles": "florida state",
+  "central connecticut state": "central connecticut",
+  "florida international": "fiu",
+  "mercyhurst university": "mercyhurst",
+  "southern university": "southern",
+  "utsa roadrunners": "utsa"
+};
+
+const ncaafMascotSuffixes = [
+  "fighting blue hens",
+  "fightin blue hens",
+  "fighting illini",
+  "golden gophers",
+  "golden bears",
+  "golden eagles",
+  "golden lions",
+  "horned frogs",
+  "red raiders",
+  "scarlet knights",
+  "yellow jackets",
+  "demon deacons",
+  "crimson tide",
+  "fighting irish",
+  "fighting camels",
+  "nittany lions",
+  "runnin rebels",
+  "sun devils",
+  "rainbow warriors",
+  "mountaineers",
+  "delta devils",
+  "mean green",
+  "blue devils",
+  "blue raiders",
+  "green wave",
+  "red wolves",
+  "chanticleers",
+  "leathernecks",
+  "hilltoppers",
+  "cornhuskers",
+  "commodores",
+  "midshipmen",
+  "roadrunners",
+  "thunderbirds",
+  "terrapins",
+  "catamounts",
+  "wolverines",
+  "boilermakers",
+  "colonials",
+  "jayhawks",
+  "buckeyes",
+  "hoosiers",
+  "nittany",
+  "wildcats",
+  "redhawks",
+  "seminoles",
+  "mustangs",
+  "minutemen",
+  "buffaloes",
+  "bearcats",
+  "bears",
+  "broncos",
+  "bobcats",
+  "cowboys",
+  "cyclones",
+  "falcons",
+  "gators",
+  "hawks",
+  "hurricanes",
+  "hornets",
+  "jaguars",
+  "lakers",
+  "longhorns",
+  "owls",
+  "pioneers",
+  "pirates",
+  "rams",
+  "redbirds",
+  "skyhawks",
+  "volunteers",
+  "wolves",
+  "panthers",
+  "bulldogs",
+  "cougars",
+  "cardinals",
+  "colonels",
+  "hawkeyes",
+  "huskies",
+  "lumberjacks",
+  "spartans",
+  "gamecocks",
+  "trojans",
+  "knights",
+  "sooners",
+  "badgers",
+  "beavers",
+  "miners",
+  "rebels",
+  "rockets",
+  "aggies",
+  "bison",
+  "eagles",
+  "lions",
+  "lobos",
+  "orange",
+  "tigers",
+  "ducks",
+  "zips"
+].sort((left, right) => right.length - left.length);
+
+const stripNcaafMascotSuffix = (normalized: string) => {
+  for (const suffix of ncaafMascotSuffixes) {
+    const suffixText = ` ${suffix}`;
+    if (normalized.endsWith(suffixText) && normalized.length > suffixText.length + 2) {
+      return normalized.slice(0, -suffixText.length).trim();
+    }
+  }
+  return normalized;
 };
 
 const normalizeFootballTeamKey = (team: string) =>
@@ -182,7 +334,10 @@ const normalizeFootballTeamKey = (team: string) =>
 
 const ncaafTeamKey = (team: string, batchAliases?: Map<string, string>) => {
   const normalized = normalizeFootballTeamKey(team);
-  return batchAliases?.get(normalized) ?? ncaafTeamAliases[normalized] ?? normalized;
+  const aliased = ncaafTeamAliases[normalized] ?? normalized;
+  const stripped = stripNcaafMascotSuffix(aliased);
+  const canonical = ncaafTeamAliases[stripped] ?? stripped;
+  return batchAliases?.get(canonical) ?? canonical;
 };
 
 const ncaafDisplayNames: Record<string, string> = {
@@ -191,13 +346,20 @@ const ncaafDisplayNames: Record<string, string> = {
   "usc": "USC",
   "uab": "UAB",
   "utsa": "UTSA",
-  "utrgv": "UTRGV"
+  "utrgv": "UTRGV",
+  "byu": "BYU",
+  "lsu": "LSU",
+  "smu": "SMU",
+  "tcu": "TCU",
+  "ucf": "UCF",
+  "utep": "UTEP",
+  "unlv": "UNLV"
 };
 
 const toDisplayName = (key: string) =>
   ncaafDisplayNames[key] ?? key.replace(/\b\w/g, (letter) => letter.toUpperCase());
 
-const ncaafDisplayName = (team: string) => toDisplayName(ncaafTeamKey(team));
+const ncaafDisplayName = (team: string, batchAliases?: Map<string, string>) => toDisplayName(ncaafTeamKey(team, batchAliases));
 
 export const footballEventIdentity = (
   sport: LocalSport,
@@ -206,7 +368,13 @@ export const footballEventIdentity = (
 ) => {
   const startKey = eventStartKey(event.commence_time);
   if (sport === "NCAAF") {
-    return [event.sport_key, startKey, ncaafTeamKey(event.away_team, batchAliases), ncaafTeamKey(event.home_team, batchAliases)].join("|");
+    return [
+      event.sport_key,
+      event.canonical_event_id ?? startKey,
+      startKey,
+      ncaafTeamKey(event.away_team, batchAliases),
+      ncaafTeamKey(event.home_team, batchAliases)
+    ].join("|");
   }
   return [
     event.sport_key,
@@ -234,19 +402,14 @@ export const isExpectedSportEvent = (sport: LocalSport, event: ParlayEvent) => {
 const buildNcaafBatchAliases = (eventGroups: ParlayEvent[][]) => {
   const names = unique(eventGroups.flatMap((events) =>
     events.flatMap((event) => [
-      ncaafTeamAliases[normalizeFootballTeamKey(event.away_team)] ?? normalizeFootballTeamKey(event.away_team),
-      ncaafTeamAliases[normalizeFootballTeamKey(event.home_team)] ?? normalizeFootballTeamKey(event.home_team)
+      stripNcaafMascotSuffix(ncaafTeamAliases[normalizeFootballTeamKey(event.away_team)] ?? normalizeFootballTeamKey(event.away_team)),
+      stripNcaafMascotSuffix(ncaafTeamAliases[normalizeFootballTeamKey(event.home_team)] ?? normalizeFootballTeamKey(event.home_team))
     ])
   )).sort((left, right) => left.length - right.length);
 
   const aliases = new Map<string, string>();
   for (const name of names) {
-    const shorterPrefix = names.find((candidate) =>
-      candidate !== name
-      && name.startsWith(`${candidate} `)
-      && candidate.length >= 4
-    );
-    aliases.set(name, shorterPrefix ?? name);
+    aliases.set(name, name);
   }
   return aliases;
 };
@@ -282,7 +445,8 @@ const hasCompleteMarket = (
   event: ParlayEvent,
   marketKey: MarketKey,
   requireStandardMlbRunline = false,
-  sport?: LocalSport
+  sport?: LocalSport,
+  batchAliases?: Map<string, string>
 ) => {
   if (!outcomes) {
     return false;
@@ -300,7 +464,7 @@ const hasCompleteMarket = (
 
   const teamMatches = (outcome: ParlayOutcome, team: string) =>
     outcome.name === team
-    || (sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(team));
+    || (sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases));
 
   const sides = [event.away_team, event.home_team].map((team) =>
     outcomes.find((outcome) =>
@@ -340,15 +504,15 @@ const median = (values: number[]) => {
     : sorted[middle];
 };
 
-const eventTeamOutcome = (outcomes: ParlayOutcome[], team: string, sport?: LocalSport) =>
+const eventTeamOutcome = (outcomes: ParlayOutcome[], team: string, sport?: LocalSport, batchAliases?: Map<string, string>) =>
   outcomes.find((outcome) =>
     outcome.name === team
-    || (sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(team))
+    || (sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases))
   );
 
-const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent, sport?: LocalSport) => {
-  const away = eventTeamOutcome(outcomes, event.away_team, sport);
-  const home = eventTeamOutcome(outcomes, event.home_team, sport);
+const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent, sport?: LocalSport, batchAliases?: Map<string, string>) => {
+  const away = eventTeamOutcome(outcomes, event.away_team, sport, batchAliases);
+  const home = eventTeamOutcome(outcomes, event.home_team, sport, batchAliases);
   if (typeof away?.price !== "number" || typeof home?.price !== "number") {
     return false;
   }
@@ -357,9 +521,15 @@ const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent, spor
   return impliedSum >= 0.94 && impliedSum <= 1.25;
 };
 
-const moneylineDeviation = (outcomes: ParlayOutcome[], event: ParlayEvent, consensus: Map<string, number>, sport?: LocalSport) => {
+const moneylineDeviation = (
+  outcomes: ParlayOutcome[],
+  event: ParlayEvent,
+  consensus: Map<string, number>,
+  sport?: LocalSport,
+  batchAliases?: Map<string, string>
+) => {
   return Math.max(...[event.away_team, event.home_team].map((team) => {
-    const outcome = eventTeamOutcome(outcomes, team, sport);
+    const outcome = eventTeamOutcome(outcomes, team, sport, batchAliases);
     const teamConsensus = consensus.get(team);
     if (typeof outcome?.price !== "number" || teamConsensus === undefined) {
       return Number.POSITIVE_INFINITY;
@@ -373,6 +543,133 @@ const eventStartKey = (commenceTime: string) => {
   date.setUTCMinutes(Math.floor(date.getUTCMinutes() / 5) * 5, 0, 0);
   return date.toISOString().replace(/[:.]/g, "");
 };
+
+const yyyyMmDd = (date: Date) => date.toISOString().slice(0, 10);
+
+const addDays = (date: string, days: number) => {
+  const copy = new Date(`${date}T00:00:00.000Z`);
+  copy.setUTCDate(copy.getUTCDate() + days);
+  return copy.toISOString().slice(0, 10);
+};
+
+const espnFootballLeagueForSport = (sport: "NFL" | "NCAAF") => sport === "NCAAF" ? "college-football" : "nfl";
+
+const fetchEspnFootballSchedule = async (
+  sport: "NFL" | "NCAAF",
+  eventGroups: ParlayEvent[][]
+): Promise<CanonicalFootballEvent[]> => {
+  const timestamps = eventGroups
+    .flat()
+    .map((event) => new Date(event.commence_time).getTime())
+    .filter(Number.isFinite);
+  if (!timestamps.length) {
+    return [];
+  }
+
+  // ESPN's football scoreboard rejects multi-day date ranges. Fetch only the
+  // distinct event dates (plus adjacent dates for timezone tolerance) and
+  // combine them before canonical matching.
+  const dates = [...new Set(timestamps.flatMap((timestamp) => {
+    const date = yyyyMmDd(new Date(timestamp));
+    return [addDays(date, -1), date, addDays(date, 1)];
+  }))].sort();
+  const bodies = await Promise.all(dates.map(async (date) => {
+    const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${espnFootballLeagueForSport(sport)}/scoreboard`);
+    url.searchParams.set("limit", "500");
+    url.searchParams.set("dates", date.replace(/-/g, ""));
+    const response = await fetch(url, {
+      headers: {
+        accept: "*/*",
+        "user-agent": "curl/8.0.1"
+      }
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`ESPN football schedule ${sport} ${date} failed with ${response.status}: ${body.slice(0, 200)}`);
+    }
+    return (await response.json()) as EspnFootballScoreboardResponse;
+  }));
+
+  const events = [...new Map(
+    bodies.flatMap((body) => body.events ?? []).map((event) => [event.id, event])
+  ).values()];
+  return events.flatMap((event) => {
+    const competition = event.competitions?.[0];
+    const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+    const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+    const awayTeam = away?.team?.displayName ?? away?.team?.name ?? away?.team?.shortDisplayName ?? away?.team?.abbreviation;
+    const homeTeam = home?.team?.displayName ?? home?.team?.name ?? home?.team?.shortDisplayName ?? home?.team?.abbreviation;
+    const startsAt = new Date(event.date);
+    if (!awayTeam || !homeTeam || Number.isNaN(startsAt.getTime())) {
+      return [];
+    }
+    return [{
+      id: event.id,
+      startsAt: startsAt.toISOString(),
+      awayTeam: sport === "NCAAF" ? ncaafDisplayName(awayTeam) : awayTeam,
+      homeTeam: sport === "NCAAF" ? ncaafDisplayName(homeTeam) : homeTeam
+    }];
+  });
+};
+
+const canonicalFootballEventFor = (
+  event: ParlayEvent,
+  sport: "NFL" | "NCAAF",
+  schedule: CanonicalFootballEvent[] | undefined
+) => {
+  if (!schedule?.length) {
+    return null;
+  }
+
+  const eventTime = new Date(event.commence_time).getTime();
+  if (!Number.isFinite(eventTime)) {
+    return null;
+  }
+
+  const awayKey = sport === "NCAAF" ? ncaafTeamKey(event.away_team) : normalizeFootballTeamKey(event.away_team);
+  const homeKey = sport === "NCAAF" ? ncaafTeamKey(event.home_team) : normalizeFootballTeamKey(event.home_team);
+  const matches = schedule.flatMap((scheduled) => {
+    const scheduledAwayKey = sport === "NCAAF" ? ncaafTeamKey(scheduled.awayTeam) : normalizeFootballTeamKey(scheduled.awayTeam);
+    const scheduledHomeKey = sport === "NCAAF" ? ncaafTeamKey(scheduled.homeTeam) : normalizeFootballTeamKey(scheduled.homeTeam);
+    const timeDiffMinutes = Math.abs(new Date(scheduled.startsAt).getTime() - eventTime) / 60000;
+    if (timeDiffMinutes > 90) {
+      return [];
+    }
+    if (awayKey === scheduledAwayKey && homeKey === scheduledHomeKey) {
+      return [{ scheduled, score: timeDiffMinutes }];
+    }
+    if (awayKey === scheduledHomeKey && homeKey === scheduledAwayKey) {
+      return [{ scheduled, score: timeDiffMinutes + 30 }];
+    }
+    return [];
+  });
+
+  return matches.sort((left, right) => left.score - right.score)[0]?.scheduled ?? null;
+};
+
+const applyCanonicalFootballEvent = (
+  event: ParlayEvent,
+  sport: LocalSport | undefined,
+  schedule: CanonicalFootballEvent[] | undefined
+) => {
+  if (sport !== "NFL" && sport !== "NCAAF") {
+    return event;
+  }
+  const canonical = canonicalFootballEventFor(event, sport, schedule);
+  if (!canonical) {
+    return event;
+  }
+  return {
+    ...event,
+    canonical_event_id: `espn:${canonical.id}`,
+    commence_time: canonical.startsAt,
+    away_team: canonical.awayTeam,
+    home_team: canonical.homeTeam
+  };
+};
+
+const canonicalRequiredForSport = (sport: LocalSport | undefined, schedule: CanonicalFootballEvent[] | undefined) =>
+  sport === "NCAAF" && Boolean(schedule?.length);
 
 const eventIdentity = (event: ParlayEvent, sport?: LocalSport, batchAliases?: Map<string, string>) => {
   if (sport === "NFL" || sport === "NCAAF") {
@@ -392,32 +689,36 @@ const eventMergeKey = (event: ParlayEvent, sport?: LocalSport, batchAliases?: Ma
   return eventIdentity(event, sport, batchAliases);
 };
 
-const mergeEvents = (eventGroups: ParlayEvent[][], sport?: LocalSport) => {
+const mergeEvents = (eventGroups: ParlayEvent[][], sport?: LocalSport, schedule?: CanonicalFootballEvent[]) => {
   const merged = new Map<string, ParlayEvent>();
   const batchAliases = sport === "NCAAF" ? buildNcaafBatchAliases(eventGroups) : undefined;
 
   for (const events of eventGroups) {
     for (const event of events) {
-      const key = eventMergeKey(event, sport, batchAliases);
+      if (canonicalRequiredForSport(sport, schedule) && !canonicalFootballEventFor(event, "NCAAF", schedule)) {
+        continue;
+      }
+      const canonicalEvent = applyCanonicalFootballEvent(event, sport, schedule);
+      const key = eventMergeKey(canonicalEvent, sport, batchAliases);
       const existing = merged.get(key);
       if (!existing) {
-        merged.set(key, { ...event, bookmakers: [...(event.bookmakers ?? [])] });
+        merged.set(key, { ...canonicalEvent, bookmakers: [...(canonicalEvent.bookmakers ?? [])] });
         continue;
       }
 
-      if (new Date(event.commence_time).getTime() < new Date(existing.commence_time).getTime()) {
-        existing.commence_time = event.commence_time;
+      if (new Date(canonicalEvent.commence_time).getTime() < new Date(existing.commence_time).getTime()) {
+        existing.commence_time = canonicalEvent.commence_time;
       }
 
       const bookmakerMap = new Map((existing.bookmakers ?? []).map((bookmaker) => [bookmaker.key, bookmaker]));
-      for (const bookmaker of event.bookmakers ?? []) {
+      for (const bookmaker of canonicalEvent.bookmakers ?? []) {
         bookmakerMap.set(bookmaker.key, bookmaker);
       }
       existing.bookmakers = [...bookmakerMap.values()];
     }
   }
 
-  return [...merged.values()];
+  return { events: [...merged.values()], batchAliases };
 };
 
 const findPreferredMarket = (
@@ -426,23 +727,24 @@ const findPreferredMarket = (
   bookmakerPriority: string[],
   requireStandardMlbRunline = false,
   requireTwoWayH2hHold = true,
-  sport?: LocalSport
+  sport?: LocalSport,
+  batchAliases?: Map<string, string>
 ) => {
   const completeMarkets = (event.bookmakers ?? []).flatMap((bookmaker) => {
     const market = bookmaker.markets.find((item) => item.key === marketKey);
     const outcomes = market?.outcomes.filter((outcome) => typeof outcome.price === "number") ?? [];
-    return hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport)
+    return hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport, batchAliases)
       ? [{ bookmaker, outcomes }]
       : [];
   });
 
   if (marketKey === "h2h" && requireTwoWayH2hHold) {
-    const saneMarkets = completeMarkets.filter(({ outcomes }) => h2hHoldIsReasonable(outcomes, event, sport));
+    const saneMarkets = completeMarkets.filter(({ outcomes }) => h2hHoldIsReasonable(outcomes, event, sport, batchAliases));
     if (saneMarkets.length >= 2) {
       const consensus = new Map([event.away_team, event.home_team].map((team) => [
         team,
         median(saneMarkets.map(({ outcomes }) => {
-          const outcome = eventTeamOutcome(outcomes, team, sport)!;
+          const outcome = eventTeamOutcome(outcomes, team, sport, batchAliases)!;
           return impliedProbability(outcome.price as number);
         }))
       ]));
@@ -451,9 +753,9 @@ const findPreferredMarket = (
         const rightIndex = bookmakerPriority.indexOf(right.bookmaker.key);
         return (leftIndex === -1 ? 999 : leftIndex) - (rightIndex === -1 ? 999 : rightIndex);
       });
-      const preferred = byPriority.find(({ outcomes }) => moneylineDeviation(outcomes, event, consensus, sport) <= 0.08);
+      const preferred = byPriority.find(({ outcomes }) => moneylineDeviation(outcomes, event, consensus, sport, batchAliases) <= 0.08);
       return preferred ?? saneMarkets.sort((left, right) =>
-        moneylineDeviation(left.outcomes, event, consensus, sport) - moneylineDeviation(right.outcomes, event, consensus, sport)
+        moneylineDeviation(left.outcomes, event, consensus, sport, batchAliases) - moneylineDeviation(right.outcomes, event, consensus, sport, batchAliases)
       )[0];
     }
 
@@ -468,7 +770,7 @@ const findPreferredMarket = (
     const bookmaker = event.bookmakers?.find((book) => book.key === key);
     const market = bookmaker?.markets.find((item) => item.key === marketKey);
     const outcomes = market?.outcomes.filter((outcome) => typeof outcome.price === "number") ?? [];
-    if (bookmaker && hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport)) {
+    if (bookmaker && hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport, batchAliases)) {
       return { bookmaker, outcomes };
     }
   }
@@ -476,7 +778,7 @@ const findPreferredMarket = (
   for (const bookmaker of event.bookmakers ?? []) {
     const market = bookmaker.markets.find((item) => item.key === marketKey);
     const outcomes = market?.outcomes.filter((outcome) => typeof outcome.price === "number") ?? [];
-    if (hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport)) {
+    if (hasCompleteMarket(outcomes, event, marketKey, requireStandardMlbRunline, sport, batchAliases)) {
       return { bookmaker, outcomes };
     }
   }
@@ -488,29 +790,30 @@ const normalizeSpreads = (
   event: ParlayEvent,
   bookmakerPriority: string[],
   sport: LocalSport,
-  requireStandardMlbRunline: boolean
+  requireStandardMlbRunline: boolean,
+  batchAliases?: Map<string, string>
 ): NormalizedLine[] => {
-  const spread = findPreferredMarket(event, "spreads", bookmakerPriority, requireStandardMlbRunline, true, sport);
+  const spread = findPreferredMarket(event, "spreads", bookmakerPriority, requireStandardMlbRunline, true, sport, batchAliases);
   if (!spread) {
     return [];
   }
-  const eventId = eventIdentity(event, sport);
-  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team) : event.away_team;
-  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team) : event.home_team;
+  const eventId = eventIdentity(event, sport, batchAliases);
+  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team, batchAliases) : event.away_team;
+  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team, batchAliases) : event.home_team;
 
   return spread.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
       (
         [event.home_team, event.away_team].includes(outcome.name)
-        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name) === ncaafTeamKey(team)))
+        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases)))
       )
       && typeof outcome.point === "number"
       && typeof outcome.price === "number"
     )
     .map((outcome) => {
-      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(awayTeam)
+      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(awayTeam, batchAliases)
         ? awayTeam
-        : sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(event.home_team)
+        : sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(event.home_team, batchAliases)
           ? homeTeam
           : outcome.name;
       return {
@@ -526,28 +829,33 @@ const normalizeSpreads = (
     });
 };
 
-const normalizeMoneylines = (event: ParlayEvent, bookmakerPriority: string[], sport: LocalSport): NormalizedLine[] => {
-  const moneyline = findPreferredMarket(event, "h2h", bookmakerPriority, false, !event.sport_key.startsWith("soccer_"), sport);
+const normalizeMoneylines = (
+  event: ParlayEvent,
+  bookmakerPriority: string[],
+  sport: LocalSport,
+  batchAliases?: Map<string, string>
+): NormalizedLine[] => {
+  const moneyline = findPreferredMarket(event, "h2h", bookmakerPriority, false, !event.sport_key.startsWith("soccer_"), sport, batchAliases);
   if (!moneyline) {
     return [];
   }
-  const eventId = eventIdentity(event, sport);
-  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team) : event.away_team;
-  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team) : event.home_team;
+  const eventId = eventIdentity(event, sport, batchAliases);
+  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team, batchAliases) : event.away_team;
+  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team, batchAliases) : event.home_team;
 
   return moneyline.outcomes
     .filter((outcome): outcome is PricedOutcome =>
       (
         [event.home_team, event.away_team].includes(outcome.name)
-        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name) === ncaafTeamKey(team)))
+        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases)))
         || (event.sport_key.startsWith("soccer_") && outcome.name === "Draw")
       )
       && typeof outcome.price === "number"
     )
     .map((outcome) => {
-      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(awayTeam)
+      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(awayTeam, batchAliases)
         ? awayTeam
-        : sport === "NCAAF" && ncaafTeamKey(outcome.name) === ncaafTeamKey(event.home_team)
+        : sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(event.home_team, batchAliases)
           ? homeTeam
           : outcome.name;
       return {
@@ -563,14 +871,19 @@ const normalizeMoneylines = (event: ParlayEvent, bookmakerPriority: string[], sp
     });
 };
 
-const normalizeTotals = (event: ParlayEvent, bookmakerPriority: string[], sport: LocalSport): NormalizedLine[] => {
-  const total = findPreferredMarket(event, "totals", bookmakerPriority, false, false, sport);
+const normalizeTotals = (
+  event: ParlayEvent,
+  bookmakerPriority: string[],
+  sport: LocalSport,
+  batchAliases?: Map<string, string>
+): NormalizedLine[] => {
+  const total = findPreferredMarket(event, "totals", bookmakerPriority, false, false, sport, batchAliases);
   if (!total) {
     return [];
   }
-  const eventId = eventIdentity(event, sport);
-  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team) : event.away_team;
-  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team) : event.home_team;
+  const eventId = eventIdentity(event, sport, batchAliases);
+  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team, batchAliases) : event.away_team;
+  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team, batchAliases) : event.home_team;
 
   return total.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
@@ -596,14 +909,15 @@ const normalizeMarkets = (
   includeMoneyline: boolean,
   includeTotals: boolean,
   bookmakerPriority: string[],
-  requireStandardMlbRunline = false
+  requireStandardMlbRunline = false,
+  batchAliases?: Map<string, string>
 ) => {
-  const lines = normalizeSpreads(event, bookmakerPriority, sport, requireStandardMlbRunline);
+  const lines = normalizeSpreads(event, bookmakerPriority, sport, requireStandardMlbRunline, batchAliases);
   if (includeMoneyline) {
-    lines.push(...normalizeMoneylines(event, bookmakerPriority, sport));
+    lines.push(...normalizeMoneylines(event, bookmakerPriority, sport, batchAliases));
   }
   if (includeTotals) {
-    lines.push(...normalizeTotals(event, bookmakerPriority, sport));
+    lines.push(...normalizeTotals(event, bookmakerPriority, sport, batchAliases));
   }
 
   return lines;
@@ -658,10 +972,16 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
       bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
     }
 
+    const schedule = sport === "NCAAF"
+      ? await fetchEspnFootballSchedule(sport, eventGroups)
+      : undefined;
+    const merged = mergeEvents(eventGroups, sport, schedule);
     return {
-      events: mergeEvents(eventGroups, sport),
+      events: merged.events,
       bookmakerPriority,
-      bookmakerFetches
+      bookmakerFetches,
+      batchAliases: merged.batchAliases,
+      scheduleEvents: schedule?.length ?? null
     };
   }
 
@@ -683,10 +1003,12 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
     bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
   }
 
+  const merged = mergeEvents(eventGroups, sport);
   return {
-    events: mergeEvents(eventGroups, sport),
+    events: merged.events,
     bookmakerPriority,
-    bookmakerFetches
+    bookmakerFetches,
+    batchAliases: merged.batchAliases
   };
 };
 
@@ -750,15 +1072,15 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
     }
 
     const isFootball = sport.local === "NFL" || sport.local === "NCAAF";
-    const includeMoneyline = sport.local === "MLB" || soccerSports.has(sport.local) || isFootball;
-    const includeTotals = sport.local === "MLB" || isFootball;
+    const includeMoneyline = sport.local === "MLB" || sport.local === "NHL" || soccerSports.has(sport.local) || isFootball;
+    const includeTotals = sport.local === "MLB" || sport.local === "NHL" || isFootball;
     const requestedMarkets: MarketKey[] = ["spreads"];
     if (includeMoneyline) requestedMarkets.push("h2h");
     if (includeTotals) requestedMarkets.push("totals");
     const fetched = await fetchMergedSportOdds(sport.local, sport.parlay, requestedMarkets);
     const events = fetched.events.filter((event) => isExpectedSportEvent(sport.local, event) && !isDerivativeSoccerEvent(event));
     const lines = events.flatMap((event) =>
-      normalizeMarkets(event, sport.local, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB")
+      normalizeMarkets(event, sport.local, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB", fetched.batchAliases)
     );
 
     await transaction(async (client) => {
@@ -803,7 +1125,7 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
 
     summary.imported += lines.length;
     summary.skippedEvents += events.filter((event) =>
-      normalizeMarkets(event, sport.local, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB").length === 0
+      normalizeMarkets(event, sport.local, includeMoneyline, includeTotals, fetched.bookmakerPriority, sport.local === "MLB", fetched.batchAliases).length === 0
     ).length;
     summary.sports.push({ sport: sport.local, events: events.length, imported: lines.length });
   }

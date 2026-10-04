@@ -17,6 +17,17 @@ export const currentWeekStart = (date = new Date()) => {
   return copy.toISOString().slice(0, 10);
 };
 
+export const nflSeasonWeek = (seasonStartsOn: string, date = new Date()) => {
+  const activeWeekStart = currentWeekStart(date);
+  if (activeWeekStart < seasonStartsOn) return 1;
+
+  const start = Date.parse(`${seasonStartsOn}T00:00:00Z`);
+  const current = Date.parse(`${activeWeekStart}T00:00:00Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(current)) return 1;
+
+  return Math.min(25, Math.max(1, Math.floor((current - start) / (7 * 24 * 60 * 60 * 1000)) + 1));
+};
+
 export const americanToDecimal = (american: number) => {
   if (american > 0) {
     return 1 + american / 100;

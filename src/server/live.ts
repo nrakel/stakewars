@@ -3,7 +3,7 @@ import { query, transaction } from "./db.js";
 import { sendLiveGameNotifications, type LiveStateChange } from "./liveNotifications.js";
 import type { SportKey } from "../shared/types.js";
 
-type LiveSport = "MLB" | "NCAAF" | "EPL" | "WORLDCUP";
+type LiveSport = "MLB" | "NHL" | "NFL" | "NCAAF" | "EPL" | "WORLDCUP";
 
 type ParlayLiveMatch = {
   match_id?: string | number;
@@ -177,12 +177,51 @@ type EspnFootballEvent = {
       homeAway?: "home" | "away";
       score?: string;
       team?: {
+        id?: string;
         displayName?: string;
         name?: string;
         shortDisplayName?: string;
       };
     }>;
+    situation?: {
+      down?: number;
+      distance?: number;
+      yardLine?: number;
+      downDistanceText?: string;
+      shortDownDistanceText?: string;
+      possessionText?: string;
+      possession?: string;
+      isRedZone?: boolean;
+      lastPlay?: {
+        id?: string;
+        text?: string;
+        statYardage?: number;
+        type?: {
+          id?: string;
+          text?: string;
+          abbreviation?: string;
+        };
+        team?: { id?: string };
+      };
+    };
   }>;
+};
+
+type EspnFootballSummary = {
+  boxscore?: {
+    players?: Array<{
+      team?: { displayName?: string; name?: string };
+      statistics?: Array<{
+        name?: string;
+        displayName?: string;
+        labels?: string[];
+        athletes?: Array<{
+          athlete?: { displayName?: string; fullName?: string };
+          stats?: Array<string | number>;
+        }>;
+      }>;
+    }>;
+  };
 };
 
 type MlbLiveFeed = {
@@ -250,6 +289,8 @@ export type LiveGameState = {
 
 const liveSports: Record<LiveSport, string> = {
   MLB: "baseball_mlb",
+  NHL: "icehockey_nhl",
+  NFL: "americanfootball_nfl",
   NCAAF: "americanfootball_ncaaf",
   EPL: "soccer_epl",
   WORLDCUP: "soccer_fifa_world_cup"
@@ -614,7 +655,7 @@ const normalizeEspnSoccerEvent = async (sport: Extract<LiveSport, "EPL" | "WORLD
   };
 };
 
-const normalizeEspnFootballEvent = async (sport: Extract<LiveSport, "NCAAF">, event: EspnFootballEvent): Promise<NormalizedLiveMatch | null> => {
+const normalizeEspnTeamEvent = async (sport: Extract<LiveSport, "NHL" | "NFL" | "NCAAF">, event: EspnFootballEvent): Promise<NormalizedLiveMatch | null> => {
   const competition = event.competitions?.[0];
   const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
   const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
@@ -628,6 +669,14 @@ const normalizeEspnFootballEvent = async (sport: Extract<LiveSport, "NCAAF">, ev
   const safeStartsAt = startsAt && Number.isFinite(startsAt.getTime()) ? startsAt : null;
   const status = event.status?.type;
   const isLive = status?.state === "in";
+  const situation = competition?.situation;
+  const teamsById = new Map(
+    (competition?.competitors ?? [])
+      .map((competitor) => [competitor.team?.id, firstString(competitor.team?.displayName, competitor.team?.name, competitor.team?.shortDisplayName)] as const)
+      .filter((entry): entry is [string, string] => Boolean(entry[0] && entry[1]))
+  );
+  const possessionTeam = situation?.possession ? teamsById.get(situation.possession) ?? null : null;
+  const footballSituation = sport === "NFL" || sport === "NCAAF";
 
   return {
     matchId: `espn:${sport.toLowerCase()}:${event.id}`,
@@ -641,8 +690,8 @@ const normalizeEspnFootballEvent = async (sport: Extract<LiveSport, "NCAAF">, ev
     homeScore: numberOrNull(home?.score),
     period: status?.shortDetail ?? status?.detail ?? null,
     gameStatus: status?.description ?? status?.detail ?? status?.name ?? null,
-    description: status?.detail ?? null,
-    lastPlay: null,
+    description: footballSituation ? situation?.downDistanceText ?? status?.detail ?? null : status?.detail ?? null,
+    lastPlay: footballSituation ? situation?.lastPlay?.text ?? null : null,
     batter: null,
     pitcher: null,
     balls: null,
@@ -653,7 +702,20 @@ const normalizeEspnFootballEvent = async (sport: Extract<LiveSport, "NCAAF">, ev
     batterAtBats: null,
     inPlay: isLive,
     lastEventAt: isLive ? new Date() : null,
-    bases: {},
+    bases: footballSituation ? {
+      possessionTeam,
+      downDistance: situation?.shortDownDistanceText ?? null,
+      downDistanceText: situation?.downDistanceText ?? null,
+      fieldPosition: situation?.possessionText ?? null,
+      down: situation?.down ?? null,
+      distance: situation?.distance ?? null,
+      yardLine: situation?.yardLine ?? null,
+      isRedZone: situation?.isRedZone ?? false,
+      lastPlayId: situation?.lastPlay?.id ?? null,
+      lastPlayType: situation?.lastPlay?.type?.text ?? situation?.lastPlay?.type?.abbreviation ?? null,
+      lastPlayYards: situation?.lastPlay?.statYardage ?? null,
+      lastPlayTeam: situation?.lastPlay?.team?.id ? teamsById.get(situation.lastPlay.team.id) ?? null : null
+    } : {},
     payload: event
   };
 };
@@ -803,8 +865,9 @@ const fetchEspnSoccerLive = async (sport: Extract<LiveSport, "EPL" | "WORLDCUP">
   return body.events ?? [];
 };
 
-const fetchEspnFootballLive = async (sport: Extract<LiveSport, "NCAAF">) => {
-  const url = new URL("https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard");
+const fetchEspnFootballLive = async (sport: Extract<LiveSport, "NFL" | "NCAAF">) => {
+  const league = sport === "NFL" ? "nfl" : "college-football";
+  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${league}/scoreboard`);
   url.searchParams.set("limit", "300");
   url.searchParams.set("dates", centralDate().replace(/-/g, ""));
 
@@ -816,6 +879,99 @@ const fetchEspnFootballLive = async (sport: Extract<LiveSport, "NCAAF">) => {
 
   const body = await response.json() as { events?: EspnFootballEvent[] };
   return body.events ?? [];
+};
+
+const fetchEspnNhlLive = async () => {
+  const url = new URL("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard");
+  url.searchParams.set("limit", "100");
+  url.searchParams.set("dates", centralDate().replace(/-/g, ""));
+
+  const response = await fetch(url, { headers: espnFetchHeaders });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`ESPN NHL live failed with ${response.status}: ${body.slice(0, 240)}`);
+  }
+
+  const body = await response.json() as { events?: EspnFootballEvent[] };
+  return body.events ?? [];
+};
+
+const footballBoxScoreGroups = new Set(["passing", "rushing", "receiving", "defensive", "interceptions", "kicking"]);
+
+export const getEspnFootballBoxScore = async (sport: "NFL" | "NCAAF", matchId: string) => {
+  const eventId = matchId.match(/^espn:(?:nfl|ncaaf):(\d+)$/)?.[1];
+  if (!eventId) {
+    throw new Error("Invalid football match ID");
+  }
+  const league = sport === "NFL" ? "nfl" : "college-football";
+  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${league}/summary`);
+  url.searchParams.set("event", eventId);
+  const response = await fetch(url, { headers: espnFetchHeaders });
+  if (!response.ok) {
+    throw new Error(`ESPN football box score failed with ${response.status}`);
+  }
+  const body = await response.json() as EspnFootballSummary;
+  return {
+    matchId,
+    teams: (body.boxscore?.players ?? []).map((team) => ({
+      team: firstString(team.team?.displayName, team.team?.name) ?? "Team",
+      groups: (team.statistics ?? [])
+        .filter((group) => group.name && footballBoxScoreGroups.has(group.name))
+        .map((group) => ({
+          key: group.name!,
+          label: group.displayName ?? group.name!,
+          columns: group.labels ?? [],
+          players: (group.athletes ?? []).map((row) => ({
+            player: firstString(row.athlete?.displayName, row.athlete?.fullName) ?? "Player",
+            stats: (row.stats ?? []).map(String)
+          }))
+        }))
+        .filter((group) => group.players.length > 0)
+    }))
+  };
+};
+
+const nhlStatColumns: Record<string, string[]> = {
+  forwards: ["G", "A", "S", "+/-", "TOI", "HT", "BS", "PIM"],
+  defenses: ["G", "A", "S", "+/-", "TOI", "HT", "BS", "PIM"],
+  goalies: ["GA", "SA", "SV", "SV%", "TOI"]
+};
+
+export const getEspnNhlBoxScore = async (matchId: string) => {
+  const eventId = matchId.match(/^espn:nhl:(\d+)$/)?.[1];
+  if (!eventId) {
+    throw new Error("Invalid NHL match ID");
+  }
+  const url = new URL("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/summary");
+  url.searchParams.set("event", eventId);
+  const response = await fetch(url, { headers: espnFetchHeaders });
+  if (!response.ok) {
+    throw new Error(`ESPN NHL box score failed with ${response.status}`);
+  }
+  const body = await response.json() as EspnFootballSummary;
+  return {
+    matchId,
+    teams: (body.boxscore?.players ?? []).map((team) => ({
+      team: firstString(team.team?.displayName, team.team?.name) ?? "Team",
+      groups: (team.statistics ?? [])
+        .filter((group) => group.name && nhlStatColumns[group.name])
+        .map((group) => {
+          const labels = group.labels ?? [];
+          const columns = nhlStatColumns[group.name!].filter((column) => labels.includes(column));
+          const indexes = columns.map((column) => labels.indexOf(column));
+          return {
+            key: group.name!,
+            label: group.name === "goalies" ? "Goalies" : group.name === "defenses" ? "Defense" : "Forwards",
+            columns,
+            players: (group.athletes ?? []).map((row) => ({
+              player: firstString(row.athlete?.displayName, row.athlete?.fullName) ?? "Player",
+              stats: indexes.map((index) => String(row.stats?.[index] ?? "-"))
+            }))
+          };
+        })
+        .filter((group) => group.players.length > 0)
+    }))
+  };
 };
 
 const isNearLiveWindow = (match: NormalizedLiveMatch) => {
@@ -1047,16 +1203,21 @@ const refreshLiveSport = async (sport: LiveSport) => {
     ? (await Promise.all(soccerEvents.map((event) => normalizeEspnSoccerEvent(sport, event))))
       .filter((match): match is NonNullable<typeof match> => Boolean(match))
     : [];
-  const footballEvents = sport === "NCAAF" ? await fetchEspnFootballLive(sport) : [];
-  const footballNormalized = sport === "NCAAF"
-    ? (await Promise.all(footballEvents.map((event) => normalizeEspnFootballEvent(sport, event))))
+  const footballEvents = sport === "NFL" || sport === "NCAAF" ? await fetchEspnFootballLive(sport) : [];
+  const footballNormalized = sport === "NFL" || sport === "NCAAF"
+    ? (await Promise.all(footballEvents.map((event) => normalizeEspnTeamEvent(sport, event))))
       .filter((match): match is NonNullable<typeof match> => Boolean(match))
     : [];
-  const primaryNormalized = [...mlbNormalized, ...soccerNormalized, ...footballNormalized];
+  const nhlEvents = sport === "NHL" ? await fetchEspnNhlLive() : [];
+  const nhlNormalized = sport === "NHL"
+    ? (await Promise.all(nhlEvents.map((event) => normalizeEspnTeamEvent("NHL", event))))
+      .filter((match): match is NonNullable<typeof match> => Boolean(match))
+    : [];
+  const primaryNormalized = [...mlbNormalized, ...soccerNormalized, ...footballNormalized, ...nhlNormalized];
 
   let matches: ParlayLiveMatch[] = [];
   let liveEvents: ParlayLiveEvent[] = [];
-  if (sport !== "NCAAF" && shouldFetchParlayLive(primaryNormalized)) {
+  if (sport !== "NFL" && sport !== "NCAAF" && shouldFetchParlayLive(primaryNormalized)) {
     matches = await fetchLivePoints(sport);
     liveEvents = await fetchParlayLiveEvents(sport);
   }
@@ -1084,6 +1245,7 @@ const refreshLiveSport = async (sport: LiveSport) => {
     mlbFetched: mlbGames.length,
     soccerFetched: soccerEvents.length,
     footballFetched: footballEvents.length,
+    nhlFetched: nhlEvents.length,
     imported: normalized.length,
     recent,
     notifications: notifications.length
@@ -1102,6 +1264,7 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
     mlbFetched: results.reduce((sum, result) => sum + result.mlbFetched, 0),
     soccerFetched: results.reduce((sum, result) => sum + result.soccerFetched, 0),
     footballFetched: results.reduce((sum, result) => sum + result.footballFetched, 0),
+    nhlFetched: results.reduce((sum, result) => sum + result.nhlFetched, 0),
     imported: results.reduce((sum, result) => sum + result.imported, 0),
     recent: results.reduce((sum, result) => sum + result.recent, 0),
     notifications: results.reduce((sum, result) => sum + result.notifications, 0)
@@ -1110,7 +1273,7 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
 
 export const refreshLiveMlb = async () => refreshLiveSports(["MLB"]);
 
-export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NCAAF"]);
+export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NHL", "NFL", "NCAAF"]);
 
 export const getLiveStates = async (sport: SportKey) => {
   const result = await query<{
@@ -1158,7 +1321,7 @@ export const getLiveStates = async (sport: SportKey) => {
         WHERE sport = $1
           AND (
             ($1 = 'MLB' AND provider = 'mlb-stats-api')
-            OR ($1 IN ('NCAAF', 'EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
+            OR ($1 IN ('NHL', 'NFL', 'NCAAF', 'EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
           )
           AND in_play = true
           AND (

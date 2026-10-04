@@ -1,13 +1,13 @@
 import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Star, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { DailyAiPick, DailyChineParlay, DailyChineParlayLeg, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
+import type { ChineNflWeeklyPicksState, DailyAiPick, DailyChineParlay, DailyChineParlayLeg, FootballBoxScore, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SportKey, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "ai-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "nfl-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
 type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "rewards" | "model" | "podcast" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
@@ -19,6 +19,7 @@ const appPages = new Set<AppPage>([
   "lines",
   "scoreboard",
   "ai-picks",
+  "nfl-picks",
   "survivor",
   "nfl-confidence",
   "tower",
@@ -108,6 +109,15 @@ type PushPreferences = {
   scoreChangeEnabled: boolean;
   gameFinalEnabled: boolean;
 };
+
+type ScoreFavorite = {
+  sport: "MLB" | "NFL" | "NHL" | "NCAAF";
+  eventKey: string;
+};
+
+const scoreFavoriteKey = (sport: string, eventKey: string) => `${sport}:${eventKey}`;
+const supportsScoreFavorites = (sport: SportKey): sport is ScoreFavorite["sport"] =>
+  sport === "MLB" || sport === "NFL" || sport === "NHL" || sport === "NCAAF";
 
 type RedditStatus = {
   configured: boolean;
@@ -426,6 +436,8 @@ type ChineModelAudit = {
   generatedAt: string;
   since: string | null;
   through: string | null;
+  sport: string | null;
+  availableSports: SportKey[];
   summary: ChineModelAuditGroup[];
   confidenceBuckets: ChineModelAuditGroup[];
   markets: ChineModelAuditGroup[];
@@ -455,6 +467,13 @@ const isVerificationRequiredResponse = (value: unknown): value is VerificationRe
   );
 
 const money = (cents: number) => `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2 })}`;
+const contestPoolSourceLabel = (pool: { registeredPlayers: number; prizePoolCents: number; uncappedPrizePoolCents: number; prizePoolCapCents: number }) => {
+  const playerLabel = `registered player${pool.registeredPlayers === 1 ? "" : "s"}`;
+  const capLabel = pool.uncappedPrizePoolCents > pool.prizePoolCents
+    ? `, capped at ${money(pool.prizePoolCapCents)}`
+    : "";
+  return `${pool.registeredPlayers} ${playerLabel} x $30${capLabel}.`;
+};
 const shortDateTime = (value: string) => new Date(value).toLocaleString(undefined, {
   month: "short",
   day: "numeric",
@@ -1045,6 +1064,7 @@ const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: S
   if (page === "contact") return "Contact Us";
   if (page === "install") return "Install App";
   if (page === "ai-picks") return "Daily Chine Picks";
+  if (page === "nfl-picks") return "NFL Picks";
   if (page === "survivor") return "NFL Survivor";
   if (page === "nfl-confidence") return "NFL Confidence";
   if (page === "tower") return "Tower";
@@ -1059,6 +1079,70 @@ const BaseDiamond = ({ game }: { game: LiveGameState }) => (
     <span className={`base-marker second ${baseOccupied(game, "onSecond") ? "occupied" : ""}`} title={baseOccupied(game, "onSecond") ? `2B: ${game.bases.onSecond}` : "2B empty"} />
     <span className={`base-marker third ${baseOccupied(game, "onThird") ? "occupied" : ""}`} title={baseOccupied(game, "onThird") ? `3B: ${game.bases.onThird}` : "3B empty"} />
     <span className={`base-marker first ${baseOccupied(game, "onFirst") ? "occupied" : ""}`} title={baseOccupied(game, "onFirst") ? `1B: ${game.bases.onFirst}` : "1B empty"} />
+  </div>
+);
+
+const footballSituationValue = (game: LiveGameState, key: string) => {
+  const value = game.bases?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+};
+
+const FootballSituation = ({ game }: { game: LiveGameState }) => {
+  const downDistance = footballSituationValue(game, "downDistance");
+  const fieldPosition = footballSituationValue(game, "fieldPosition");
+  if (!downDistance && !fieldPosition) return null;
+  return (
+    <div className="football-situation">
+      <span>{[downDistance, fieldPosition].filter(Boolean).join(" ")}</span>
+    </div>
+  );
+};
+
+const FootballTeamLabel = ({ game, team }: { game: LiveGameState; team: string }) => {
+  const hasPossession = footballSituationValue(game, "possessionTeam") === team;
+  const isRedZone = hasPossession && game.bases?.isRedZone === true;
+  return (
+    <span className="football-team-label">
+      {hasPossession && (
+        <ArrowRight
+          aria-label={`${team} has possession${isRedZone ? " in the red zone" : ""}`}
+          className={`possession-arrow ${isRedZone ? "red-zone" : ""}`}
+          size={17}
+          strokeWidth={3}
+        />
+      )}
+      <span>{team}</span>
+    </span>
+  );
+};
+
+const FootballBoxScorePanel = ({ boxScore }: { boxScore: FootballBoxScore }) => (
+  <div className="football-box-score">
+    {boxScore.teams.map((team) => (
+      <section key={team.team} className="football-box-team">
+        <h3>{team.team}</h3>
+        {team.groups.map((group) => (
+          <div key={group.key} className="football-stat-group">
+            <h4>{group.label}</h4>
+            <div className="football-stat-scroll">
+              <table>
+                <thead>
+                  <tr><th>Player</th>{group.columns.map((column) => <th key={column}>{column}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {group.players.map((player) => (
+                    <tr key={`${group.key}:${player.player}`}>
+                      <td>{player.player}</td>
+                      {group.columns.map((column, index) => <td key={`${column}:${index}`}>{player.stats[index] ?? "-"}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </section>
+    ))}
   </div>
 );
 
@@ -1203,12 +1287,12 @@ function RulesContent() {
         <h2>NFL Survivor</h2>
         <p>NFL Survivor is independent from the weekly StakeWars bankroll contest. Each active player may pick one NFL team per week. If that team wins, the player advances. If that team loses, ties, or the player misses the weekly pick, the player is eliminated.</p>
         <p>A team can only be used once per Survivor pool. Picks may be changed until that selected team's kickoff, then they lock. Other players' current-week picks stay hidden until kickoff.</p>
-        <p>The Survivor prize pool is $30 per registered Survivor player.</p>
+        <p>The Survivor prize pool is $30 per registered Survivor player, capped at $1,000.</p>
       </section>
       <section id="nfl-confidence-rules">
         <h2>NFL Confidence</h2>
         <p>NFL Confidence is independent from the weekly StakeWars bankroll contest. Each active player picks the winner of every NFL game for the week, then assigns each pick a unique confidence value. Correct picks earn the assigned confidence points. Incorrect picks earn zero points.</p>
-        <p>The NFL Confidence season-long prize pool is $30 per registered NFL Confidence player and is paid 60%, 25%, and 15% to first, second, and third place. Weekly prizes are awarded after the conclusion of Monday Night Football. Ties at the top roll over the weekly prize. Season-long prizes are awarded after the NFL regular season based on total confidence points.</p>
+        <p>The NFL Confidence season-long prize pool is $30 per registered NFL Confidence player, capped at $3,000, and is paid 60%, 25%, and 15% to first, second, and third place. Weekly prizes are awarded after the conclusion of Monday Night Football. Ties at the top roll over the weekly prize. Season-long prizes are awarded after the NFL regular season based on total confidence points.</p>
         <p>If a player misses the Thursday game pick, that game is scored as a loss and confidence value 5 is removed from that player's available values. If a player does not make picks before the first Sunday kickoff, the week is locked with no points awarded.</p>
       </section>
       <section>
@@ -1341,6 +1425,11 @@ function AuthPanel({
   const [password, setPassword] = useState("");
   const [recoveryToken, setRecoveryToken] = useState("");
   const [recoveryPassword, setRecoveryPassword] = useState("");
+  const [passwordResetRequested, setPasswordResetRequested] = useState(false);
+  const [passwordResetIdentifier, setPasswordResetIdentifier] = useState("");
+  const [passwordResetToken, setPasswordResetToken] = useState("");
+  const [passwordResetPassword, setPasswordResetPassword] = useState("");
+  const [passwordResetConfirmation, setPasswordResetConfirmation] = useState("");
   const [verificationUserId, setVerificationUserId] = useState("");
   const [verificationEmail, setVerificationEmail] = useState("");
   const [error, setError] = useState("");
@@ -1364,6 +1453,11 @@ function AuthPanel({
     setVerificationEmail("");
     setRecoveryToken("");
     setRecoveryPassword("");
+    setPasswordResetRequested(false);
+    setPasswordResetIdentifier("");
+    setPasswordResetToken("");
+    setPasswordResetPassword("");
+    setPasswordResetConfirmation("");
   };
 
   useEffect(() => {
@@ -1372,6 +1466,16 @@ function AuthPanel({
     const authToken = params.get("authToken");
     const emailVerificationToken = params.get("verifyEmail");
     const emailRecoveryToken = params.get("emailRecovery");
+    const resetPasswordToken = params.get("resetPassword");
+    if (resetPasswordToken) {
+      setMode("login");
+      setPasswordResetToken(resetPasswordToken);
+      setAuthNotice("Choose a new password for your StakeWars account.");
+      params.delete("resetPassword");
+      const nextSearch = params.toString();
+      window.history.replaceState({}, "", `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`);
+      return;
+    }
     if (emailRecoveryToken) {
       setMode("login");
       setRecoveryToken(emailRecoveryToken);
@@ -1501,12 +1605,51 @@ function AuthPanel({
     }
   };
 
+  const requestPasswordReset = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setAuthNotice("");
+    try {
+      await api<{ accepted: true }>("/auth/request-password-reset", {
+        method: "POST",
+        body: JSON.stringify({ identifier: passwordResetIdentifier })
+      });
+      setAuthNotice("If that account has an email address, a password reset link has been sent. The link expires in 30 minutes.");
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  const submitPasswordReset = async (event: FormEvent) => {
+    event.preventDefault();
+    setError("");
+    setAuthNotice("");
+    if (passwordResetPassword !== passwordResetConfirmation) {
+      setError("Passwords do not match.");
+      return;
+    }
+    try {
+      const result = await api<{ token: string; user: SessionUser }>("/auth/reset-password", {
+        method: "POST",
+        body: JSON.stringify({ token: passwordResetToken, password: passwordResetPassword })
+      });
+      localStorage.setItem("stakewars_token", result.token);
+      onAuth(result.token, result.user);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
   return (
     <section className="auth-shell">
       <div className="brand-panel">
         <img className="hero-logo" src="/images/sw-hero.png" alt="StakeWars" />
       </div>
-      <form className="auth-card" onSubmit={recoveryToken ? submitEmailRecovery : submit} autoComplete="on">
+      <form
+        className="auth-card"
+        onSubmit={passwordResetToken ? submitPasswordReset : passwordResetRequested ? requestPasswordReset : recoveryToken ? submitEmailRecovery : submit}
+        autoComplete="on"
+      >
         <div className="auth-heading">
           <img className="auth-logo" src="/icons/icon-192.png" alt="" />
           <div>
@@ -1533,15 +1676,48 @@ function AuthPanel({
             </button>
           </div>
         </div>
-        <div className="segmented">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>
-            <Lock size={16} /> Login
-          </button>
-          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>
-            <UserPlus size={16} /> Register
-          </button>
-        </div>
-        {recoveryToken ? (
+        {!recoveryToken && !passwordResetRequested && !passwordResetToken && (
+          <div className="segmented">
+            <button type="button" className={mode === "login" ? "active" : ""} onClick={() => switchMode("login")}>
+              <Lock size={16} /> Login
+            </button>
+            <button type="button" className={mode === "register" ? "active" : ""} onClick={() => switchMode("register")}>
+              <UserPlus size={16} /> Register
+            </button>
+          </div>
+        )}
+        {passwordResetToken ? (
+          <>
+            <div className="notification-card">
+              <div>
+                <strong>Reset password</strong>
+                <span>Enter a new password. Other signed-in sessions will be invalidated.</span>
+              </div>
+            </div>
+            <label>
+              New password
+              <input type="password" autoComplete="new-password" value={passwordResetPassword} onChange={(event) => setPasswordResetPassword(event.target.value)} minLength={10} required />
+            </label>
+            <label>
+              Confirm new password
+              <input type="password" autoComplete="new-password" value={passwordResetConfirmation} onChange={(event) => setPasswordResetConfirmation(event.target.value)} minLength={10} required />
+            </label>
+            <p className="hint">Minimum 10 characters with uppercase, lowercase, number, and symbol.</p>
+          </>
+        ) : passwordResetRequested ? (
+          <>
+            <div className="notification-card">
+              <div>
+                <strong>Forgot password</strong>
+                <span>Enter your username or email address. We will email a reset link if the account has an email address.</span>
+              </div>
+            </div>
+            <label>
+              Username or email
+              <input autoComplete="username" autoCapitalize="none" autoCorrect="off" value={passwordResetIdentifier} onChange={(event) => setPasswordResetIdentifier(event.target.value)} minLength={3} maxLength={254} required />
+            </label>
+          </>
+        ) : recoveryToken ? (
           <>
             <div className="notification-card">
               <div>
@@ -1639,12 +1815,29 @@ function AuthPanel({
         )}
         {authNotice && <p className="success">{authNotice}</p>}
         {error && <p className="error">{error}</p>}
-        {recoveryToken ? (
+        {passwordResetToken ? (
+          <button className="primary" type="submit">Reset password</button>
+        ) : passwordResetRequested ? (
+          <>
+            <button className="primary" type="submit">Send reset link</button>
+            <button className="secondary-action" type="button" onClick={() => switchMode("login")}>Back to login</button>
+          </>
+        ) : recoveryToken ? (
           <button className="primary" type="submit">Recover account</button>
         ) : verificationUserId ? (
           <button className="primary" type="button" onClick={() => switchMode("login")}>Back to login</button>
         ) : (
           <button className="primary" type="submit">{mode === "login" ? "Login" : "Create account"}</button>
+        )}
+        {mode === "login" && !verificationUserId && !recoveryToken && !passwordResetToken && !passwordResetRequested && (
+          <button className="secondary-action" type="button" onClick={() => {
+            setError("");
+            setAuthNotice("");
+            setPasswordResetIdentifier(username);
+            setPasswordResetRequested(true);
+          }}>
+            Forgot password?
+          </button>
         )}
         {verificationUserId && (
           <button className="secondary-action" type="button" onClick={resendVerificationLink}>
@@ -1709,10 +1902,17 @@ function App() {
   const [nflConfidenceLeaderboard, setNflConfidenceLeaderboard] = useState<NflConfidenceLeaderboard | null>(null);
   const [survivorLeaderboard, setSurvivorLeaderboard] = useState<SurvivorLeaderboard | null>(null);
   const [liveGames, setLiveGames] = useState<LiveGameState[]>([]);
+  const [footballBoxScores, setFootballBoxScores] = useState<Record<string, FootballBoxScore>>({});
+  const [footballBoxScoreLoading, setFootballBoxScoreLoading] = useState<Record<string, boolean>>({});
+  const [footballBoxScoreErrors, setFootballBoxScoreErrors] = useState<Record<string, string>>({});
   const [openBets, setOpenBets] = useState<OpenBet[]>([]);
   const [historyBets, setHistoryBets] = useState<SettledBet[]>([]);
   const [aiPicks, setAiPicks] = useState<DailyAiPick[]>([]);
   const [dailyChineParlay, setDailyChineParlay] = useState<DailyChineParlay | null>(null);
+  const [chineNflPicks, setChineNflPicks] = useState<ChineNflWeeklyPicksState | null>(null);
+  const [chineNflPicksWeek, setChineNflPicksWeek] = useState<number | null>(null);
+  const [chineNflPicksNotice, setChineNflPicksNotice] = useState("");
+  const [chineNflPicksPending, setChineNflPicksPending] = useState(false);
   const [survivorState, setSurvivorState] = useState<SurvivorState | null>(null);
   const [survivorNotice, setSurvivorNotice] = useState("");
   const [survivorPending, setSurvivorPending] = useState(false);
@@ -1783,6 +1983,9 @@ function App() {
     scoreChangeEnabled: false,
     gameFinalEnabled: false
   });
+  const [scoreFavorites, setScoreFavorites] = useState<Set<string>>(() => new Set());
+  const [scoreFavoritePending, setScoreFavoritePending] = useState<Set<string>>(() => new Set());
+  const [scoreFavoriteNotice, setScoreFavoriteNotice] = useState("");
   const [adminSection, setAdminSection] = useState<AdminSection>("traffic");
   const [redditStatus, setRedditStatus] = useState<RedditStatus | null>(null);
   const [redditSubreddit, setRedditSubreddit] = useState("");
@@ -1819,6 +2022,7 @@ function App() {
   const [adminRewardFulfillmentMessages, setAdminRewardFulfillmentMessages] = useState<Record<string, string>>({});
   const [adminRewardFulfillmentSavingId, setAdminRewardFulfillmentSavingId] = useState<string | null>(null);
   const [chineModelAudit, setChineModelAudit] = useState<ChineModelAudit | null>(null);
+  const [chineModelAuditSport, setChineModelAuditSport] = useState<"ALL" | SportKey>("ALL");
   const [chineModelAuditNotice, setChineModelAuditNotice] = useState("");
   const [podcastDate, setPodcastDate] = useState(() => centralDate());
   const [podcastNotice, setPodcastNotice] = useState("");
@@ -1861,11 +2065,13 @@ function App() {
 
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
-    const [lineResult, boardResult, aiResult, liveMlbResult, liveEplResult, liveNcaafResult] = await Promise.all([
+    const [lineResult, boardResult, aiResult, liveMlbResult, liveNhlResult, liveNflResult, liveEplResult, liveNcaafResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
       api<LeaderboardResponse>(leaderboardPath, {}, authToken),
       api<{ picks: DailyAiPick[]; parlay: DailyChineParlay | null }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
+      api<{ games: LiveGameState[] }>("/live/nhl"),
+      api<{ games: LiveGameState[] }>("/live/nfl"),
       api<{ games: LiveGameState[] }>("/live/epl"),
       api<{ games: LiveGameState[] }>("/live/ncaaf")
     ]);
@@ -1911,16 +2117,17 @@ function App() {
     }
     setAiPicks(aiResult.picks);
     setDailyChineParlay(aiResult.parlay);
-    setLiveGames([...liveMlbResult.games, ...liveEplResult.games, ...liveNcaafResult.games]);
+    setLiveGames([...liveMlbResult.games, ...liveNhlResult.games, ...liveNflResult.games, ...liveEplResult.games, ...liveNcaafResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult, scoreFavoriteResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
         api<ReferralInfo>("/me/referral", {}, authToken),
         api<SurvivorState>("/survivor", {}, authToken).catch(() => null),
         api<{ rewards: RewardAward[] }>("/me/rewards", {}, authToken),
-        api<{ withdrawals: RewardWithdrawalRequest[]; pendingWithdrawal: RewardWithdrawalRequest | null }>("/me/reward-withdrawals", {}, authToken)
+        api<{ withdrawals: RewardWithdrawalRequest[]; pendingWithdrawal: RewardWithdrawalRequest | null }>("/me/reward-withdrawals", {}, authToken),
+        api<{ favorites: ScoreFavorite[] }>("/score-favorites", {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -1954,6 +2161,7 @@ function App() {
       setBankroll(me.bankroll);
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
+      setScoreFavorites(new Set(scoreFavoriteResult.favorites.map((favorite) => scoreFavoriteKey(favorite.sport, favorite.eventKey))));
       setReferralInfo(referralResult);
       setSurvivorState(survivorResult);
       if (TOWER_FEATURE_ENABLED) {
@@ -2809,7 +3017,7 @@ function App() {
     const teamLabel = lineButtonTeamLabel(market.sport, side?.team);
     if (market.marketKey === "h2h" && teamLabel) return `${teamLabel} Moneyline`;
     if (market.marketKey === "totals") return "Total";
-    return `${teamLabel ? `${teamLabel} ` : ""}${market.sport === "MLB" ? "Run Line" : "Spread"}`;
+    return `${teamLabel ? `${teamLabel} ` : ""}${market.sport === "MLB" ? "Run Line" : market.sport === "NHL" ? "Puck Line" : "Spread"}`;
   };
 
   const lineForLeg = (leg: SlipLeg) => lineForId(leg.gameLineId);
@@ -2853,6 +3061,19 @@ function App() {
     return { maxLegs, ways: roundRobinWays(includedSlip.length, maxLegs) };
   });
   const scoreboardGames = liveGames.filter((game) => game.sport === scoreboardSport);
+  const loadFootballBoxScore = async (game: LiveGameState) => {
+    if ((game.sport !== "NHL" && game.sport !== "NFL" && game.sport !== "NCAAF") || footballBoxScores[game.matchId] || footballBoxScoreLoading[game.matchId]) return;
+    setFootballBoxScoreLoading((current) => ({ ...current, [game.matchId]: true }));
+    setFootballBoxScoreErrors((current) => ({ ...current, [game.matchId]: "" }));
+    try {
+      const result = await api<FootballBoxScore>(`/live/${game.sport.toLowerCase()}/${encodeURIComponent(game.matchId)}/boxscore`);
+      setFootballBoxScores((current) => ({ ...current, [game.matchId]: result }));
+    } catch (err) {
+      setFootballBoxScoreErrors((current) => ({ ...current, [game.matchId]: (err as Error).message }));
+    } finally {
+      setFootballBoxScoreLoading((current) => ({ ...current, [game.matchId]: false }));
+    }
+  };
   const bankrollValue = bankroll ? money(bankroll.balance_cents) : "$0.00";
   const bankrollInline = (
     <div className="betslip-bankroll">
@@ -3277,6 +3498,55 @@ function App() {
     }
   };
 
+  const toggleScoreFavorite = async (game: LiveGameState) => {
+    if (!supportsScoreFavorites(game.sport)) return;
+    const eventKey = game.eventKey ?? game.matchId;
+    const key = scoreFavoriteKey(game.sport, eventKey);
+    if (scoreFavoritePending.has(key)) return;
+    const removing = scoreFavorites.has(key);
+    setScoreFavoriteNotice("");
+    setScoreFavoritePending((current) => new Set(current).add(key));
+    setScoreFavorites((current) => {
+      const next = new Set(current);
+      if (removing) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    try {
+      await api("/score-favorites", {
+        method: removing ? "DELETE" : "POST",
+        body: JSON.stringify(removing ? {
+          sport: game.sport,
+          eventKey
+        } : {
+          sport: game.sport,
+          eventKey,
+          matchId: game.matchId,
+          startsAt: game.startsAt,
+          awayTeam: game.awayTeam,
+          homeTeam: game.homeTeam
+        })
+      }, token);
+      setScoreFavoriteNotice(removing
+        ? `${game.awayTeam} at ${game.homeTeam} removed from favorites.`
+        : `${game.awayTeam} at ${game.homeTeam} favorited for score alerts.`);
+    } catch (err) {
+      setScoreFavorites((current) => {
+        const next = new Set(current);
+        if (removing) next.add(key);
+        else next.delete(key);
+        return next;
+      });
+      setScoreFavoriteNotice((err as Error).message);
+    } finally {
+      setScoreFavoritePending((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  };
+
   const refreshRedditStatus = async () => {
     if (!token || !canManageReddit) return;
     const status = await api<RedditStatus>("/admin/reddit/status", {}, token);
@@ -3369,7 +3639,7 @@ function App() {
   };
 
   const refreshNflConfidence = async () => {
-    if (!token || !isNateRakelAccount) return;
+    if (!token) return;
     setNflConfidenceNotice("");
     try {
       const result = await api<NflConfidenceState>("/nfl-confidence", {}, token);
@@ -3381,12 +3651,32 @@ function App() {
   };
 
   useEffect(() => {
-    if (activePage !== "nfl-confidence" || !token || !isNateRakelAccount || nflConfidenceState) return;
+    if (activePage !== "nfl-confidence" || !token || nflConfidenceState) return;
     refreshNflConfidence().catch((err) => setNflConfidenceNotice((err as Error).message));
-  }, [activePage, token, isNateRakelAccount, nflConfidenceState]);
+  }, [activePage, token, nflConfidenceState]);
+
+  const refreshChineNflPicks = async (week = chineNflPicksWeek) => {
+    if (!token) return;
+    setChineNflPicksPending(true);
+    setChineNflPicksNotice("");
+    try {
+      const result = await api<ChineNflWeeklyPicksState>(`/chine/nfl-picks${week ? `?week=${week}` : ""}`, {}, token);
+      setChineNflPicks(result);
+      setChineNflPicksWeek(result.week);
+    } catch (err) {
+      setChineNflPicksNotice((err as Error).message);
+    } finally {
+      setChineNflPicksPending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activePage !== "nfl-picks" || !token || chineNflPicks) return;
+    refreshChineNflPicks().catch((err) => setChineNflPicksNotice((err as Error).message));
+  }, [activePage, token, chineNflPicks]);
 
   const joinNflConfidence = async () => {
-    if (!token || !isNateRakelAccount) return;
+    if (!token) return;
     setNflConfidencePending(true);
     setNflConfidenceNotice("");
     try {
@@ -3544,11 +3834,12 @@ function App() {
     }
   };
 
-  const refreshChineModelAudit = async () => {
+  const refreshChineModelAudit = async (sport: "ALL" | SportKey = chineModelAuditSport) => {
     if (!token || !isNateRakelAccount) return;
     setChineModelAuditNotice("");
     try {
-      const result = await api<ChineModelAudit>("/admin/chine-model-audit", {}, token);
+      const sportQuery = sport === "ALL" ? "" : `?sport=${encodeURIComponent(sport)}`;
+      const result = await api<ChineModelAudit>(`/admin/chine-model-audit${sportQuery}`, {}, token);
       setChineModelAudit(result);
       setChineModelAuditNotice("Chine model audit refreshed.");
     } catch (err) {
@@ -3783,6 +4074,7 @@ function App() {
 
   const SurvivorPage = () => {
     const entry = survivorState?.entry ?? null;
+    const champion = survivorState?.standings.find((standing) => standing.status === "winner") ?? null;
     const usedTeams = new Set(entry?.usedTeams ?? []);
     const currentPick = entry?.currentPick ?? null;
     const currentPickLocked = Boolean(currentPick?.locked);
@@ -3799,6 +4091,16 @@ function App() {
 	            <button className="orange-action" type="button" onClick={() => openLeaderboardTab("survivor")}>View Survivor Leaderboard</button>
 	            <button className="orange-action" type="button" onClick={() => openRulesSection("nfl-survivor-rules")}>Contest Rules</button>
 	          </div>
+	          {champion && (
+	            <div className="survivor-champion-award">
+	              <Trophy size={34} aria-hidden="true" />
+	              <div>
+	                <span>Congratulations to our champion</span>
+	                <strong>{champion.displayName}</strong>
+	                <small>{champion.picksMade}-0 and the last player standing</small>
+	              </div>
+	            </div>
+	          )}
 	          {!survivorState ? (
 	            <div className="notification-actions">
 	              <button className="secondary-action" onClick={refreshSurvivor}>Load Survivor</button>
@@ -3807,12 +4109,11 @@ function App() {
             <div className="notification-card">
               <div>
                 <strong>Join the pool</strong>
-                <span>Email verification is required so Survivor entries stay tied to real accounts.</span>
+                <span>Pick one NFL winner each week. Win and advance. Lose and you are out.</span>
               </div>
               <div className="notification-actions">
-                <button className="primary" disabled={survivorPending || !user?.emailVerified} onClick={joinSurvivor}>Join Survivor</button>
+                <button className="primary" disabled={survivorPending} onClick={joinSurvivor}>Join Survivor</button>
               </div>
-              {!user?.emailVerified && <p className="error">Verify your email on the Account page before joining.</p>}
             </div>
           ) : (
             <div className="survivor-status-grid">
@@ -3823,7 +4124,7 @@ function App() {
               <div className="metric-card">
                 <span>Prize Pool</span>
                 <strong>{money(survivorState.pool.prizePoolCents)}</strong>
-                <small>{survivorState.pool.registeredPlayers} registered × $30</small>
+                <small>{contestPoolSourceLabel(survivorState.pool)}</small>
               </div>
               <div className="metric-card">
                 <span>Current pick</span>
@@ -3835,7 +4136,7 @@ function App() {
           {survivorNotice && <p className={survivorNotice.includes("saved") || survivorNotice.includes("joined") || survivorNotice.includes("refreshed") ? "success" : "error"}>{survivorNotice}</p>}
         </div>
 
-        {survivorState && entry && (
+        {survivorState && entry && entry.status !== "winner" && (
           <>
             <div className="panel page-panel survivor-games">
               <div className="panel-title">
@@ -3883,6 +4184,91 @@ function App() {
     );
   };
 
+  const ChineNflPicksPage = () => {
+    const state = chineNflPicks;
+    const week = state?.week ?? nflConfidenceState?.currentWeek ?? nflConfidenceLeaderboard?.currentWeek ?? 1;
+    const picks = [...(state?.picks ?? [])].sort((a, b) => Number(b.confidence) - Number(a.confidence));
+    const confidenceBandClass = (confidence: number | string) => {
+      const value = Number(confidence);
+      if (value >= 0.75) return "high";
+      if (value >= 0.65) return "medium";
+      return "low";
+    };
+    const recordText = (record: { wins: number; losses: number; pushes: number } | null) =>
+      record ? `${record.wins}-${record.losses}${record.pushes ? `-${record.pushes}` : ""}` : "Not archived";
+    const loadWeek = async (selectedWeek: number) => {
+      setChineNflPicksWeek(selectedWeek);
+      await refreshChineNflPicks(selectedWeek);
+    };
+
+    return (
+      <div className="panel page-panel chine-nfl-picks-card">
+        <div className="panel-title">
+          <Bot size={20} />
+          <div>
+            <h2>Week {week} NFL Picks</h2>
+            <span>Chine's spread picks, sorted by confidence.</span>
+          </div>
+        </div>
+        <div className="contest-page-actions">
+          <button className="secondary-action" disabled={chineNflPicksPending} onClick={() => void refreshChineNflPicks()}>
+            {chineNflPicksPending ? "Loading..." : "Refresh Picks"}
+          </button>
+        </div>
+        {chineNflPicksNotice && <p className="error">{chineNflPicksNotice}</p>}
+        {state && (
+          <div className="chine-nfl-records">
+            <div><small>Overall Record</small><strong>{recordText(state.overallRecord)}</strong></div>
+            <div><small>Last Week</small><strong>{recordText(state.lastWeekRecord)}</strong></div>
+            <div><small>Week {state.week}</small><strong>{recordText(state.record)}</strong></div>
+          </div>
+        )}
+        {state && state.availableWeeks.length > 1 && (
+          <div className="chine-nfl-week-tabs" aria-label="NFL pick weeks">
+            {state.availableWeeks.map((availableWeek) => (
+              <button
+                className={availableWeek === state.week ? "active" : ""}
+                disabled={chineNflPicksPending}
+                key={availableWeek}
+                onClick={() => void loadWeek(availableWeek)}
+              >
+                Week {availableWeek}
+              </button>
+            ))}
+          </div>
+        )}
+        {state?.generatedAt && <p className="muted">Last generated {shortDateTime(state.generatedAt)}</p>}
+        {picks.length === 0 ? (
+          <p className="muted">No current NFL spread picks are available yet.</p>
+        ) : (
+          <div className="chine-nfl-picks-list">
+            <div className="chine-nfl-picks-header">
+              <span>Game</span>
+              <span>Pick</span>
+              <span>Confidence</span>
+            </div>
+            {picks.map((pick) => (
+              <div className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)}`} key={pick.id}>
+                <div>
+                  <strong>{pick.game}</strong>
+                  <small>{shortDateTime(pick.startsAt)}</small>
+                </div>
+                <div>
+                  <strong>{pick.pick}</strong>
+                  <small>Spread {pick.spread} • {pick.oddsAmerican > 0 ? "+" : ""}{pick.oddsAmerican}</small>
+                </div>
+                <div className="chine-nfl-confidence">
+                  {Math.round(Number(pick.confidence) * 100)}%
+                  {pick.result !== "pending" && <small className={`pick-result ${pick.result}`}>{statusLabel(pick.result)}</small>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const NflConfidencePage = () => {
     const state = nflConfidenceState;
     const selectableGames = nflConfidenceSelectableGames();
@@ -3892,6 +4278,7 @@ function App() {
     const assignedRankings = nflConfidenceRanking.filter(Boolean);
     const unrankedSelectedGames = selectableGames.filter((game) => nflConfidenceSelections[game.id] && !assignedRankings.includes(game.id));
     const savedPickByGame = new Map(state?.picks.map((pick) => [pick.gameId, pick]) ?? []);
+    const chinePicks = state?.chinePicks ?? [];
     const seasonPrizes = state ? [
       { place: 1, label: "Champion", amount: state.pool.seasonWinnerPrizeCents, className: "gold" },
       { place: 2, label: "Runner-up", amount: state.pool.seasonRunnerUpPrizeCents, className: "silver" },
@@ -3916,7 +4303,7 @@ function App() {
               <div className="confidence-prize-chart" aria-label="NFL Confidence season-long prizes">
                 <div className="confidence-prize-heading">
                   <strong>Season-long prizes</strong>
-                  <span>Pool: {money(state.pool.prizePoolCents)} from {state.pool.registeredPlayers} registered player{state.pool.registeredPlayers === 1 ? "" : "s"} • Weekly prize: {money(state.pool.weeklyPrizeCents)}</span>
+                  <span>Pool: {money(state.pool.prizePoolCents)} from {contestPoolSourceLabel(state.pool)} • Weekly prize: {money(state.pool.weeklyPrizeCents)}</span>
                 </div>
                 <div className="confidence-prize-podium">
                   {seasonPrizes.map((prize) => (
@@ -3966,6 +4353,37 @@ function App() {
           {state?.sundayLocked && <p className="error">The first Sunday kickoff has passed. This week is locked with no points awarded.</p>}
           {nflConfidenceNotice && <p className={nflConfidenceNotice.includes("saved") || nflConfidenceNotice.includes("joined") || nflConfidenceNotice.includes("refreshed") ? "success" : "error"}>{nflConfidenceNotice}</p>}
         </div>
+
+        {state && (
+          <div className="panel page-panel nfl-confidence-chine-card">
+            <div className="panel-title">
+              <Bot size={20} />
+              <div>
+                <h2>Chine's Confidence Picks</h2>
+                <span>StakeWars' weekly NFL card, visible to every player.</span>
+              </div>
+            </div>
+            {chinePicks.length === 0 ? (
+              <p className="muted">Chine has not locked Confidence picks for this week yet.</p>
+            ) : (
+              <div className="chine-confidence-list">
+                {chinePicks.map((pick) => (
+                  <div className="chine-confidence-pick" key={pick.id}>
+                    <strong>{pick.confidencePoints ?? "-"} pts</strong>
+                    <div>
+                      <span>{pick.selectedTeam}</span>
+                      <small>
+                        {pick.awayTeam} @ {pick.homeTeam} • {shortDateTime(pick.startsAt)}
+                        {pick.gameStatus === "final" && pick.awayScore != null && pick.homeScore != null ? ` • Final ${pick.awayScore}-${pick.homeScore}` : ""}
+                      </small>
+                    </div>
+                    <em>{survivorStatusLabel(pick.status)}{pick.pointsAwarded ? ` • ${pick.pointsAwarded} pts` : ""}</em>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {state?.entry && (
           <>
@@ -4131,7 +4549,9 @@ function App() {
                   <button className="primary" disabled={nflConfidencePending || assignedRankings.length !== availablePoints.length} onClick={saveNflConfidencePicks}>
                     Save Picks
                   </button>
-                  <button className="secondary-action" disabled={nflConfidencePending} onClick={settleNflConfidence}>Settle Finals</button>
+                  {isNateRakelAccount && (
+                    <button className="secondary-action" disabled={nflConfidencePending} onClick={settleNflConfidence}>Settle Finals</button>
+                  )}
                 </div>
               </div>
             )}
@@ -4708,10 +5128,9 @@ function App() {
             </div>
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
+          <button className={activePage === "nfl-picks" ? "active" : ""} onClick={() => openPage("nfl-picks")}><Bot size={18} /> Week {chineNflPicks?.week ?? nflConfidenceState?.currentWeek ?? nflConfidenceLeaderboard?.currentWeek ?? 1} NFL Picks</button>
           <button className={activePage === "survivor" ? "active" : ""} onClick={() => openPage("survivor")}><Trophy size={18} /> NFL Survivor</button>
-          {isNateRakelAccount && (
-            <button className={activePage === "nfl-confidence" ? "active" : ""} onClick={() => openPage("nfl-confidence")}><ClipboardList size={18} /> NFL Confidence</button>
-          )}
+          <button className={activePage === "nfl-confidence" ? "active" : ""} onClick={() => openPage("nfl-confidence")}><ClipboardList size={18} /> NFL Confidence</button>
           {TOWER_FEATURE_ENABLED && isNateRakelAccount && (
             <button className={activePage === "tower" ? "active" : ""} onClick={() => openPage("tower")}><Layers size={18} /> Tower</button>
           )}
@@ -4969,8 +5388,9 @@ function App() {
         )}
 
         {activePage === "tower" && TOWER_FEATURE_ENABLED && isNateRakelAccount && TowerPage()}
+        {activePage === "nfl-picks" && ChineNflPicksPage()}
         {activePage === "survivor" && SurvivorPage()}
-        {activePage === "nfl-confidence" && isNateRakelAccount && NflConfidencePage()}
+        {activePage === "nfl-confidence" && NflConfidencePage()}
 
         {activePage === "scoreboard" && (
           <div className="panel page-panel">
@@ -4978,19 +5398,38 @@ function App() {
               <Radio size={20} />
               <h2>{scoreboardSport} live box scores</h2>
             </div>
-            {scoreboardSport === "MLB" || scoreboardSport === "EPL" || scoreboardSport === "NCAAF" ? (
+            {scoreFavoriteNotice && <p className="score-favorite-notice" role="status">{scoreFavoriteNotice}</p>}
+            {scoreboardSport === "MLB" || scoreboardSport === "NHL" || scoreboardSport === "NFL" || scoreboardSport === "EPL" || scoreboardSport === "NCAAF" ? (
               <div className="live-list scoreboard-grid">
-                {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => (
+                {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => {
+                  const eventKey = game.eventKey ?? game.matchId;
+                  const favoriteKey = scoreFavoriteKey(game.sport, eventKey);
+                  const isFavorite = scoreFavorites.has(favoriteKey);
+                  return (
                   <article className="live-game" key={game.matchId}>
+                    {supportsScoreFavorites(game.sport) && (
+                      <button
+                        className={`score-favorite-button${isFavorite ? " active" : ""}`}
+                        type="button"
+                        onClick={() => void toggleScoreFavorite(game)}
+                        disabled={scoreFavoritePending.has(favoriteKey)}
+                        aria-pressed={isFavorite}
+                        aria-label={`${isFavorite ? "Remove" : "Add"} ${game.awayTeam} at ${game.homeTeam} ${isFavorite ? "from" : "to"} score favorites`}
+                        title={isFavorite ? "Stop score alerts" : "Favorite for score alerts"}
+                      >
+                        <Star size={20} fill={isFavorite ? "currentColor" : "none"} />
+                      </button>
+                    )}
                     <div className="live-score">
-                      <span>{game.awayTeam}</span>
+                      {game.sport === "NFL" ? <FootballTeamLabel game={game} team={game.awayTeam} /> : <span>{game.awayTeam}</span>}
                       <strong>{game.awayScore ?? "-"}</strong>
                     </div>
                     <div className="live-score">
-                      <span>{game.homeTeam}</span>
+                      {game.sport === "NFL" ? <FootballTeamLabel game={game} team={game.homeTeam} /> : <span>{game.homeTeam}</span>}
                       <strong>{game.homeScore ?? "-"}</strong>
                     </div>
                     {game.sport === "MLB" && <BaseDiamond game={game} />}
+                    {game.sport === "NFL" && <FootballSituation game={game} />}
                     <div className="live-meta">
                       <span>{[game.period ?? game.gameStatus ?? "Live", liveCount(game), liveOuts(game.outs)].filter(Boolean).join(" • ")}</span>
                       <div className="live-details">
@@ -4999,8 +5438,19 @@ function App() {
                         {(game.lastPlay ?? game.description) && <small className="last-play">{game.sport === "MLB" ? "Last play: " : ""}{game.lastPlay ?? game.description}</small>}
                       </div>
                     </div>
+                    {(game.sport === "NHL" || game.sport === "NFL" || game.sport === "NCAAF") && (
+                      <details className="football-box-details" onToggle={(event) => {
+                        if (event.currentTarget.open) void loadFootballBoxScore(game);
+                      }}>
+                        <summary>Player box score</summary>
+                        {footballBoxScoreLoading[game.matchId] && <p className="muted">Loading player statistics...</p>}
+                        {footballBoxScoreErrors[game.matchId] && <p className="error">{footballBoxScoreErrors[game.matchId]}</p>}
+                        {footballBoxScores[game.matchId] && <FootballBoxScorePanel boxScore={footballBoxScores[game.matchId]} />}
+                      </details>
+                    )}
                   </article>
-                ))}
+                  );
+                })}
               </div>
             ) : (
               <p className="muted">Live {scoreboardSport} box scores will appear here when that sport is enabled.</p>
@@ -5122,7 +5572,7 @@ function App() {
                 </div>
                 <div className="contest-prize-strip">
                   <strong>Season pool: {money(nflConfidenceLeaderboard.pool.prizePoolCents)}</strong>
-                  <span>{nflConfidenceLeaderboard.pool.registeredPlayers} registered player{nflConfidenceLeaderboard.pool.registeredPlayers === 1 ? "" : "s"} × $30.</span>
+                  <span>{contestPoolSourceLabel(nflConfidenceLeaderboard.pool)}</span>
                   <strong>Weekly prize: {money(nflConfidenceLeaderboard.pool.weeklyPrizeCents)}</strong>
                   <span>Paid after Monday Night Football concludes.</span>
                   <strong>Season prizes: 1st {money(nflConfidenceSeasonPrizes[0] ?? 0)} • 2nd {money(nflConfidenceSeasonPrizes[1] ?? 0)} • 3rd {money(nflConfidenceSeasonPrizes[2] ?? 0)}</strong>
@@ -5206,9 +5656,22 @@ function App() {
 	                    <span>{survivorLeaderboard.pool.season} pool • Current week {weekRangeLabel(survivorLeaderboard.currentWeekStart)}</span>
 	                  </div>
 	                </div>
+	                {survivorLeaderboard.standings.find((standing) => standing.status === "winner") && (() => {
+	                  const champion = survivorLeaderboard.standings.find((standing) => standing.status === "winner")!;
+	                  return (
+	                    <div className="survivor-champion-award leaderboard-champion-award">
+	                      <Trophy size={34} aria-hidden="true" />
+	                      <div>
+	                        <span>Congratulations to our champion</span>
+	                        <strong>{champion.displayName}</strong>
+	                        <small>{champion.picksMade}-0 and the last player standing</small>
+	                      </div>
+	                    </div>
+	                  );
+	                })()}
 	                <div className="contest-prize-strip">
 	                  <strong>Prize pool: {money(survivorLeaderboard.pool.prizePoolCents)}</strong>
-	                  <span>{survivorLeaderboard.pool.registeredPlayers} registered player{survivorLeaderboard.pool.registeredPlayers === 1 ? "" : "s"} × $30.</span>
+	                  <span>{contestPoolSourceLabel(survivorLeaderboard.pool)}</span>
 	                </div>
 	                <div className="user-map-table contest-table">
 	                  <table>
@@ -5924,10 +6387,27 @@ function App() {
                 <span>Settled locked Chine picks, scored as one simulated unit per pick. This measures heuristic quality without parlay staking noise.</span>
               </div>
               <div className="notification-actions">
-                <button className="secondary-action" onClick={refreshChineModelAudit}>Refresh audit</button>
+                <button className="secondary-action" onClick={() => void refreshChineModelAudit()}>Refresh audit</button>
+              </div>
+              <div className="segmented model-audit-sports" aria-label="Chine model league filter">
+                {(["ALL", ...(chineModelAudit?.availableSports ?? [])] as Array<"ALL" | SportKey>).map((sport) => (
+                  <button
+                    key={sport}
+                    type="button"
+                    className={chineModelAuditSport === sport ? "active" : ""}
+                    onClick={() => {
+                      setChineModelAuditSport(sport);
+                      void refreshChineModelAudit(sport);
+                    }}
+                  >
+                    {sport === "ALL" ? "All" : sport}
+                  </button>
+                ))}
               </div>
               {chineModelAudit?.generatedAt && (
-                <small className="muted">Generated {new Date(chineModelAudit.generatedAt).toLocaleString()}</small>
+                <small className="muted">
+                  {chineModelAudit.sport ?? "All sports"} • Generated {new Date(chineModelAudit.generatedAt).toLocaleString()}
+                </small>
               )}
               <div className="model-audit-grid">
                 <ModelAuditTable title="Summary" rows={chineModelAudit?.summary ?? []} />

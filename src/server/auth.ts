@@ -45,8 +45,8 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
   }
 
   try {
-    const payload = jwt.verify(token, config.jwtSecret) as SessionUser;
-    const result = await query<SessionUser & { role: SessionUser["role"] }>(
+    const payload = jwt.verify(token, config.jwtSecret) as SessionUser & { iat?: number };
+    const result = await query<SessionUser & { role: SessionUser["role"]; passwordChangedAt: Date }>(
       `
         SELECT
           id,
@@ -59,7 +59,8 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
           payout_method AS "payoutMethod",
           payout_handle AS "payoutHandle",
           phone_last4 AS "phoneLast4",
-          role
+          role,
+          password_changed_at AS "passwordChangedAt"
         FROM app_user
         WHERE id = $1
       `,
@@ -69,7 +70,12 @@ export const requireAuth = async (req: Request, res: Response, next: NextFunctio
       res.status(401).json({ error: "User no longer exists" });
       return;
     }
-    req.user = result.rows[0];
+    const user = result.rows[0];
+    if (!payload.iat || payload.iat < Math.floor(new Date(user.passwordChangedAt).getTime() / 1000)) {
+      res.status(401).json({ error: "Session expired. Please log in again." });
+      return;
+    }
+    req.user = user;
     next();
   } catch {
     res.status(401).json({ error: "Invalid session" });
@@ -85,8 +91,8 @@ export const optionalAuth = async (req: Request, _res: Response, next: NextFunct
   }
 
   try {
-    const payload = jwt.verify(token, config.jwtSecret) as SessionUser;
-    const result = await query<SessionUser & { role: SessionUser["role"] }>(
+    const payload = jwt.verify(token, config.jwtSecret) as SessionUser & { iat?: number };
+    const result = await query<SessionUser & { role: SessionUser["role"]; passwordChangedAt: Date }>(
       `
         SELECT
           id,
@@ -99,13 +105,17 @@ export const optionalAuth = async (req: Request, _res: Response, next: NextFunct
           payout_method AS "payoutMethod",
           payout_handle AS "payoutHandle",
           phone_last4 AS "phoneLast4",
-          role
+          role,
+          password_changed_at AS "passwordChangedAt"
         FROM app_user
         WHERE id = $1
       `,
       [payload.id]
     );
-    req.user = result.rows[0];
+    const user = result.rows[0];
+    req.user = user && payload.iat && payload.iat >= Math.floor(new Date(user.passwordChangedAt).getTime() / 1000)
+      ? user
+      : undefined;
   } catch {
     req.user = undefined;
   }

@@ -52,6 +52,8 @@ const latestDetailType = (game: LiveState) =>
   typeof game.bases?.latestDetailType === "string" ? game.bases.latestDetailType.toLowerCase() : "";
 
 const isSoccerSport = (sport: SportKey) => sport === "EPL" || sport === "WORLDCUP";
+const isFootballSport = (sport: SportKey) => sport === "NFL" || sport === "NCAAF";
+const favoriteNotificationSports = new Set<SportKey>(["MLB", "NFL", "NHL", "NCAAF"]);
 
 const notificationUrl = "/scoreboard";
 
@@ -130,6 +132,38 @@ const usersForGame = async (game: LiveState, preference: LiveNotificationPrefere
     [game.sport, game.eventKey, game.awayTeam, game.homeTeam, game.startsAt]
   );
 
+  if (preference !== "score_change_enabled" || !favoriteNotificationSports.has(game.sport)) {
+    return result.rows;
+  }
+
+  const favoriteResult = await query<{ userId: string; selectedTeams: string[] }>(
+    `
+      SELECT DISTINCT
+        lgf.user_id AS "userId",
+        ARRAY[]::text[] AS "selectedTeams"
+      FROM live_game_favorite lgf
+      JOIN push_subscription ps ON ps.user_id = lgf.user_id
+      WHERE lgf.sport = $1
+        AND lgf.event_key = $2
+    `,
+    [game.sport, notificationGameKey(game)]
+  );
+  const users = new Map(result.rows.map((row) => [row.userId, row]));
+  for (const row of favoriteResult.rows) users.set(row.userId, row);
+  return [...users.values()];
+};
+
+const favoriteUsersForGame = async (game: LiveState) => {
+  const result = await query<{ userId: string }>(
+    `
+      SELECT DISTINCT lgf.user_id AS "userId"
+      FROM live_game_favorite lgf
+      JOIN push_subscription ps ON ps.user_id = lgf.user_id
+      WHERE lgf.sport = $1
+        AND lgf.event_key = $2
+    `,
+    [game.sport, notificationGameKey(game)]
+  );
   return result.rows;
 };
 
@@ -196,7 +230,8 @@ const sendGroupedNotification = async ({
   tag,
   renotify = true,
   ttlSeconds,
-  urgency
+  urgency,
+  favoritesOnly = false
 }: {
   key: string;
   title: string;
@@ -208,10 +243,11 @@ const sendGroupedNotification = async ({
   renotify?: boolean;
   ttlSeconds?: number;
   urgency?: "very-low" | "low" | "normal" | "high";
+  favoritesOnly?: boolean;
 }) => {
-  const targets = await usersForGame(game, preference);
+  const targets = favoritesOnly ? await favoriteUsersForGame(game) : await usersForGame(game, preference);
   if (targets.length === 0) {
-    return { sent: false, reason: "no opted-in wager users", key };
+    return { sent: false, reason: "no opted-in users", key };
   }
 
   const logId = await insertNotificationLog({
@@ -245,6 +281,54 @@ const sendGroupedNotification = async ({
 };
 
 const notificationGameKey = (game: LiveState) => game.eventKey ?? game.matchId;
+
+const baseString = (game: LiveState, key: string) =>
+  typeof game.bases?.[key] === "string" ? game.bases[key] as string : null;
+const baseNumber = (game: LiveState, key: string) =>
+  typeof game.bases?.[key] === "number" ? game.bases[key] as number : null;
+const baseBoolean = (game: LiveState, key: string) => game.bases?.[key] === true;
+
+export const footballLiveEvents = (previous: LiveState | null, game: LiveState) => {
+  if (!previous || !isFootballSport(game.sport) || !game.inPlay) return [];
+  const events: Array<{ type: string; title: string; body: string; eventId: string }> = [];
+  const playId = baseString(game, "lastPlayId");
+  const previousPlayId = baseString(previous, "lastPlayId");
+  const playText = game.lastPlay?.trim() ?? "";
+  const playChanged = playId
+    ? playId !== previousPlayId
+    : Boolean(playText && playText !== previous.lastPlay?.trim());
+  const playType = baseString(game, "lastPlayType") ?? "";
+  const yards = baseNumber(game, "lastPlayYards");
+  const turnover = playChanged && (
+    /interception|turnover on downs|fumble recovery \(opponent\)|muffed.*recovered/i.test(`${playType} ${playText}`)
+  );
+  if (turnover) {
+    events.push({ type: "turnover", title: "Turnover", body: playText, eventId: playId ?? playText });
+  } else if (playChanged && yards !== null && yards > 20) {
+    const team = baseString(game, "lastPlayTeam");
+    events.push({
+      type: "big_play",
+      title: "Big Play",
+      body: [team, playText].filter(Boolean).join(": "),
+      eventId: playId ?? playText
+    });
+  }
+  const possessionTeam = baseString(game, "possessionTeam");
+  const enteredRedZone = baseBoolean(game, "isRedZone") && (
+    !baseBoolean(previous, "isRedZone")
+    || possessionTeam !== baseString(previous, "possessionTeam")
+  );
+  if (enteredRedZone) {
+    const situation = [baseString(game, "downDistance"), baseString(game, "fieldPosition")].filter(Boolean).join(" ");
+    events.push({
+      type: "red_zone",
+      title: "Red Zone",
+      body: [`${possessionTeam ?? "A team"} entered the red zone.`, situation].filter(Boolean).join(" "),
+      eventId: `${possessionTeam ?? "unknown"}:${game.period ?? ""}:${situation}`
+    });
+  }
+  return events;
+};
 
 const americanOdds = (odds: number) => `${odds > 0 ? "+" : ""}${odds}`;
 
@@ -327,7 +411,10 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
     if (isSoccerSport(game.sport) && game.provider !== "espn-scoreboard") {
       continue;
     }
-    if (game.sport !== "MLB" && !isSoccerSport(game.sport)) {
+    if ((game.sport === "NFL" || game.sport === "NCAAF" || game.sport === "NHL") && game.provider !== "espn-scoreboard") {
+      continue;
+    }
+    if (game.sport !== "MLB" && game.sport !== "NFL" && game.sport !== "NCAAF" && game.sport !== "NHL" && !isSoccerSport(game.sport)) {
       continue;
     }
 
@@ -353,7 +440,10 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
     if (scoreChanged) {
       const body = isSoccerSport(game.sport)
         ? [displayScoreText(game), game.lastPlay ?? game.description].filter(Boolean).join("\n")
-        : [displayScoreText(game), game.description].filter(Boolean).join("\n");
+        : [
+            displayScoreText(game),
+            isFootballSport(game.sport) ? game.lastPlay ?? game.description : game.description
+          ].filter(Boolean).join("\n");
       results.push(await sendGroupedNotification({
         key: `live-score:${notificationGameKey(game)}:${game.awayScore}-${game.homeScore}`,
         title: "Score Update",
@@ -364,6 +454,22 @@ export const sendLiveGameNotifications = async (changes: LiveStateChange[]) => {
         tag: `score-update:${notificationGameKey(game)}`,
         renotify: false,
         ttlSeconds: 2 * 60 * 60
+      }));
+    }
+
+    for (const footballEvent of footballLiveEvents(previous, game)) {
+      results.push(await sendGroupedNotification({
+        key: `live-${footballEvent.type}:${notificationGameKey(game)}:${footballEvent.eventId}`,
+        title: footballEvent.title,
+        body: footballEvent.body,
+        game,
+        preference: "score_change_enabled",
+        metadata: { type: footballEvent.type, play: game.lastPlay },
+        tag: `football-event:${notificationGameKey(game)}`,
+        renotify: false,
+        ttlSeconds: 30 * 60,
+        urgency: footballEvent.type === "turnover" ? "high" : "normal",
+        favoritesOnly: true
       }));
     }
 

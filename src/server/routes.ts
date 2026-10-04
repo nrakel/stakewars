@@ -2,12 +2,13 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Router } from "express";
 import { z } from "zod";
 import { hashPassword, optionalAuth, passwordSchema, requireAuth, signToken, usernameSchema, verifyPassword } from "./auth.js";
-import { currentWeekStart, ensureWeeklyEntry, estimatePayoutCents, roundRobinPayoutCents, roundRobinWays } from "./betting.js";
+import { currentWeekStart, ensureWeeklyEntry, estimatePayoutCents, nflSeasonWeek, roundRobinPayoutCents, roundRobinWays } from "./betting.js";
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
-import { getLiveMlbStates, getLiveStates } from "./live.js";
+import { getEspnFootballBoxScore, getEspnNhlBoxScore, getLiveMlbStates, getLiveStates } from "./live.js";
 import { getPushPreferences, getVapidPublicKey, savePushSubscription, sendPushToUsers, sendTestPush, updatePushPreferences } from "./push.js";
 import { sendMail } from "./mail.js";
+import { buildSurvivorChampionEmail } from "./survivorRewardEmail.js";
 import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } from "./mlbContext.js";
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, getTodayRedditLockStatus, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
@@ -17,7 +18,11 @@ import {
   dailyAiParlayBankrollFraction,
   dailyAiReducedStraightBankrollThresholdCents,
   dailyAiStraightBankrollFraction,
-  dailyAiWagerMinConfidence
+  dailyAiWagerMinConfidence,
+  buildFootballContexts,
+  modelVersion,
+  scoreLine,
+  type CandidateLine
 } from "./ai.js";
 import { isStakeWarsOwnerUsername, merchNavItemForUser } from "../shared/merch.js";
 import type { DailyAiPick, DailyChineParlay } from "../shared/types.js";
@@ -55,6 +60,15 @@ const resendVerificationSchema = z.object({
 });
 
 const emailChangeRecoverySchema = z.object({
+  token: z.string().trim().min(40).max(200),
+  password: passwordSchema
+});
+
+const passwordResetRequestSchema = z.object({
+  identifier: z.string().trim().min(3).max(254)
+});
+
+const passwordResetSchema = z.object({
   token: z.string().trim().min(40).max(200),
   password: passwordSchema
 });
@@ -419,12 +433,19 @@ const isInContestWeek = (startsAt: Date, weekStart: string) => {
   return startsOn >= weekStart && startsOn < addDays(weekStart, 7);
 };
 
+const isInNflContestWeek = (startsAt: Date, weekStart: string) => {
+  const startsOn = centralDate(startsAt);
+  return startsOn >= weekStart && startsOn < addDays(weekStart, 8);
+};
+
 const currentSurvivorWeekStart = (pool: { startsOn: string }) => {
   const weekStart = currentWeekStart();
   return weekStart < pool.startsOn ? pool.startsOn : weekStart;
 };
 
 const contestPrizePerRegisteredPlayerCents = 3_000;
+const nflConfidencePrizePoolCapCents = 300_000;
+const survivorPrizePoolCapCents = 100_000;
 
 const getActiveSurvivorPool = async () => {
   const result = await query<{
@@ -485,24 +506,30 @@ const countContestEntries = async (tableName: "nfl_confidence_entry" | "survivor
 
 const nflConfidencePoolWithDynamicPrize = async (pool: NonNullable<Awaited<ReturnType<typeof getActiveNflConfidencePool>>>) => {
   const registeredPlayers = await countContestEntries("nfl_confidence_entry", pool.id);
-  const prizePoolCents = registeredPlayers * contestPrizePerRegisteredPlayerCents;
+  const uncappedPrizePoolCents = registeredPlayers * contestPrizePerRegisteredPlayerCents;
+  const prizePoolCents = Math.min(uncappedPrizePoolCents, nflConfidencePrizePoolCapCents);
   return {
     ...pool,
     seasonWinnerPrizeCents: Math.round(prizePoolCents * 0.6),
     seasonRunnerUpPrizeCents: Math.round(prizePoolCents * 0.25),
     seasonThirdPlacePrizeCents: Math.round(prizePoolCents * 0.15),
     registeredPlayers,
-    prizePoolCents
+    prizePoolCents,
+    uncappedPrizePoolCents,
+    prizePoolCapCents: nflConfidencePrizePoolCapCents
   };
 };
 
 const survivorPoolWithDynamicPrize = async (pool: NonNullable<Awaited<ReturnType<typeof getActiveSurvivorPool>>>) => {
   const registeredPlayers = await countContestEntries("survivor_entry", pool.id);
-  const prizePoolCents = registeredPlayers * contestPrizePerRegisteredPlayerCents;
+  const uncappedPrizePoolCents = registeredPlayers * contestPrizePerRegisteredPlayerCents;
+  const prizePoolCents = Math.min(uncappedPrizePoolCents, survivorPrizePoolCapCents);
   return {
     ...pool,
     registeredPlayers,
-    prizePoolCents
+    prizePoolCents,
+    uncappedPrizePoolCents,
+    prizePoolCapCents: survivorPrizePoolCapCents
   };
 };
 
@@ -585,22 +612,7 @@ const ensureNflConfidenceWeekGames = async (pool: { id: string; season: number }
 };
 
 const currentNflConfidenceWeek = async (pool: { id: string; season: number; startsOn: string }) => {
-  const today = centralDate();
-  if (today < pool.startsOn) {
-    return 1;
-  }
-  const upcoming = await query<{ week: number }>(
-    `
-      SELECT week
-      FROM nfl_confidence_game
-      WHERE pool_id = $1
-        AND starts_at >= now() - interval '12 hours'
-      ORDER BY week ASC, starts_at ASC
-      LIMIT 1
-    `,
-    [pool.id]
-  );
-  return upcoming.rows[0]?.week ?? 1;
+  return nflSeasonWeek(pool.startsOn);
 };
 
 const survivorVisiblePickTeam = (startsAt: Date, selectedTeam: string, isCurrentUser: boolean, isAdmin = false) =>
@@ -660,6 +672,118 @@ const settleSurvivorPickById = async (
 
     return { id: pickId, status };
   });
+};
+
+const finalizeSurvivorChampion = async (poolId: string) => {
+  return transaction(async (client) => {
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`survivor_champion:${poolId}`]);
+    const poolResult = await client.query<{ season: number }>(
+      "SELECT season FROM survivor_pool WHERE id = $1 FOR UPDATE",
+      [poolId]
+    );
+    const pool = poolResult.rows[0];
+    if (!pool) return null;
+    const entries = await client.query<{
+      id: string;
+      userId: string;
+      status: "active" | "eliminated" | "winner";
+    }>(
+      `SELECT id, user_id AS "userId", status FROM survivor_entry WHERE pool_id = $1 FOR UPDATE`,
+      [poolId]
+    );
+    const existingWinner = entries.rows.find((entry) => entry.status === "winner");
+    const active = entries.rows.filter((entry) => entry.status === "active");
+    const champion = existingWinner ?? (active.length === 1 ? active[0] : null);
+    if (entries.rows.length < 2 || !champion) {
+      return null;
+    }
+    const pending = await client.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM survivor_pick WHERE entry_id = $1 AND status = 'pending'",
+      [champion.id]
+    );
+    if (Number(pending.rows[0]?.count ?? 0) > 0) return null;
+
+    if (!existingWinner) await client.query(
+      `
+        UPDATE survivor_entry
+        SET status = 'winner', updated_at = now()
+        WHERE id = $1 AND status = 'active'
+      `,
+      [champion.id]
+    );
+
+    const rewardCents = Math.min(entries.rows.length * contestPrizePerRegisteredPlayerCents, survivorPrizePoolCapCents);
+    const award = await client.query<{ id: string }>(
+      `
+        INSERT INTO survivor_reward_award (id, pool_id, user_id, reward_cents)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (pool_id) DO NOTHING
+        RETURNING id
+      `,
+      [randomUUID(), poolId, champion.userId, rewardCents]
+    );
+    if (award.rows[0]) {
+      await client.query(
+        "UPDATE app_user SET reward_balance_cents = reward_balance_cents + $1 WHERE id = $2",
+        [rewardCents, champion.userId]
+      );
+    }
+
+    const pendingAward = await client.query<{
+      id: string;
+      rewardCents: number;
+      displayName: string;
+      email: string | null;
+      emailVerified: boolean;
+      wins: number;
+    }>(
+      `
+        SELECT
+          a.id,
+          a.reward_cents AS "rewardCents",
+          COALESCE(NULLIF(u.display_name, ''), u.username) AS "displayName",
+          u.email,
+          u.email_verified AS "emailVerified",
+          count(p.id) FILTER (WHERE p.status = 'won')::int AS wins
+        FROM survivor_reward_award a
+        JOIN app_user u ON u.id = a.user_id
+        LEFT JOIN survivor_pick p ON p.entry_id = $2
+        WHERE a.pool_id = $1 AND a.reward_email_sent_at IS NULL
+        GROUP BY a.id, u.id
+      `,
+      [poolId, champion.id]
+    );
+    return pendingAward.rows[0]
+      ? { ...pendingAward.rows[0], season: pool.season, entryId: champion.id }
+      : { season: pool.season, entryId: champion.id, awardId: null };
+  });
+};
+
+const finalizeAndNotifySurvivorChampion = async (poolId: string) => {
+  const champion = await finalizeSurvivorChampion(poolId);
+  if (!champion || !("id" in champion) || !champion.email || !champion.emailVerified) return champion;
+  const email = buildSurvivorChampionEmail({
+    displayName: champion.displayName,
+    season: champion.season,
+    wins: champion.wins,
+    rewardCents: champion.rewardCents,
+    accountUrl: `${config.publicOrigin.replace(/\/+$/, "")}/?view=account`
+  });
+  try {
+    await sendMail({
+      to: [{ email: champion.email, name: champion.displayName }],
+      subject: email.subject,
+      text: email.text,
+      html: email.html
+    });
+    await query(
+      "UPDATE survivor_reward_award SET reward_email_sent_at = now() WHERE id = $1 AND reward_email_sent_at IS NULL",
+      [champion.id]
+    );
+  } catch (error) {
+    console.error("Survivor champion email failed", error);
+  }
+  return champion;
 };
 
 const normalizeMlbTeamName = (team: string) =>
@@ -799,6 +923,26 @@ const createEmailChangeRecoveryToken = async (userId: string, oldEmail: string, 
     );
   });
   return `${userId}.${tokenSecret}`;
+};
+
+const createPasswordResetToken = async (userId: string) => {
+  const id = randomUUID();
+  const tokenSecret = randomBytes(32).toString("base64url");
+  const tokenHash = await hashPassword(tokenSecret);
+  await transaction(async (client) => {
+    await client.query(
+      "UPDATE password_reset_token SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL",
+      [userId]
+    );
+    await client.query(
+      `
+        INSERT INTO password_reset_token (id, user_id, token_hash, expires_at)
+        VALUES ($1, $2, $3, now() + interval '30 minutes')
+      `,
+      [id, userId, tokenHash]
+    );
+  });
+  return `${id}.${tokenSecret}`;
 };
 
 const consumeEmailChangeRecoveryTokens = async (userId: string) => {
@@ -969,6 +1113,76 @@ const sendEmailChangeRecoveryNoticeWithToken = async (userId: string, oldEmail: 
 const sendEmailChangeRecoveryNotice = async (userId: string, oldEmail: string, newEmail: string) => {
   const token = await createEmailChangeRecoveryToken(userId, oldEmail, newEmail);
   await sendEmailChangeRecoveryNoticeWithToken(userId, oldEmail, newEmail, token);
+};
+
+const sendPasswordResetLink = async (userId: string, email: string) => {
+  const token = await createPasswordResetToken(userId);
+  const resetUrl = `${publicAppOrigin()}/?resetPassword=${encodeURIComponent(token)}`;
+  const result = await sendMail({
+    to: [{ email }],
+    subject: "Reset your StakeWars password",
+    text: [
+      "A password reset was requested for your StakeWars account.",
+      "",
+      "Open this link to choose a new password:",
+      resetUrl,
+      "",
+      "This link expires in 30 minutes and can only be used once.",
+      "If you did not request this reset, you can ignore this email."
+    ].join("\n"),
+    html: [
+      "<p>A password reset was requested for your StakeWars account.</p>",
+      `<p><a href="${htmlEscape(resetUrl)}" style="display:inline-block;background:#f97316;color:#111827;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:6px;">Reset Password</a></p>`,
+      `<p>Or copy and paste this link into your browser:<br /><a href="${htmlEscape(resetUrl)}">${htmlEscape(resetUrl)}</a></p>`,
+      "<p>This link expires in 30 minutes and can only be used once.</p>",
+      "<p><small>If you did not request this reset, you can ignore this email.</small></p>"
+    ].join("")
+  });
+  console.info("Password reset link sent", { userId, email, accepted: result.accepted });
+};
+
+const resetPasswordWithToken = async (token: string, password: string) => {
+  const [tokenId, tokenSecret] = token.split(".", 2);
+  if (!tokenId || !tokenSecret || !z.string().uuid().safeParse(tokenId).success || tokenSecret.length < 32) return null;
+
+  const pending = await query<{ userId: string; tokenHash: string }>(
+    `
+      SELECT user_id AS "userId", token_hash AS "tokenHash"
+      FROM password_reset_token
+      WHERE id = $1 AND consumed_at IS NULL AND expires_at > now()
+    `,
+    [tokenId]
+  );
+  const record = pending.rows[0];
+  if (!record || !(await verifyPassword(tokenSecret, record.tokenHash))) return null;
+
+  const passwordHash = await hashPassword(password);
+  const result = await transaction(async (client) => {
+    const consumed = await client.query<{ userId: string }>(
+      `
+        UPDATE password_reset_token
+        SET consumed_at = now()
+        WHERE id = $1 AND consumed_at IS NULL AND expires_at > now()
+        RETURNING user_id AS "userId"
+      `,
+      [tokenId]
+    );
+    if (!consumed.rowCount) return null;
+    await client.query(
+      "UPDATE password_reset_token SET consumed_at = now() WHERE user_id = $1 AND consumed_at IS NULL",
+      [record.userId]
+    );
+    return client.query(
+      `
+        UPDATE app_user
+        SET password_hash = $2, password_changed_at = now()
+        WHERE id = $1
+        RETURNING ${sessionUserSelect}
+      `,
+      [record.userId, passwordHash]
+    );
+  });
+  return result?.rows[0] ?? null;
 };
 
 const sessionUserSelect = `
@@ -1280,7 +1494,8 @@ const recoverEmailChange = async (token: string, password: string) => {
         SET email = $2,
             email_verified = true,
             email_verified_at = now(),
-            password_hash = $3
+            password_hash = $3,
+            password_changed_at = now()
         WHERE id = $1
         RETURNING ${sessionUserSelect}
       `,
@@ -1492,6 +1707,22 @@ const pushPreferencesSchema = z.object({
   gameStartedEnabled: z.boolean(),
   scoreChangeEnabled: z.boolean(),
   gameFinalEnabled: z.boolean()
+});
+
+const scoreFavoriteSportSchema = z.enum(["MLB", "NFL", "NHL", "NCAAF"]);
+
+const scoreFavoriteSchema = z.object({
+  sport: scoreFavoriteSportSchema,
+  eventKey: z.string().trim().min(1).max(200),
+  matchId: z.string().trim().min(1).max(200),
+  startsAt: z.string().datetime().nullable(),
+  awayTeam: z.string().trim().min(1).max(120),
+  homeTeam: z.string().trim().min(1).max(120)
+});
+
+const removeScoreFavoriteSchema = z.object({
+  sport: scoreFavoriteSportSchema,
+  eventKey: z.string().trim().min(1).max(200)
 });
 
 const supportCategorySchema = z.enum([
@@ -1912,6 +2143,47 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
+  router.post("/auth/request-password-reset", async (req, res, next) => {
+    try {
+      const input = passwordResetRequestSchema.parse(req.body);
+      const result = await query<{ id: string; email: string | null }>(
+        `
+          SELECT id, email
+          FROM app_user
+          WHERE lower(username) = lower($1) OR lower(email) = lower($1)
+          ORDER BY created_at ASC
+          LIMIT 1
+        `,
+        [input.identifier]
+      );
+      const user = result.rows[0];
+      if (user?.email) {
+        try {
+          await sendPasswordResetLink(user.id, user.email);
+        } catch (error) {
+          console.error("Password reset email failed", { userId: user.id, error });
+        }
+      }
+      res.json({ accepted: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/auth/reset-password", async (req, res, next) => {
+    try {
+      const input = passwordResetSchema.parse(req.body);
+      const user = await resetPasswordWithToken(input.token, input.password);
+      if (!user) {
+        res.status(400).json({ error: "Invalid or expired password reset link" });
+        return;
+      }
+      res.json({ token: signToken(user), user });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.get("/auth/verify-email-link", async (req, res, next) => {
     try {
       const token = typeof req.query.token === "string" ? req.query.token : "";
@@ -1985,7 +2257,7 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.get("/nfl-confidence", requireNateRakelAccount, async (req, res, next) => {
+  router.get("/nfl-confidence", requireAuth, async (req, res, next) => {
     try {
       const pool = await getActiveNflConfidencePool();
       if (!pool) {
@@ -2131,6 +2403,46 @@ export const registerRoutes = (router: Router) => {
         [entry.id, week]
       )).rows : [];
 
+      const chinePicks = (await query<{
+        id: string;
+        gameId: string;
+        selectedTeam: string | null;
+        confidencePoints: number | null;
+        status: "pending" | "won" | "lost" | "void" | "no_pick";
+        pointsAwarded: number;
+        startsAt: Date;
+        awayTeam: string;
+        homeTeam: string;
+        gameStatus: "scheduled" | "in_progress" | "final" | "void";
+        awayScore: number | null;
+        homeScore: number | null;
+      }>(
+        `
+          SELECT
+            p.id,
+            p.game_id AS "gameId",
+            p.selected_team AS "selectedTeam",
+            p.confidence_points AS "confidencePoints",
+            p.status,
+            p.points_awarded AS "pointsAwarded",
+            g.starts_at AS "startsAt",
+            g.away_team AS "awayTeam",
+            g.home_team AS "homeTeam",
+            g.status AS "gameStatus",
+            g.away_score AS "awayScore",
+            g.home_score AS "homeScore"
+          FROM nfl_confidence_pick p
+          JOIN nfl_confidence_game g ON g.id = p.game_id
+          JOIN app_user u ON u.id = p.user_id
+          WHERE p.pool_id = $1
+            AND p.week = $2
+            AND u.username = $3
+            AND p.selected_team IS NOT NULL
+          ORDER BY p.confidence_points DESC NULLS LAST, g.starts_at ASC
+        `,
+        [pool.id, week, config.aiUsername]
+      )).rows;
+
       const weeklyStandings = await query<{
         userId: string;
         displayName: string | null;
@@ -2192,6 +2504,20 @@ export const registerRoutes = (router: Router) => {
           homeScore: game.homeScore
         })),
         picks,
+        chinePicks: chinePicks.map((pick) => ({
+          id: pick.id,
+          gameId: pick.gameId,
+          selectedTeam: pick.selectedTeam,
+          confidencePoints: pick.confidencePoints,
+          status: pick.status,
+          pointsAwarded: pick.pointsAwarded,
+          startsAt: pick.startsAt.toISOString(),
+          awayTeam: pick.awayTeam,
+          homeTeam: pick.homeTeam,
+          gameStatus: pick.gameStatus,
+          awayScore: pick.awayScore,
+          homeScore: pick.homeScore
+        })),
         unavailableConfidencePoints: picks.some((pick) => pick.confidencePoints === 5 && pick.selectedTeam === null) ? [5] : [],
         missedThursdayPick: picks.some((pick) => pick.confidencePoints === 5 && pick.selectedTeam === null && pick.status === "lost"),
         sundayLocked: Boolean(firstSundayGame && firstSundayGame.startsAt.getTime() <= Date.now() && !picks.some((pick) => pick.selectedTeam)),
@@ -2219,7 +2545,203 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.post("/nfl-confidence/entry", requireNateRakelAccount, async (req, res, next) => {
+  router.get("/chine/nfl-picks", requireAuth, async (req, res, next) => {
+    try {
+      const pool = await getActiveNflConfidencePool();
+      let currentWeek = 1;
+      if (pool) {
+        currentWeek = await currentNflConfidenceWeek(pool);
+        await ensureNflConfidenceWeekGames(pool, currentWeek);
+      }
+      if (!pool) {
+        res.status(404).json({ error: "No active NFL schedule is available." });
+        return;
+      }
+      const requestedWeek = Number(req.query.week ?? currentWeek);
+      const week = Number.isInteger(requestedWeek) && requestedWeek >= 1 && requestedWeek <= currentWeek
+        ? requestedWeek
+        : currentWeek;
+
+      if (week === currentWeek) {
+        await transaction(async (client) => {
+        const linesResult = await client.query<CandidateLine & { game_id: string }>(
+          `
+            WITH ranked_lines AS (
+              SELECT
+                g.id AS game_id,
+                gl.id,
+                gl.provider_event_id,
+                gl.sport,
+                gl.starts_at,
+                gl.home_team,
+                gl.away_team,
+                gl.favorite_team AS selected_team,
+                gl.spread,
+                gl.odds_american,
+                gl.market_key,
+                row_number() OVER (
+                  PARTITION BY
+                    g.id,
+                    gl.market_key,
+                    gl.favorite_team
+                  ORDER BY gl.is_active DESC, gl.fetched_at DESC, gl.id DESC
+                ) AS side_rank
+              FROM nfl_confidence_game g
+              JOIN game_line gl ON gl.sport = 'NFL'
+                AND gl.market_key = 'spreads'
+                AND gl.away_team = g.away_team
+                AND gl.home_team = g.home_team
+                AND gl.favorite_team IN (g.away_team, g.home_team)
+                AND abs(extract(epoch from gl.starts_at - g.starts_at)) <= 10800
+              WHERE g.pool_id = $1
+                AND g.week = $2
+            )
+            SELECT
+              game_id,
+              id,
+              provider_event_id,
+              sport,
+              starts_at,
+              home_team,
+              away_team,
+              selected_team,
+              spread,
+              odds_american,
+              market_key
+            FROM ranked_lines
+            WHERE side_rank = 1
+            ORDER BY starts_at ASC, away_team ASC, home_team ASC, selected_team ASC
+          `,
+          [pool.id, week]
+        );
+
+        const gameKey = (line: CandidateLine) => `${line.away_team}|${line.home_team}|${line.starts_at.toISOString().slice(0, 10)}`;
+        const eventMarketCounts = new Map<string, number>();
+        const footballContexts = await buildFootballContexts(client, linesResult.rows);
+        const scored = linesResult.rows
+          .map((line) => scoreLine(line, eventMarketCounts, footballContexts.get(line.id) ?? null, { modelVersion }))
+          .sort((a, b) => b.confidence - a.confidence || b.score - a.score);
+        const byGame = new Map<string, typeof scored[number]>();
+        for (const candidate of scored) {
+          const key = gameKey(candidate);
+          const existing = byGame.get(key);
+          if (!existing || candidate.confidence > existing.confidence || (candidate.confidence === existing.confidence && candidate.score > existing.score)) {
+            byGame.set(key, candidate);
+          }
+        }
+        const selected = [...byGame.values()].sort((a, b) => b.confidence - a.confidence || a.starts_at.getTime() - b.starts_at.getTime());
+        const gameIdByLineId = new Map(linesResult.rows.map((line) => [line.id, line.game_id]));
+        for (const pick of selected) {
+          const gameId = gameIdByLineId.get(pick.id);
+          if (!gameId) continue;
+          await client.query(
+            `
+              INSERT INTO chine_nfl_weekly_pick (
+                id, pool_id, game_id, game_line_id, season, week, away_team,
+                home_team, starts_at, selected_team, spread, odds_american,
+                confidence, model_version
+              )
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+              ON CONFLICT (pool_id, week, game_id) DO NOTHING
+            `,
+            [
+              randomUUID(), pool.id, gameId, pick.id, pool.season, week,
+              pick.away_team, pick.home_team, pick.starts_at, pick.selected_team,
+              pick.spread, pick.odds_american, pick.confidence, modelVersion
+            ]
+          );
+        }
+      });
+      }
+
+      const resultFor = (alias: string) => `
+        CASE
+          WHEN g.status = 'void' THEN 'void'
+          WHEN g.status <> 'final' OR g.away_score IS NULL OR g.home_score IS NULL THEN 'pending'
+          WHEN (
+            CASE WHEN ${alias}.selected_team = ${alias}.away_team
+              THEN g.away_score + ${alias}.spread - g.home_score
+              ELSE g.home_score + ${alias}.spread - g.away_score
+            END
+          ) > 0 THEN 'won'
+          WHEN (
+            CASE WHEN ${alias}.selected_team = ${alias}.away_team
+              THEN g.away_score + ${alias}.spread - g.home_score
+              ELSE g.home_score + ${alias}.spread - g.away_score
+            END
+          ) < 0 THEN 'lost'
+          ELSE 'push'
+        END
+      `;
+      const picks = await query<{
+        id: string; gameLineId: string | null; awayTeam: string; homeTeam: string;
+        startsAt: Date; selectedTeam: string; spread: string; oddsAmerican: number;
+        confidence: string; createdAt: Date; result: "pending" | "won" | "lost" | "push" | "void";
+      }>(
+        `
+          SELECT p.id, p.game_line_id AS "gameLineId", p.away_team AS "awayTeam",
+            p.home_team AS "homeTeam", p.starts_at AS "startsAt",
+            p.selected_team AS "selectedTeam", p.spread::text, p.odds_american AS "oddsAmerican",
+            p.confidence::text, p.created_at AS "createdAt", ${resultFor("p")} AS result
+          FROM chine_nfl_weekly_pick p
+          JOIN nfl_confidence_game g ON g.id = p.game_id
+          WHERE p.pool_id = $1 AND p.week = $2
+          ORDER BY p.confidence DESC, p.starts_at ASC
+        `,
+        [pool.id, week]
+      );
+      const availableWeeksResult = await query<{ week: number }>(
+        "SELECT DISTINCT week FROM chine_nfl_weekly_pick WHERE pool_id = $1 ORDER BY week DESC",
+        [pool.id]
+      );
+      const records = await query<{ week: number; result: string; count: number }>(
+        `
+          SELECT p.week, ${resultFor("p")} AS result, count(*)::int AS count
+          FROM chine_nfl_weekly_pick p
+          JOIN nfl_confidence_game g ON g.id = p.game_id
+          WHERE p.pool_id = $1
+          GROUP BY p.week, result
+        `,
+        [pool.id]
+      );
+      const recordFor = (weeks: number[]) => records.rows
+        .filter((row) => weeks.includes(row.week))
+        .reduce((record, row) => {
+          if (row.result === "won") record.wins += row.count;
+          if (row.result === "lost") record.losses += row.count;
+          if (row.result === "push") record.pushes += row.count;
+          return record;
+        }, { wins: 0, losses: 0, pushes: 0 });
+      const availableWeeks = availableWeeksResult.rows.map((row) => row.week);
+
+      res.json({
+        week,
+        currentWeek,
+        availableWeeks,
+        generatedAt: picks.rows[0]?.createdAt?.toISOString() ?? null,
+        record: recordFor([week]),
+        lastWeekRecord: availableWeeks.includes(currentWeek - 1) ? recordFor([currentWeek - 1]) : null,
+        overallRecord: recordFor(availableWeeks),
+        picks: picks.rows.map((pick) => ({
+          id: pick.id,
+          gameLineId: pick.gameLineId ?? pick.id,
+          game: `${pick.awayTeam} @ ${pick.homeTeam}`,
+          pick: pick.selectedTeam,
+          confidence: Number(pick.confidence),
+          startsAt: pick.startsAt.toISOString(),
+          awayTeam: pick.awayTeam,
+          homeTeam: pick.homeTeam,
+          spread: pick.spread,
+          oddsAmerican: pick.oddsAmerican,
+          result: pick.result
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/nfl-confidence/entry", requireAuth, async (req, res, next) => {
     try {
       const pool = await getActiveNflConfidencePool();
       if (!pool) {
@@ -2240,7 +2762,7 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
-  router.put("/nfl-confidence/picks", requireNateRakelAccount, async (req, res, next) => {
+  router.put("/nfl-confidence/picks", requireAuth, async (req, res, next) => {
     try {
       const input = nflConfidenceSubmitSchema.parse(req.body);
       const pool = await getActiveNflConfidencePool();
@@ -2488,7 +3010,7 @@ export const registerRoutes = (router: Router) => {
       }
       const displayPool = await survivorPoolWithDynamicPrize(pool);
       const weekStart = currentSurvivorWeekStart(pool);
-      const weekEnd = addDays(weekStart, 7);
+      const weekEnd = addDays(weekStart, 8);
 
       const entryResult = await query<{
         id: string;
@@ -2641,7 +3163,7 @@ export const registerRoutes = (router: Router) => {
           GROUP BY u.id, u.display_name, u.username, e.status, e.eliminated_week_start,
                    p.id, p.week_start, p.selected_team, p.away_team, p.home_team, p.starts_at, p.status
           ORDER BY
-            CASE e.status WHEN 'active' THEN 1 WHEN 'winner' THEN 2 ELSE 3 END,
+            CASE e.status WHEN 'winner' THEN 1 WHEN 'active' THEN 2 ELSE 3 END,
             count(p_all.id) DESC,
             lower(COALESCE(NULLIF(u.display_name, ''), u.username))
         `,
@@ -2696,13 +3218,17 @@ export const registerRoutes = (router: Router) => {
 
   router.post("/survivor/entry", requireAuth, async (req, res, next) => {
     try {
-      if (!req.user!.emailVerified) {
-        res.status(403).json({ error: "Verify your email address before joining Survivor." });
-        return;
-      }
       const pool = await getActiveSurvivorPool();
       if (!pool) {
         res.status(404).json({ error: "No active Survivor pool is available." });
+        return;
+      }
+      const winner = await query<{ id: string }>(
+        "SELECT id FROM survivor_entry WHERE pool_id = $1 AND status = 'winner' LIMIT 1",
+        [pool.id]
+      );
+      if (winner.rowCount) {
+        res.status(409).json({ error: "This Survivor pool has a champion and is closed to new entries." });
         return;
       }
       await query(
@@ -2721,10 +3247,6 @@ export const registerRoutes = (router: Router) => {
 
   router.post("/survivor/picks", requireAuth, async (req, res, next) => {
     try {
-      if (!req.user!.emailVerified) {
-        res.status(403).json({ error: "Verify your email address before making a Survivor pick." });
-        return;
-      }
       const input = survivorPickSchema.parse(req.body);
       const pool = await getActiveSurvivorPool();
       if (!pool) {
@@ -2771,7 +3293,7 @@ export const registerRoutes = (router: Router) => {
         if (line.starts_at.getTime() <= Date.now()) {
           throw new WagerValidationError("This Survivor game has already started.");
         }
-        if (!isInContestWeek(line.starts_at, weekStart)) {
+        if (!isInNflContestWeek(line.starts_at, weekStart)) {
           throw new WagerValidationError("Survivor picks must be for the current contest week.");
         }
 
@@ -2883,7 +3405,7 @@ export const registerRoutes = (router: Router) => {
           GROUP BY e.id, u.id, u.display_name, u.username, e.status, e.eliminated_week_start,
                    p.id, p.week_start, p.selected_team, p.away_team, p.home_team, p.starts_at, p.status
           ORDER BY
-            CASE e.status WHEN 'active' THEN 1 WHEN 'winner' THEN 2 ELSE 3 END,
+            CASE e.status WHEN 'winner' THEN 1 WHEN 'active' THEN 2 ELSE 3 END,
             count(p_all.id) DESC,
             lower(COALESCE(NULLIF(u.display_name, ''), u.username))
         `,
@@ -2929,6 +3451,13 @@ export const registerRoutes = (router: Router) => {
         res.status(404).json({ error: "Survivor pick not found." });
         return;
       }
+      const poolResult = await query<{ poolId: string }>(
+        "SELECT pool_id AS \"poolId\" FROM survivor_pick WHERE id = $1",
+        [pickId]
+      );
+      if (poolResult.rows[0]) {
+        await finalizeAndNotifySurvivorChampion(poolResult.rows[0].poolId);
+      }
       await logAdminAction(req, "admin.survivor_pick.override", { pickId, status: input.status });
       res.json({ pick: result });
     } catch (error) {
@@ -2944,7 +3473,7 @@ export const registerRoutes = (router: Router) => {
         return;
       }
       const weekStart = currentSurvivorWeekStart(pool);
-      const weekEnd = addDays(weekStart, 7);
+      const weekEnd = addDays(weekStart, 8);
       const pendingResult = await query<{
         id: string;
         selectedTeam: string;
@@ -3034,8 +3563,10 @@ export const registerRoutes = (router: Router) => {
         missed = missedResult.rowCount ?? 0;
       }
 
-      await logAdminAction(req, "admin.survivor.settle", { settled, missed });
-      res.json({ settled, missed });
+      const champion = await finalizeAndNotifySurvivorChampion(pool.id);
+
+      await logAdminAction(req, "admin.survivor.settle", { settled, missed, winnerEntryId: champion?.entryId ?? null });
+      res.json({ settled, missed, winnerEntryId: champion?.entryId ?? null });
     } catch (error) {
       next(error);
     }
@@ -3489,6 +4020,62 @@ export const registerRoutes = (router: Router) => {
       const input = pushPreferencesSchema.parse(req.body);
       const preferences = await updatePushPreferences(req.user!.id, input);
       res.json({ preferences });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/score-favorites", requireAuth, async (req, res, next) => {
+    try {
+      const result = await query<{
+        sport: z.infer<typeof scoreFavoriteSportSchema>;
+        eventKey: string;
+      }>(
+        `
+          SELECT sport, event_key AS "eventKey"
+          FROM live_game_favorite
+          WHERE user_id = $1
+          ORDER BY created_at DESC
+        `,
+        [req.user!.id]
+      );
+      res.json({ favorites: result.rows });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/score-favorites", requireAuth, async (req, res, next) => {
+    try {
+      const input = scoreFavoriteSchema.parse(req.body);
+      await query(
+        `
+          INSERT INTO live_game_favorite (
+            id, user_id, sport, event_key, match_id, starts_at, away_team, home_team
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ON CONFLICT (user_id, sport, event_key) DO UPDATE SET
+            match_id = EXCLUDED.match_id,
+            starts_at = EXCLUDED.starts_at,
+            away_team = EXCLUDED.away_team,
+            home_team = EXCLUDED.home_team
+        `,
+        [randomUUID(), req.user!.id, input.sport, input.eventKey, input.matchId, input.startsAt, input.awayTeam, input.homeTeam]
+      );
+      res.status(201).json({ ok: true });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.delete("/score-favorites", requireAuth, async (req, res, next) => {
+    try {
+      const input = removeScoreFavoriteSchema.parse(req.body);
+      await query(
+        `DELETE FROM live_game_favorite WHERE user_id = $1 AND sport = $2 AND event_key = $3`,
+        [req.user!.id, input.sport, input.eventKey]
+      );
+      res.json({ ok: true });
     } catch (error) {
       next(error);
     }
@@ -4004,10 +4591,14 @@ export const registerRoutes = (router: Router) => {
     try {
       const since = optionalDateParam.parse(typeof req.query.since === "string" ? req.query.since : undefined) ?? null;
       const through = optionalDateParam.parse(typeof req.query.through === "string" ? req.query.through : undefined) ?? null;
-      const audit = await getChineModelAudit({ since, through });
+      const sport = z.enum(["MLB", "NHL", "NFL", "NBA", "NCAAMB", "NCAAF", "EPL", "WORLDCUP"])
+        .optional()
+        .parse(typeof req.query.sport === "string" && req.query.sport ? req.query.sport.toUpperCase() : undefined) ?? null;
+      const audit = await getChineModelAudit({ since, through, sport });
       await logAdminAction(req, "admin.chine_model_audit.view", {
         since,
         through,
+        sport,
         settledPicks: audit.summary[0]?.picks ?? 0
       });
       res.json(audit);
@@ -5431,7 +6022,7 @@ export const registerRoutes = (router: Router) => {
               GROUP BY u.id, u.display_name, u.username, e.status, e.eliminated_week_start,
                        p.id, p.week_start, p.selected_team, p.away_team, p.home_team, p.starts_at, p.status
               ORDER BY
-                CASE e.status WHEN 'active' THEN 1 WHEN 'winner' THEN 2 ELSE 3 END,
+                CASE e.status WHEN 'winner' THEN 1 WHEN 'active' THEN 2 ELSE 3 END,
                 count(p_all.id) DESC,
                 lower(COALESCE(NULLIF(u.display_name, ''), u.username))
               LIMIT 100
@@ -5722,12 +6313,29 @@ export const registerRoutes = (router: Router) => {
   router.get("/live/:sport", async (req, res, next) => {
     try {
       const sport = req.params.sport.toUpperCase();
-      if (sport !== "WORLDCUP" && sport !== "EPL" && sport !== "NCAAF") {
+      if (sport !== "WORLDCUP" && sport !== "EPL" && sport !== "NHL" && sport !== "NCAAF" && sport !== "NFL") {
         res.status(404).json({ error: "Live scoreboard is not available for this sport" });
         return;
       }
       const games = await getLiveStates(sport);
       res.json({ games });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/live/:sport/:matchId/boxscore", async (req, res, next) => {
+    try {
+      const sport = req.params.sport.toUpperCase();
+      if (sport === "NHL") {
+        res.json(await getEspnNhlBoxScore(req.params.matchId));
+        return;
+      }
+      if (sport !== "NFL" && sport !== "NCAAF") {
+        res.status(404).json({ error: "Player box score is not available for this sport" });
+        return;
+      }
+      res.json(await getEspnFootballBoxScore(sport, req.params.matchId));
     } catch (error) {
       next(error);
     }

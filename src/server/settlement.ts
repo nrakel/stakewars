@@ -69,7 +69,7 @@ type PendingLeg = {
   spread: string;
   odds_american: number;
   leg_status: WagerOutcome | "pending";
-  sport: "MLB" | "NFL" | "NCAAF" | "EPL" | "WORLDCUP";
+  sport: "MLB" | "NHL" | "NFL" | "NCAAF" | "EPL" | "WORLDCUP";
   market_key: "h2h" | "spreads" | "totals";
   starts_at: string;
   starts_on: string;
@@ -199,6 +199,39 @@ const ncaafMascotSuffixes = [
   "fighting irish",
   "mean green",
   "yellow jackets",
+  "delta devils",
+  "fighting blue hens",
+  "fightin blue hens",
+  "fighting illini",
+  "fighting camels",
+  "golden bears",
+  "golden eagles",
+  "nittany lions",
+  "red raiders",
+  "runnin rebels",
+  "sun devils",
+  "rainbow warriors",
+  "blue devils",
+  "blue raiders",
+  "green wave",
+  "red wolves",
+  "horned frogs",
+  "chanticleers",
+  "leathernecks",
+  "hilltoppers",
+  "cornhuskers",
+  "commodores",
+  "midshipmen",
+  "roadrunners",
+  "thunderbirds",
+  "terrapins",
+  "catamounts",
+  "wolverines",
+  "boilermakers",
+  "colonials",
+  "jayhawks",
+  "buckeyes",
+  "nittany",
   "mountaineers",
   "spartans",
   "rockets",
@@ -209,20 +242,55 @@ const ncaafMascotSuffixes = [
   "cougars",
   "panthers",
   "aggies",
+  "bears",
+  "badgers",
+  "bearcats",
+  "cardinals",
+  "colonels",
+  "hawkeyes",
+  "huskies",
+  "lions",
+  "lumberjacks",
   "zips",
   "knights",
   "boilermakers",
   "sycamores",
   "seminoles",
+  "mustangs",
+  "broncos",
+  "bobcats",
+  "cowboys",
+  "cyclones",
+  "falcons",
+  "gators",
+  "hawks",
+  "hurricanes",
+  "hornets",
+  "jaguars",
+  "lakers",
+  "longhorns",
+  "owls",
+  "pioneers",
+  "pirates",
+  "rams",
+  "redbirds",
+  "redhawks",
+  "skyhawks",
+  "volunteers",
+  "wolves",
   "bison",
+  "rebels",
+  "seawolves",
   "gamecocks",
   "minutemen",
   "hoosiers",
   "beavers",
   "lobos",
+  "orange",
   "miners",
   "sooners",
-  "trojans"
+  "trojans",
+  "ducks"
 ].sort((left, right) => right.length - left.length);
 
 const stripNcaafMascotSuffix = (normalized: string) => {
@@ -236,9 +304,12 @@ const stripNcaafMascotSuffix = (normalized: string) => {
 };
 
 const normalizeTeamName = (team: string, sport?: string, provider?: string, aliases?: TeamAliasMap) => {
+  const base = builtInCanonicalTeamName(baseNormalizeTeamName(team));
   const normalized = sport === "NCAAF"
-    ? stripNcaafMascotSuffix(builtInCanonicalTeamName(baseNormalizeTeamName(team)))
-    : builtInCanonicalTeamName(baseNormalizeTeamName(team));
+    ? stripNcaafMascotSuffix(base)
+      .replace(/\ba and m\b/g, "a m")
+      .replace(/^miami oh$/, "miami")
+    : base;
   if (!aliases) {
     return normalized;
   }
@@ -357,23 +428,33 @@ export const fetchSoccerFinals = async (sport: "EPL" | "WORLDCUP", startDate: st
 };
 
 export const fetchFootballFinals = async (sport: "NFL" | "NCAAF", startDate: string, endDate: string) => {
-  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${espnFootballLeagueForSport(sport)}/scoreboard`);
-  url.searchParams.set("limit", "300");
-  url.searchParams.set("dates", espnDatesParam(startDate, endDate));
+  const finals: FinalGame[] = [];
+  const cursor = new Date(`${startDate}T12:00:00.000Z`);
+  const finalDate = new Date(`${endDate}T12:00:00.000Z`);
 
-  const response = await fetch(url, { headers: espnFetchHeaders });
-  if (!response.ok) {
-    throw new Error(`ESPN football scoreboard ${sport} failed with ${response.status}`);
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(finalDate.getTime()) || cursor > finalDate) {
+    throw new Error(`Invalid ESPN football date range: ${startDate} to ${endDate}`);
   }
 
-  const body = (await response.json()) as EspnScoreboardResponse;
-  const finals: FinalGame[] = [];
-  const startTime = new Date(`${startDate}T00:00:00.000Z`).getTime();
-  const endTime = new Date(`${endDate}T23:59:59.999Z`).getTime();
+  const events: NonNullable<EspnScoreboardResponse["events"]> = [];
+  while (cursor <= finalDate) {
+    const date = yyyyMmDd(cursor);
+    const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/football/${espnFootballLeagueForSport(sport)}/scoreboard`);
+    url.searchParams.set("limit", "300");
+    url.searchParams.set("dates", date.replace(/-/g, ""));
 
-  for (const event of body.events ?? []) {
+    const response = await fetch(url, { headers: espnFetchHeaders });
+    if (!response.ok) {
+      throw new Error(`ESPN football scoreboard ${sport} failed with ${response.status} for ${date}`);
+    }
+    const body = (await response.json()) as EspnScoreboardResponse;
+    events.push(...(body.events ?? []));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  for (const event of events) {
     const startsAt = new Date(event.date);
-    if (Number.isNaN(startsAt.getTime()) || startsAt.getTime() < startTime || startsAt.getTime() > endTime) {
+    if (Number.isNaN(startsAt.getTime())) {
       continue;
     }
 
@@ -404,6 +485,61 @@ export const fetchFootballFinals = async (sport: "NFL" | "NCAAF", startDate: str
       homeScore,
       metadata: { source: "espn-scoreboard", sport, status }
     });
+  }
+
+  return finals;
+};
+
+export const fetchNhlFinals = async (startDate: string, endDate: string) => {
+  const finals: FinalGame[] = [];
+  const cursor = new Date(`${startDate}T12:00:00.000Z`);
+  const finalDate = new Date(`${endDate}T12:00:00.000Z`);
+
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(finalDate.getTime()) || cursor > finalDate) {
+    throw new Error(`Invalid ESPN NHL date range: ${startDate} to ${endDate}`);
+  }
+
+  while (cursor <= finalDate) {
+    const date = yyyyMmDd(cursor);
+    const url = new URL("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard");
+    url.searchParams.set("limit", "100");
+    url.searchParams.set("dates", date.replace(/-/g, ""));
+    const response = await fetch(url, { headers: espnFetchHeaders });
+    if (!response.ok) {
+      throw new Error(`ESPN NHL scoreboard failed with ${response.status} for ${date}`);
+    }
+
+    const body = (await response.json()) as EspnScoreboardResponse;
+    for (const event of body.events ?? []) {
+      const startsAt = new Date(event.date);
+      const competition = event.competitions?.[0];
+      const status = competition?.status?.type;
+      if (Number.isNaN(startsAt.getTime()) || (!status?.completed && status?.state !== "post" && status?.name !== "STATUS_FINAL")) {
+        continue;
+      }
+
+      const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+      const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+      const homeScore = Number(home?.score);
+      const awayScore = Number(away?.score);
+      const homeTeam = home?.team?.displayName ?? home?.team?.name ?? home?.team?.shortDisplayName;
+      const awayTeam = away?.team?.displayName ?? away?.team?.name ?? away?.team?.shortDisplayName;
+      if (!homeTeam || !awayTeam || !Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
+        continue;
+      }
+
+      finals.push({
+        providerGameId: event.id,
+        startsAt: startsAt.toISOString(),
+        startsOn: yyyyMmDd(startsAt),
+        awayTeam,
+        homeTeam,
+        awayScore,
+        homeScore,
+        metadata: { source: "espn-scoreboard", sport: "NHL", status }
+      });
+    }
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
   return finals;
@@ -916,6 +1052,19 @@ const settleWagersForFinals = async ({
   finals: FinalGame[];
 }) => {
   const result = await transaction(async (client) => {
+    const staleTerminalLegs = await client.query(
+      `
+        UPDATE wager_leg wl
+        SET status = 'void'
+        FROM wager w, game_line gl
+        WHERE wl.wager_id = w.id
+          AND wl.game_line_id = gl.id
+          AND wl.status = 'pending'
+          AND w.status <> 'pending'
+          AND gl.starts_at < now() - INTERVAL '7 days'
+        RETURNING wl.id
+      `
+    );
     const aliases = await loadTeamAliases(client, sports);
     const pending = await client.query<PendingLeg>(
       `
@@ -1127,6 +1276,7 @@ const settleWagersForFinals = async ({
     return {
       dateRange: { startDate, endDate },
       finals: finals.length,
+      staleTerminalLegsCleaned: staleTerminalLegs.rowCount ?? 0,
       pendingChecked: wagers.size,
       settled,
       settledLegsPartial,
@@ -1142,6 +1292,19 @@ const settleWagersForFinals = async ({
     await sendPendingWeeklyRewardEmails(weekStart);
   }
   return result;
+};
+
+export const settleReconciledGames = async (sport: PendingLeg["sport"], games: FinalGame[]) => {
+  if (games.length === 0) {
+    return null;
+  }
+  const dates = games.map((game) => game.startsOn).sort();
+  return settleWagersForFinals({
+    startDate: dates[0],
+    endDate: dates.at(-1)!,
+    sports: [sport],
+    finals: games
+  });
 };
 
 export const settleMlbStraightWagers = async (
@@ -1176,4 +1339,14 @@ export const settleNcaafWagers = async (
 ) => {
   const finals = await fetchFootballFinals("NCAAF", startDate, endDate);
   return settleWagersForFinals({ startDate, endDate, sports: ["NCAAF"], finals });
+};
+
+export const settleNhlWagers = async (
+  startDate = yyyyMmDd(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+  endDate = yyyyMmDd(new Date())
+) => {
+  const expandedStart = new Date(`${startDate}T00:00:00.000Z`);
+  expandedStart.setUTCDate(expandedStart.getUTCDate() - 1);
+  const finals = await fetchNhlFinals(yyyyMmDd(expandedStart), endDate);
+  return settleWagersForFinals({ startDate, endDate, sports: ["NHL"], finals });
 };

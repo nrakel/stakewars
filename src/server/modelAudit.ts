@@ -28,6 +28,8 @@ export type ChineModelAudit = {
   generatedAt: string;
   since: string | null;
   through: string | null;
+  sport: string | null;
+  availableSports: string[];
   summary: ChineModelAuditGroup[];
   confidenceBuckets: ChineModelAuditGroup[];
   markets: ChineModelAuditGroup[];
@@ -63,6 +65,7 @@ const baseSettledPicksSql = `
       NULLIF(p.features #>> '{edge}', '')::numeric AS edge,
       p.reasons,
       p.features,
+      gl.sport::text AS sport,
       COALESCE(wl.status::text, w.status::text) AS status,
       gl.market_key,
       gl.odds_american,
@@ -93,6 +96,7 @@ const baseSettledPicksSql = `
       AND COALESCE(wl.status::text, w.status::text) IN ('won', 'lost', 'push', 'void')
       AND ($1::date IS NULL OR p.published_for >= $1::date)
       AND ($2::date IS NULL OR p.published_for <= $2::date)
+      AND ($3::text IS NULL OR gl.sport::text = $3::text)
   ),
   scored AS (
     SELECT
@@ -158,12 +162,14 @@ const orderedAggregateSql = (labelExpression: string, orderExpression: string) =
 
 export const getChineModelAudit = async ({
   since = null,
-  through = null
+  through = null,
+  sport = null
 }: {
   since?: string | null;
   through?: string | null;
+  sport?: string | null;
 } = {}): Promise<ChineModelAudit> => {
-  const params = [since, through];
+  const params = [since, through, sport];
   const [
     summary,
     confidenceBuckets,
@@ -175,7 +181,8 @@ export const getChineModelAudit = async ({
     homeRoad,
     starterEdge,
     bullpenEdge,
-    marketMovement
+    marketMovement,
+    availableSports
   ] = await Promise.all([
     query<AuditRow>(aggregateSql("'All settled locked Chine picks'"), params),
     query<AuditRow>(orderedAggregateSql(
@@ -273,13 +280,29 @@ export const getChineModelAudit = async ({
         WHEN reasons && ARRAY['Market movement against pick', 'Market sanity cap for adverse line movement', 'Adverse market movement partly offset by model context'] THEN 'Market moved against Chine'
         ELSE 'No meaningful market movement'
       END`
-    ), params)
+    ), params),
+    query<{ sport: string }>(`
+      SELECT DISTINCT gl.sport::text AS sport
+      FROM ai_pick p
+      JOIN game_line gl ON gl.id = p.game_line_id
+      LEFT JOIN wager w ON w.id = p.wager_id
+      LEFT JOIN wager_leg wl ON wl.wager_id = w.id
+        AND wl.game_line_id = p.game_line_id
+        AND wl.selected_team = p.selected_team
+      WHERE p.locked_at IS NOT NULL
+        AND COALESCE(wl.status::text, w.status::text) IN ('won', 'lost', 'push', 'void')
+        AND ($1::date IS NULL OR p.published_for >= $1::date)
+        AND ($2::date IS NULL OR p.published_for <= $2::date)
+      ORDER BY sport
+    `, [since, through])
   ]);
 
   return {
     generatedAt: new Date().toISOString(),
     since,
     through,
+    sport,
+    availableSports: availableSports.rows.map((row) => row.sport),
     summary: mapRows(summary.rows),
     confidenceBuckets: mapRows(confidenceBuckets.rows),
     markets: mapRows(markets.rows),

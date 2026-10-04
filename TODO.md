@@ -19,3 +19,17 @@
   - Add stronger protections around admin/system-only actions and scheduled jobs.
   - Review secret storage, service environment files, and logging for accidental sensitive data exposure.
   - Add security-focused tests for registration, login, profile updates, wagers, and push subscriptions.
+
+## 2026-08-09
+
+- Expand Leaderboard contest views:
+  - Add NFL Confidence leaderboard data.
+  - Add NFL Survivor leaderboard data.
+  - Let users switch the Leaderboard between Weekly Contest, NFL Confidence, and NFL Survivor.
+  - Preserve week/history selection behavior for each contest type where applicable.
+
+- Restructure Rules:
+  - Add General Rules covering settlement, eligibility, referral boosts, rewards, account requirements, and administrative corrections.
+  - Add Weekly Contest Rules.
+  - Add NFL Survivor Rules.
+  - Add NFL Confidence Rules.

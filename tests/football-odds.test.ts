@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { scoreLine } from "../src/server/ai.js";
+import { nflSeasonWeek } from "../src/server/betting.js";
 import { footballEventIdentity, isExpectedSportEvent } from "../src/server/odds.js";
 
 const baseEvent = {
@@ -11,6 +12,11 @@ const baseEvent = {
   home_team: "Rutgers",
   away_team: "Massachusetts"
 };
+
+test("NFL season week advances from the configured Monday start", () => {
+  assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-10T18:00:00Z")), 1);
+  assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-17T18:00:00Z")), 2);
+});
 
 test("NCAAF aliases resolve to the same football event identity", () => {
   const shortNameEvent = {
@@ -24,6 +30,27 @@ test("NCAAF aliases resolve to the same football event identity", () => {
     id: "mascot",
     home_team: "Rutgers Scarlet Knights",
     away_team: "UMass Minutemen"
+  };
+
+  assert.equal(
+    footballEventIdentity("NCAAF", shortNameEvent),
+    footballEventIdentity("NCAAF", mascotNameEvent)
+  );
+});
+
+test("NCAAF mascot suffixes resolve Florida State duplicates without batch aliases", () => {
+  const shortNameEvent = {
+    ...baseEvent,
+    id: "short",
+    commence_time: "2026-09-07T23:30:00.000Z",
+    home_team: "Florida State",
+    away_team: "SMU"
+  };
+  const mascotNameEvent = {
+    ...shortNameEvent,
+    id: "mascot",
+    home_team: "Florida State Seminoles",
+    away_team: "SMU Mustangs"
   };
 
   assert.equal(
@@ -54,6 +81,42 @@ test("NCAAF refresh batch aliases collapse short and mascot team names", () => {
   assert.equal(
     footballEventIdentity("NCAAF", shortNameEvent, batchAliases),
     footballEventIdentity("NCAAF", mascotNameEvent, batchAliases)
+  );
+});
+
+test("NCAAF aliases do not collapse distinct state schools into base schools", () => {
+  assert.notEqual(
+    footballEventIdentity("NCAAF", {
+      ...baseEvent,
+      id: "oregon",
+      commence_time: "2026-09-12T16:00:00.000Z",
+      away_team: "Oregon Ducks",
+      home_team: "Oklahoma Sooners"
+    }),
+    footballEventIdentity("NCAAF", {
+      ...baseEvent,
+      id: "oregon-state",
+      commence_time: "2026-09-12T16:00:00.000Z",
+      away_team: "Oregon State Beavers",
+      home_team: "Oklahoma State Cowboys"
+    })
+  );
+
+  assert.notEqual(
+    footballEventIdentity("NCAAF", {
+      ...baseEvent,
+      id: "texas",
+      commence_time: "2026-09-12T23:30:00.000Z",
+      away_team: "Texas Longhorns",
+      home_team: "Oregon Ducks"
+    }),
+    footballEventIdentity("NCAAF", {
+      ...baseEvent,
+      id: "texas-state",
+      commence_time: "2026-09-12T23:30:00.000Z",
+      away_team: "Texas State Bobcats",
+      home_team: "Oregon State Beavers"
+    })
   );
 });
 
@@ -189,5 +252,5 @@ test("NCAAF Chine model scores against projected margin versus spread", () => {
   assert.equal(scored.market_key, "spreads");
   assert.ok(scored.edge > 0);
   assert.ok(scored.confidence >= 0.7);
-  assert.equal(scored.features.modelProfile, "ncaaf-spread-v1");
+  assert.equal(scored.features.modelProfile, "football-spread-v1");
 });

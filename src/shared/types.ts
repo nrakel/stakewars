@@ -144,6 +144,28 @@ export type LiveGameState = {
   fetchedAt: string;
 };
 
+export type FootballPlayerStatRow = {
+  player: string;
+  stats: string[];
+};
+
+export type FootballStatGroup = {
+  key: string;
+  label: string;
+  columns: string[];
+  players: FootballPlayerStatRow[];
+};
+
+export type FootballTeamBoxScore = {
+  team: string;
+  groups: FootballStatGroup[];
+};
+
+export type FootballBoxScore = {
+  matchId: string;
+  teams: FootballTeamBoxScore[];
+};
+
 export type LeaderboardRow = {
   rank: number;
   displayName: string;
@@ -218,6 +240,37 @@ export type DailyChineParlay = {
   profitCents?: number;
   profitUnits: string;
   legs: DailyChineParlayLeg[];
+};
+
+export type ChineNflWeeklyPick = {
+  id: string;
+  gameLineId: string;
+  game: string;
+  pick: string;
+  confidence: number | string;
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+  spread: string;
+  oddsAmerican: number;
+  result: "pending" | "won" | "lost" | "push" | "void";
+};
+
+export type ChineNflPickRecord = {
+  wins: number;
+  losses: number;
+  pushes: number;
+};
+
+export type ChineNflWeeklyPicksState = {
+  week: number;
+  currentWeek: number;
+  availableWeeks: number[];
+  generatedAt: string | null;
+  picks: ChineNflWeeklyPick[];
+  record: ChineNflPickRecord;
+  lastWeekRecord: ChineNflPickRecord | null;
+  overallRecord: ChineNflPickRecord;
 };
 
 export type OpenBetLeg = {
@@ -313,6 +366,15 @@ export type NflConfidencePick = {
   pointsAwarded: number;
 };
 
+export type NflConfidenceChinePick = NflConfidencePick & {
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+  gameStatus: NflConfidenceGame["status"];
+  awayScore: number | null;
+  homeScore: number | null;
+};
+
 export type NflConfidenceStanding = {
   userId: string;
   displayName: string;
@@ -334,6 +396,8 @@ export type NflConfidenceState = {
     seasonThirdPlacePrizeCents: number;
     registeredPlayers: number;
     prizePoolCents: number;
+    uncappedPrizePoolCents: number;
+    prizePoolCapCents: number;
   };
   entry: {
     id: string;
@@ -342,6 +406,7 @@ export type NflConfidenceState = {
   currentWeek: number;
   games: NflConfidenceGame[];
   picks: NflConfidencePick[];
+  chinePicks: NflConfidenceChinePick[];
   unavailableConfidencePoints: number[];
   missedThursdayPick: boolean;
   sundayLocked: boolean;
@@ -377,6 +442,8 @@ export type SurvivorState = {
     startsOn: string;
     registeredPlayers: number;
     prizePoolCents: number;
+    uncappedPrizePoolCents: number;
+    prizePoolCapCents: number;
   };
   currentWeekStart: string;
   entry: SurvivorEntry | null;

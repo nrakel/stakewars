@@ -153,14 +153,16 @@ const logUsage = async (
 const run = async () => {
   const now = new Date();
   const todayCentral = centralDate(now);
-  const cadence = cadenceForNow(now);
-  if (!cadence) {
+  const scheduledCadence = cadenceForNow(now);
+  const force = process.argv.includes("--force");
+  if (!scheduledCadence && !force) {
     return { status: "skipped", reason: "outside NCAAF polling cadence", todayCentral };
   }
+  const cadence = scheduledCadence ?? { cadence: "manual_force", intervalMinutes: 0 };
 
   const sameDayStarts = await fetchNcaafStartsForCentralDate(todayCentral);
   const lastStart = sameDayStarts.at(-1);
-  if (lastStart && now.getTime() > lastStart.getTime()) {
+  if (!force && lastStart && now.getTime() > lastStart.getTime()) {
     return {
       status: "skipped",
       reason: "after last same-day NCAAF start",
