@@ -27,6 +27,8 @@
     "refresh:mlb-boxscore-analytics:prod": "node dist/scripts/refresh-mlb-boxscore-analytics.js",
     "refresh:live-mlb": "tsx scripts/refresh-live-mlb.ts",
     "refresh:live-mlb:prod": "node dist/scripts/refresh-live-mlb.js",
+    "refresh:live-nfl": "tsx scripts/refresh-live-nfl.ts",
+    "refresh:live-nfl:prod": "node dist/scripts/refresh-live-nfl.js",
     "refresh:visitors": "tsx scripts/refresh-visitor-metrics.ts",
     "refresh:visitors:prod": "node dist/scripts/refresh-visitor-metrics.js",
     "ai:snapshot": "tsx scripts/snapshot-ai-candidates.ts",

@@ -1,0 +1,16 @@
+[Unit]
+Description=StakeWars NFL live score refresh
+After=network.target postgresql.service stakewars.service
+
+[Service]
+Type=oneshot
+User=stakewars
+Group=stakewars
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run refresh:live-nfl:prod
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/stakewars

@@ -1273,7 +1273,9 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
 
 export const refreshLiveMlb = async () => refreshLiveSports(["MLB"]);
 
-export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NHL", "NFL", "NCAAF"]);
+export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NHL", "NCAAF"]);
+
+export const refreshLiveNfl = async () => refreshLiveSports(["NFL"]);
 
 export const getLiveStates = async (sport: SportKey) => {
   const result = await query<{

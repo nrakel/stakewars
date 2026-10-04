@@ -1,0 +1,12 @@
+[Unit]
+Description=Run StakeWars NFL live score refresh every 20 seconds during NFL operating hours
+
+[Timer]
+OnCalendar=*-*-* 05..23:*:00,20,40 America/Chicago
+OnCalendar=*-*-* 00..02:*:00,20,40 America/Chicago
+AccuracySec=1s
+Persistent=false
+Unit=stakewars-refresh-live-nfl.service
+
+[Install]
+WantedBy=timers.target
