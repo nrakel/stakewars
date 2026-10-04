@@ -245,6 +245,7 @@ const ncaafMascotSuffixes = [
   "bears",
   "badgers",
   "bearcats",
+  "buffaloes",
   "cardinals",
   "colonels",
   "hawkeyes",
