@@ -678,6 +678,13 @@ const outcomeForLeg = (leg: PendingLeg, game: FinalGame) => {
   });
 };
 
+export const settlementStartTimeDifferenceMinutes = (lineStart: string | Date, gameStart: string | Date) => {
+  const lineTime = new Date(lineStart).getTime();
+  const gameTime = new Date(gameStart).getTime();
+  if (Number.isNaN(lineTime) || Number.isNaN(gameTime)) return null;
+  return Math.round(Math.abs(gameTime - lineTime) / 60_000);
+};
+
 const candidateSummary = (
   leg: PendingLeg,
   game: FinalGame,
@@ -688,13 +695,11 @@ const candidateSummary = (
     return null;
   }
 
-  const lineStart = new Date(leg.starts_at).getTime();
-  const gameStart = new Date(game.startsAt).getTime();
-  if (Number.isNaN(lineStart) || Number.isNaN(gameStart)) {
+  const timeDiffMinutes = settlementStartTimeDifferenceMinutes(leg.starts_at, game.startsAt);
+  if (timeDiffMinutes === null) {
     return null;
   }
 
-  const timeDiffMinutes = Math.round(Math.abs(gameStart - lineStart) / 60_000);
   const maxStartDiffMinutes = 3 * 60;
   if (timeDiffMinutes > maxStartDiffMinutes) {
     return null;
@@ -729,7 +734,6 @@ const matchFinalGame = (
   aliases: TeamAliasMap
 ) => {
   const candidates = finals
-    .filter((game) => game.startsOn === leg.starts_on)
     .flatMap((game) => {
       const same = candidateSummary(leg, game, aliases, "same");
       const swapped = candidateSummary(leg, game, aliases, "swapped");

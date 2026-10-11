@@ -3,6 +3,7 @@ import test from "node:test";
 import { scoreLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
 import { footballEventIdentity, isExpectedSportEvent } from "../src/server/odds.js";
+import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
 
 const baseEvent = {
   id: "event-1",
@@ -16,6 +17,13 @@ const baseEvent = {
 test("NFL season week advances from the configured Monday start", () => {
   assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-10T18:00:00Z")), 1);
   assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-17T18:00:00Z")), 2);
+});
+
+test("settlement start matching tolerates a kickoff change across UTC midnight", () => {
+  assert.equal(
+    settlementStartTimeDifferenceMinutes("2026-10-10T23:30:00Z", "2026-10-11T00:10:00Z"),
+    40
+  );
 });
 
 test("NCAAF aliases resolve to the same football event identity", () => {
