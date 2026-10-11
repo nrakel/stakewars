@@ -17,6 +17,7 @@ type PendingGame = {
   awayTeam: string;
   homeTeam: string;
   wagerCount: number;
+  providerEventId: string | null;
 };
 
 type ProviderGame = {
@@ -38,8 +39,13 @@ const shiftDate = (date: string, days: number) => {
   return dateText(value);
 };
 const normalize = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const espnEventId = (providerEventId: string | null) => providerEventId?.match(/(?:^|\|)espn:(\d+)(?:\||$)/)?.[1] ?? null;
 const sameTeams = (pending: PendingGame, provider: ProviderGame) =>
   normalize(pending.awayTeam) === normalize(provider.awayTeam) && normalize(pending.homeTeam) === normalize(provider.homeTeam);
+const sameProviderGame = (pending: PendingGame, provider: ProviderGame) => {
+  const storedEspnId = espnEventId(pending.providerEventId);
+  return storedEspnId ? storedEspnId === provider.id : sameTeams(pending, provider);
+};
 
 const classifyStatus = (state: string, detail: string, completed = false): ProviderGame["state"] => {
   const text = `${state} ${detail}`.toLowerCase();
@@ -114,12 +120,12 @@ const fetchMlb = async (startDate: string, endDate: string) => {
 
 const loadPending = async () => (await pool.query<PendingGame>(`
   SELECT gl.sport, min(gl.starts_at) AS "startsAt", gl.away_team AS "awayTeam", gl.home_team AS "homeTeam",
-         count(DISTINCT w.id)::int AS "wagerCount"
+         count(DISTINCT w.id)::int AS "wagerCount", min(gl.provider_event_id) AS "providerEventId"
   FROM wager w
   JOIN wager_leg wl ON wl.wager_id = w.id
   JOIN game_line gl ON gl.id = wl.game_line_id
   WHERE w.status = 'pending' AND wl.status = 'pending'
-    AND gl.starts_at <= now() - INTERVAL '4 hours'
+    AND gl.starts_at <= now()
     AND gl.starts_at >= now() - INTERVAL '14 days'
   GROUP BY gl.sport, gl.away_team, gl.home_team
   ORDER BY min(gl.starts_at)
@@ -158,7 +164,7 @@ for (const sport of [...new Set(unresolved.map((game) => game.sport))]) {
   }
 
   for (const game of games) {
-    const matches = providerGames.filter((candidate) => sameTeams(game, candidate));
+    const matches = providerGames.filter((candidate) => sameProviderGame(game, candidate));
     if (matches.length !== 1) {
       actions.push({ ...game, classification: matches.length ? "ambiguous" : "missing", candidateCount: matches.length });
       continue;
