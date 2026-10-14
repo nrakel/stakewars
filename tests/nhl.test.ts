@@ -22,6 +22,26 @@ test("NHL puck lines and totals settle through the shared engine", () => {
   assert.equal(outcomeForSelection({ selectedTeam: "Over", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "totals", spread: 5.5, game, sport: "NHL" }), "won");
 });
 
+test("NHL favorite covers a minus-1.5 puck line by winning by two", () => {
+  const game = {
+    startsOn: "2026-10-13",
+    awayTeam: "Washington Capitals",
+    homeTeam: "Carolina Hurricanes",
+    awayScore: 2,
+    homeScore: 4
+  };
+
+  assert.equal(outcomeForSelection({
+    selectedTeam: "Carolina Hurricanes",
+    awayTeam: game.awayTeam,
+    homeTeam: game.homeTeam,
+    marketKey: "spreads",
+    spread: -1.5,
+    game,
+    sport: "NHL"
+  }), "won");
+});
+
 const nhlLine = (marketKey: "h2h" | "spreads" = "h2h"): CandidateLine => ({
   id: "nhl-line",
   provider_event_id: "nhl-game",

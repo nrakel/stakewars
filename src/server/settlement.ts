@@ -161,6 +161,27 @@ type EspnScoreboardResponse = {
   }>;
 };
 
+type NhlScheduleResponse = {
+  gameWeek?: Array<{
+    date?: string;
+    games?: Array<{
+      id?: number;
+      startTimeUTC?: string;
+      gameState?: string;
+      awayTeam?: {
+        placeName?: { default?: string };
+        commonName?: { default?: string };
+        score?: number;
+      };
+      homeTeam?: {
+        placeName?: { default?: string };
+        commonName?: { default?: string };
+        score?: number;
+      };
+    }>;
+  }>;
+};
+
 const espnLeagueForSport = (sport: "EPL" | "WORLDCUP") => sport === "EPL" ? "eng.1" : "fifa.world";
 
 const espnFootballLeagueForSport = (sport: "NFL" | "NCAAF") => sport === "NCAAF" ? "college-football" : sport.toLowerCase();
@@ -502,42 +523,38 @@ export const fetchNhlFinals = async (startDate: string, endDate: string) => {
 
   while (cursor <= finalDate) {
     const date = yyyyMmDd(cursor);
-    const url = new URL("https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard");
-    url.searchParams.set("limit", "100");
-    url.searchParams.set("dates", date.replace(/-/g, ""));
+    const url = new URL(`https://api-web.nhle.com/v1/schedule/${date}`);
     const response = await fetch(url, { headers: espnFetchHeaders });
     if (!response.ok) {
-      throw new Error(`ESPN NHL scoreboard failed with ${response.status} for ${date}`);
+      throw new Error(`NHL schedule failed with ${response.status} for ${date}`);
     }
 
-    const body = (await response.json()) as EspnScoreboardResponse;
-    for (const event of body.events ?? []) {
-      const startsAt = new Date(event.date);
-      const competition = event.competitions?.[0];
-      const status = competition?.status?.type;
-      if (Number.isNaN(startsAt.getTime()) || (!status?.completed && status?.state !== "post" && status?.name !== "STATUS_FINAL")) {
+    const body = (await response.json()) as NhlScheduleResponse;
+    const games = body.gameWeek?.find((day) => day.date === date)?.games ?? [];
+    for (const game of games) {
+      const startsAt = new Date(game.startTimeUTC ?? "");
+      // OFF is the NHL's post-final state after scoring corrections are complete.
+      if (Number.isNaN(startsAt.getTime()) || game.gameState !== "OFF") {
         continue;
       }
 
-      const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
-      const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
-      const homeScore = Number(home?.score);
-      const awayScore = Number(away?.score);
-      const homeTeam = home?.team?.displayName ?? home?.team?.name ?? home?.team?.shortDisplayName;
-      const awayTeam = away?.team?.displayName ?? away?.team?.name ?? away?.team?.shortDisplayName;
+      const homeScore = Number(game.homeTeam?.score);
+      const awayScore = Number(game.awayTeam?.score);
+      const homeTeam = [game.homeTeam?.placeName?.default, game.homeTeam?.commonName?.default].filter(Boolean).join(" ");
+      const awayTeam = [game.awayTeam?.placeName?.default, game.awayTeam?.commonName?.default].filter(Boolean).join(" ");
       if (!homeTeam || !awayTeam || !Number.isFinite(homeScore) || !Number.isFinite(awayScore)) {
         continue;
       }
 
       finals.push({
-        providerGameId: event.id,
+        providerGameId: game.id?.toString(),
         startsAt: startsAt.toISOString(),
         startsOn: yyyyMmDd(startsAt),
         awayTeam,
         homeTeam,
         awayScore,
         homeScore,
-        metadata: { source: "espn-scoreboard", sport: "NHL", status }
+        metadata: { source: "nhl-schedule", sport: "NHL", gameState: game.gameState }
       });
     }
     cursor.setUTCDate(cursor.getUTCDate() + 1);
