@@ -462,8 +462,10 @@ const impliedProbability = (american: number) => {
 };
 
 const stableProviderMatchId = (providerEventId: string | null) => {
-  const eventBase = providerEventId?.split(":")[0];
-  const matchId = eventBase?.split("|")[0];
+  const parts = providerEventId?.split("|") ?? [];
+  const matchId = parts[0]?.startsWith("americanfootball_")
+    ? parts[1]
+    : parts[0]?.split(":")[0];
   return matchId || null;
 };
 
@@ -4214,5 +4216,100 @@ export const snapshotAiCandidates = async ({
       snapshots: scored.length,
       closingLinesUpdated
     };
+  });
+};
+
+export const recordDailyChinePicks = async (forDate = centralDate()) => {
+  return transaction(async (client) => {
+    const activeModelVersion = modelVersionForDate(forDate);
+    const lines = await client.query<CandidateLine>(
+      `
+        SELECT
+          id,
+          provider_event_id,
+          sport,
+          starts_at,
+          home_team,
+          away_team,
+          favorite_team AS selected_team,
+          spread,
+          odds_american,
+          market_key
+        FROM game_line
+        WHERE is_active = true
+          AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF')
+          AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
+          AND (
+            (sport IN ('NFL', 'NCAAF') AND market_key = 'spreads')
+            OR (sport IN ('MLB', 'NHL', 'NBA', 'NCAAMB') AND market_key = 'h2h')
+          )
+        ORDER BY starts_at ASC, sport ASC
+      `,
+      [forDate]
+    );
+
+    if (!lines.rows.length) return { recorded: 0 };
+
+    const eventMarketCounts = new Map<string, number>();
+    for (const line of lines.rows) {
+      eventMarketCounts.set(eventKey(line), (eventMarketCounts.get(eventKey(line)) ?? 0) + 1);
+    }
+
+    const mlbLines = lines.rows.filter((line) => line.sport === "MLB");
+    const nhlLines = lines.rows.filter((line) => line.sport === "NHL");
+    const footballLines = lines.rows.filter((line) => isFootballSpreadSport(line.sport));
+    const mlbContexts = await buildMlbContexts(client, mlbLines);
+    const nhlContexts = await buildNhlContexts(client, nhlLines);
+    const footballContexts = await buildFootballContexts(client, footballLines);
+    const confidenceCalibration = activeModelVersion === modelVersion
+      ? await buildConfidenceCalibration(client, forDate)
+      : undefined;
+
+    const scored = lines.rows.map((line) => scoreLine(
+      line,
+      eventMarketCounts,
+      isFootballSpreadSport(line.sport)
+        ? footballContexts.get(line.id) ?? null
+        : line.sport === "NHL"
+          ? nhlContexts.get(line.id) ?? null
+          : line.sport === "MLB"
+            ? mlbContexts.get(line.id) ?? null
+            : null,
+      { modelVersion: activeModelVersion, confidenceCalibration }
+    ));
+
+    const bestByGame = new Map<string, ScoredCandidate>();
+    for (const candidate of scored) {
+      const key = eventKey(candidate);
+      const current = bestByGame.get(key);
+      if (!current || candidate.confidence > current.confidence ||
+        (candidate.confidence === current.confidence && candidate.score > current.score)) {
+        bestByGame.set(key, candidate);
+      }
+    }
+
+    let recorded = 0;
+    for (const [gameKey, pick] of bestByGame) {
+      const inserted = await client.query(
+        `
+          INSERT INTO chine_daily_pick (
+            id, pick_date, sport, game_key, game_line_id, away_team, home_team,
+            starts_at, selected_team, market_key, spread, odds_american,
+            confidence, model_version
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          ON CONFLICT (pick_date, sport, game_key) DO NOTHING
+          RETURNING id
+        `,
+        [
+          randomUUID(), forDate, pick.sport, gameKey, pick.id, pick.away_team,
+          pick.home_team, pick.starts_at, pick.selected_team, pick.market_key,
+          pick.spread, pick.odds_american, pick.confidence, activeModelVersion
+        ]
+      );
+      recorded += inserted.rowCount ?? 0;
+    }
+
+    return { recorded };
   });
 };

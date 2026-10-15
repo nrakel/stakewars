@@ -3710,6 +3710,42 @@ textarea {
   margin-top: 12px;
 }
 
+.daily-picks-controls {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.daily-picks-controls label {
+  display: grid;
+  gap: 5px;
+  color: #65736d;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.daily-picks-controls select {
+  min-width: 160px;
+  min-height: 40px;
+  border: 1px solid #d5ddd7;
+  border-radius: 6px;
+  background: #fff;
+  color: #14201c;
+  padding: 0 10px;
+}
+
+@media (max-width: 640px) {
+  .daily-picks-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .daily-picks-controls select {
+    width: 100%;
+  }
+}
+
 .chine-nfl-picks-header,
 .chine-nfl-pick-row {
   display: grid;

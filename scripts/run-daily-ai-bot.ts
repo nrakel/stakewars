@@ -1,4 +1,4 @@
-import { generateAiPicks, placeDailyAiParlay } from "../src/server/ai.js";
+import { generateAiPicks, placeDailyAiParlay, recordDailyChinePicks } from "../src/server/ai.js";
 import { pool } from "../src/server/db.js";
 
 type MlbScheduleResponse = {
@@ -120,12 +120,14 @@ const run = async () => {
     fetchNcaafGamesForCentralDate(todayCentral),
     fetchNflGamesForCentralDate(todayCentral)
   ]);
+  const dailyPicks = await recordDailyChinePicks(todayCentral);
 
   if (!mlbGames.length && !nhlGames.length && !ncaafGames.length && !nflGames.length) {
     return {
       status: "skipped",
       reason: "no MLB, NHL, NCAAF, or NFL games found for today",
-      todayCentral
+      todayCentral,
+      dailyPicks
     };
   }
 
@@ -201,7 +203,8 @@ const run = async () => {
     status: "checked",
     todayCentral,
     sports,
-    dailyParlay
+    dailyParlay,
+    dailyPicks
   };
 };
 

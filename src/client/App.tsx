@@ -2,12 +2,12 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Star, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { ChineNflWeeklyPicksState, DailyAiPick, DailyChineParlay, DailyChineParlayLeg, FootballBoxScore, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SportKey, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
+import type { ChineDailyPicksState, ChineNflWeeklyPicksState, DailyAiPick, DailyChineParlay, DailyChineParlayLeg, FootballBoxScore, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SportKey, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
 type AuthMode = "login" | "register";
-type AppPage = "lines" | "scoreboard" | "ai-picks" | "nfl-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
+type AppPage = "lines" | "scoreboard" | "ai-picks" | "nfl-picks" | "daily-picks" | "survivor" | "nfl-confidence" | "tower" | "leaderboard" | "open-bets" | "history" | "rules" | "contact" | "install" | "account" | "admin";
 type AdminSection = "traffic" | "support" | "survivor" | "eligibility" | "prizes" | "rewards" | "model" | "podcast" | "reddit" | "users";
 type ScoreboardSport = "MLB" | "NFL" | "NBA" | "NHL" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 type HistoryPeriod = "day" | "week" | "all";
@@ -20,6 +20,7 @@ const appPages = new Set<AppPage>([
   "scoreboard",
   "ai-picks",
   "nfl-picks",
+  "daily-picks",
   "survivor",
   "nfl-confidence",
   "tower",
@@ -1065,6 +1066,7 @@ const pageTitle = (page: AppPage, lineSport: ScoreboardSport, scoreboardSport: S
   if (page === "install") return "Install App";
   if (page === "ai-picks") return "Daily Chine Picks";
   if (page === "nfl-picks") return "NFL Picks";
+  if (page === "daily-picks") return "Daily Picks";
   if (page === "survivor") return "NFL Survivor";
   if (page === "nfl-confidence") return "NFL Confidence";
   if (page === "tower") return "Tower";
@@ -1913,6 +1915,11 @@ function App() {
   const [chineNflPicksWeek, setChineNflPicksWeek] = useState<number | null>(null);
   const [chineNflPicksNotice, setChineNflPicksNotice] = useState("");
   const [chineNflPicksPending, setChineNflPicksPending] = useState(false);
+  const [chineDailyPicks, setChineDailyPicks] = useState<ChineDailyPicksState | null>(null);
+  const [chineDailyPicksDate, setChineDailyPicksDate] = useState(centralDate());
+  const [chineDailyPicksSport, setChineDailyPicksSport] = useState<"ALL" | SportKey>("ALL");
+  const [chineDailyPicksNotice, setChineDailyPicksNotice] = useState("");
+  const [chineDailyPicksPending, setChineDailyPicksPending] = useState(false);
   const [survivorState, setSurvivorState] = useState<SurvivorState | null>(null);
   const [survivorNotice, setSurvivorNotice] = useState("");
   const [survivorPending, setSurvivorPending] = useState(false);
@@ -3675,6 +3682,29 @@ function App() {
     refreshChineNflPicks().catch((err) => setChineNflPicksNotice((err as Error).message));
   }, [activePage, token, chineNflPicks]);
 
+  const refreshChineDailyPicks = async (date = chineDailyPicksDate) => {
+    if (!token) return;
+    setChineDailyPicksPending(true);
+    setChineDailyPicksNotice("");
+    try {
+      const result = await api<ChineDailyPicksState>(`/chine/daily-picks?date=${encodeURIComponent(date)}`, {}, token);
+      setChineDailyPicks(result);
+      setChineDailyPicksDate(result.date);
+      if (chineDailyPicksSport !== "ALL" && !result.availableSports.includes(chineDailyPicksSport)) {
+        setChineDailyPicksSport("ALL");
+      }
+    } catch (err) {
+      setChineDailyPicksNotice((err as Error).message);
+    } finally {
+      setChineDailyPicksPending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activePage !== "daily-picks" || !token || chineDailyPicks) return;
+    refreshChineDailyPicks().catch((err) => setChineDailyPicksNotice((err as Error).message));
+  }, [activePage, token, chineDailyPicks]);
+
   const joinNflConfidence = async () => {
     if (!token) return;
     setNflConfidencePending(true);
@@ -4261,6 +4291,78 @@ function App() {
                   {Math.round(Number(pick.confidence) * 100)}%
                   {pick.result !== "pending" && <small className={`pick-result ${pick.result}`}>{statusLabel(pick.result)}</small>}
                 </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const ChineDailyPicksPage = () => {
+    const state = chineDailyPicks;
+    const picks = (state?.picks ?? []).filter((pick) => chineDailyPicksSport === "ALL" || pick.sport === chineDailyPicksSport);
+    const confidenceBandClass = (confidence: number) => confidence >= 0.75 ? "high" : confidence >= 0.65 ? "medium" : "low";
+    const changeDate = async (date: string) => {
+      setChineDailyPicksDate(date);
+      await refreshChineDailyPicks(date);
+    };
+
+    return (
+      <div className="panel page-panel chine-nfl-picks-card">
+        <div className="panel-title">
+          <Sparkles size={20} />
+          <div>
+            <h2>Daily Picks</h2>
+            <span>Chine's recorded preference for every modeled game, whether wagered or not.</span>
+          </div>
+        </div>
+        <div className="daily-picks-controls">
+          <label>
+            Date
+            <select
+              value={chineDailyPicksDate}
+              disabled={chineDailyPicksPending}
+              onChange={(event) => void changeDate(event.target.value)}
+            >
+              {(state?.availableDates ?? [chineDailyPicksDate]).map((date) => <option value={date} key={date}>{date}</option>)}
+            </select>
+          </label>
+          <button className="secondary-action" disabled={chineDailyPicksPending} onClick={() => void refreshChineDailyPicks()}>
+            {chineDailyPicksPending ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+        <div className="chine-nfl-week-tabs" aria-label="Daily pick sport filters">
+          {(["ALL", ...(state?.availableSports ?? [])] as Array<"ALL" | SportKey>).map((sport) => (
+            <button className={chineDailyPicksSport === sport ? "active" : ""} key={sport} onClick={() => setChineDailyPicksSport(sport)}>
+              {sport === "ALL" ? "All" : sport}
+            </button>
+          ))}
+        </div>
+        {chineDailyPicksNotice && <p className="error">{chineDailyPicksNotice}</p>}
+        {picks.length === 0 ? (
+          <p className="muted">No modeled games were recorded for this date.</p>
+        ) : (
+          <div className="chine-nfl-picks-list">
+            <div className="chine-nfl-picks-header daily-picks-header">
+              <span>Game</span>
+              <span>Pick</span>
+              <span>Confidence</span>
+            </div>
+            {picks.map((pick) => (
+              <div className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)}`} key={pick.id}>
+                <div>
+                  <strong>{pick.game}</strong>
+                  <small>{pick.sport} • {shortDateTime(pick.startsAt)}</small>
+                </div>
+                <div>
+                  <strong>{pick.pick}</strong>
+                  <small>
+                    {pick.marketKey === "spreads" ? `Spread ${Number(pick.spread) > 0 ? "+" : ""}${pick.spread}` : "Moneyline"}
+                    {` • ${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican}`}
+                  </small>
+                </div>
+                <div className="chine-nfl-confidence">{Math.round(pick.confidence * 100)}%</div>
               </div>
             ))}
           </div>
@@ -5129,6 +5231,7 @@ function App() {
           </div>
           <button className={activePage === "ai-picks" ? "active" : ""} onClick={() => openPage("ai-picks")}><Sparkles size={18} /> Daily Chine Picks</button>
           <button className={activePage === "nfl-picks" ? "active" : ""} onClick={() => openPage("nfl-picks")}><Bot size={18} /> Week {chineNflPicks?.week ?? nflConfidenceState?.currentWeek ?? nflConfidenceLeaderboard?.currentWeek ?? 1} NFL Picks</button>
+          <button className={activePage === "daily-picks" ? "active" : ""} onClick={() => openPage("daily-picks")}><Sparkles size={18} /> Daily Picks</button>
           <button className={activePage === "survivor" ? "active" : ""} onClick={() => openPage("survivor")}><Trophy size={18} /> NFL Survivor</button>
           <button className={activePage === "nfl-confidence" ? "active" : ""} onClick={() => openPage("nfl-confidence")}><ClipboardList size={18} /> NFL Confidence</button>
           {TOWER_FEATURE_ENABLED && isNateRakelAccount && (
@@ -5389,6 +5492,7 @@ function App() {
 
         {activePage === "tower" && TOWER_FEATURE_ENABLED && isNateRakelAccount && TowerPage()}
         {activePage === "nfl-picks" && ChineNflPicksPage()}
+        {activePage === "daily-picks" && ChineDailyPicksPage()}
         {activePage === "survivor" && SurvivorPage()}
         {activePage === "nfl-confidence" && NflConfidencePage()}
 

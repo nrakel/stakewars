@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { scoreLine } from "../src/server/ai.js";
+import { eventKey, scoreLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
 import { footballEventIdentity, isExpectedSportEvent } from "../src/server/odds.js";
 import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
@@ -24,6 +24,40 @@ test("settlement start matching tolerates a kickoff change across UTC midnight",
     settlementStartTimeDifferenceMinutes("2026-10-10T23:30:00Z", "2026-10-11T00:10:00Z"),
     40
   );
+});
+
+test("football event keys use the provider match id instead of collapsing the slate", () => {
+  const line = {
+    id: "line-1",
+    provider_event_id: "americanfootball_nfl|6275929b4056e14c|2026-10-11T133000000Z|philadelphia eagles|jacksonville jaguars:bovada:spreads:Philadelphia Eagles",
+    sport: "NFL" as const,
+    starts_at: new Date("2026-10-11T13:30:00Z"),
+    away_team: "Philadelphia Eagles",
+    home_team: "Jacksonville Jaguars",
+    selected_team: "Philadelphia Eagles",
+    spread: "-3.5",
+    odds_american: -110,
+    market_key: "spreads" as const
+  };
+
+  assert.equal(eventKey(line), "6275929b4056e14c");
+});
+
+test("football event keys preserve ESPN-prefixed match ids", () => {
+  const line = {
+    id: "line-2",
+    provider_event_id: "americanfootball_ncaaf|espn:401869950|2026-10-15T233000000Z|georgia southern|old dominion monarchs:fanduel:spreads:Old Dominion Monarchs",
+    sport: "NCAAF" as const,
+    starts_at: new Date("2026-10-15T23:30:00Z"),
+    away_team: "Georgia Southern",
+    home_team: "Old Dominion Monarchs",
+    selected_team: "Old Dominion Monarchs",
+    spread: "-5.5",
+    odds_american: -110,
+    market_key: "spreads" as const
+  };
+
+  assert.equal(eventKey(line), "espn:401869950");
 });
 
 test("NCAAF aliases resolve to the same football event identity", () => {

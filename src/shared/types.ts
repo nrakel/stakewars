@@ -273,6 +273,29 @@ export type ChineNflWeeklyPicksState = {
   overallRecord: ChineNflPickRecord;
 };
 
+export type ChineDailyPick = {
+  id: string;
+  sport: SportKey;
+  game: string;
+  pick: string;
+  confidence: number;
+  startsAt: string;
+  awayTeam: string;
+  homeTeam: string;
+  marketKey: MarketKey;
+  spread: string;
+  oddsAmerican: number;
+  modelVersion: string;
+  recordedAt: string;
+};
+
+export type ChineDailyPicksState = {
+  date: string;
+  availableDates: string[];
+  availableSports: SportKey[];
+  picks: ChineDailyPick[];
+};
+
 export type OpenBetLeg = {
   id: string;
   selectedTeam: string;

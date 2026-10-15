@@ -21,6 +21,7 @@ import {
   dailyAiWagerMinConfidence,
   buildFootballContexts,
   modelVersion,
+  recordDailyChinePicks,
   scoreLine,
   type CandidateLine
 } from "./ai.js";
@@ -2734,6 +2735,70 @@ export const registerRoutes = (router: Router) => {
           spread: pick.spread,
           oddsAmerican: pick.oddsAmerican,
           result: pick.result
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/chine/daily-picks", requireAuth, async (req, res, next) => {
+    try {
+      const today = centralDate();
+      const date = optionalDateParam.parse(typeof req.query.date === "string" ? req.query.date : undefined) ?? today;
+      if (date > today) {
+        res.status(400).json({ error: "Daily Picks are recorded on the day games are scheduled." });
+        return;
+      }
+
+      if (date === today) {
+        await recordDailyChinePicks(date);
+      }
+
+      const picks = await query<{
+        id: string; sport: SportKey; awayTeam: string; homeTeam: string;
+        startsAt: Date; selectedTeam: string; marketKey: MarketKey; spread: string;
+        oddsAmerican: number; confidence: string; modelVersion: string; recordedAt: Date;
+      }>(
+        `
+          SELECT id, sport, away_team AS "awayTeam", home_team AS "homeTeam",
+            starts_at AS "startsAt", selected_team AS "selectedTeam",
+            market_key AS "marketKey", spread::text, odds_american AS "oddsAmerican",
+            confidence::text, model_version AS "modelVersion", recorded_at AS "recordedAt"
+          FROM chine_daily_pick
+          WHERE pick_date = $1
+          ORDER BY confidence DESC, starts_at ASC, sport ASC
+        `,
+        [date]
+      );
+      const dates = await query<{ date: string }>(
+        `
+          SELECT DISTINCT pick_date::text AS date
+          FROM chine_daily_pick
+          ORDER BY date DESC
+          LIMIT 120
+        `
+      );
+      const availableSports = [...new Set(picks.rows.map((pick) => pick.sport))];
+
+      res.json({
+        date,
+        availableDates: dates.rows.map((row) => row.date),
+        availableSports,
+        picks: picks.rows.map((pick) => ({
+          id: pick.id,
+          sport: pick.sport,
+          game: `${pick.awayTeam} @ ${pick.homeTeam}`,
+          pick: pick.selectedTeam,
+          confidence: Number(pick.confidence),
+          startsAt: pick.startsAt.toISOString(),
+          awayTeam: pick.awayTeam,
+          homeTeam: pick.homeTeam,
+          marketKey: pick.marketKey,
+          spread: pick.spread,
+          oddsAmerican: pick.oddsAmerican,
+          modelVersion: pick.modelVersion,
+          recordedAt: pick.recordedAt.toISOString()
         }))
       });
     } catch (error) {
