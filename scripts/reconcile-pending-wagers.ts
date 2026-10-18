@@ -151,7 +151,7 @@ for (const sport of [...new Set(initial.map((game) => game.sport))]) {
 
 const unresolved = await loadPending();
 const actions: Array<Record<string, unknown>> = [];
-const cancellations = new Map<SportKey, FinalGame[]>();
+const terminalGames = new Map<SportKey, FinalGame[]>();
 for (const sport of [...new Set(unresolved.map((game) => game.sport))]) {
   const games = unresolved.filter((game) => game.sport === sport);
   const dates = games.map((game) => dateText(game.startsAt)).sort();
@@ -170,14 +170,22 @@ for (const sport of [...new Set(unresolved.map((game) => game.sport))]) {
       continue;
     }
     const match = matches[0];
-    if (match.state === "cancelled") {
-      cancellations.set(sport, [...(cancellations.get(sport) ?? []), {
+    if (match.state === "cancelled" || match.state === "final") {
+      if (match.state === "final" && (match.awayScore === null || match.homeScore === null)) {
+        actions.push({ ...game, classification: "final_missing_score", providerGameId: match.id });
+        continue;
+      }
+      terminalGames.set(sport, [...(terminalGames.get(sport) ?? []), {
         providerGameId: match.id,
         startsAt: match.startsAt.toISOString(), startsOn: dateText(match.startsAt),
-        awayTeam: game.awayTeam, homeTeam: game.homeTeam, awayScore: 0, homeScore: 0, noAction: true,
+        awayTeam: match.awayTeam,
+        homeTeam: match.homeTeam,
+        awayScore: match.awayScore ?? 0,
+        homeScore: match.homeScore ?? 0,
+        noAction: match.state === "cancelled",
         metadata: { source: "hourly-reconciliation", detail: match.detail }
       }]);
-      actions.push({ ...game, classification: "cancelled", providerGameId: match.id });
+      actions.push({ ...game, classification: match.state, providerGameId: match.id, detail: match.detail });
     } else if (match.state === "scheduled" && Math.abs(match.startsAt.getTime() - game.startsAt.getTime()) > 5 * 60_000) {
       await pool.query(`UPDATE game_line SET starts_at=$1, updated_at=now() WHERE sport=$2 AND away_team=$3 AND home_team=$4 AND starts_at=$5`, [match.startsAt, sport, game.awayTeam, game.homeTeam, game.startsAt]);
       actions.push({ ...game, classification: "rescheduled", newStartsAt: match.startsAt.toISOString(), providerGameId: match.id });
@@ -187,7 +195,7 @@ for (const sport of [...new Set(unresolved.map((game) => game.sport))]) {
   }
 }
 
-for (const [sport, games] of cancellations) await settleReconciledGames(sport as any, games);
+for (const [sport, games] of terminalGames) await settleReconciledGames(sport as any, games);
 const remaining = await loadPending();
 const summary = { checked: initial.length, settledRuns, actions, remaining: remaining.length };
 await pool.query(`INSERT INTO admin_audit_log (id,user_id,action,metadata,user_agent) VALUES ($1,NULL,'pending_wager_reconciliation',$2,'systemd')`, [randomUUID(), JSON.stringify(summary)]);

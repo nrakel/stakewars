@@ -73,6 +73,7 @@ type PendingLeg = {
   market_key: "h2h" | "spreads" | "totals";
   starts_at: string;
   starts_on: string;
+  provider_event_id: string | null;
   away_team: string;
   home_team: string;
 };
@@ -750,6 +751,20 @@ const matchFinalGame = (
   finals: FinalGame[],
   aliases: TeamAliasMap
 ) => {
+  const storedProviderIds = (leg.provider_event_id ?? "")
+    .split("|")
+    .flatMap((part) => {
+      const match = part.match(/^(?:espn(?::[a-z]+)?|mlb):(\d+)$/i);
+      return match ? [match[1]] : [];
+    });
+  const providerMatch = finals.find((game) => (
+    game.providerGameId
+    && (leg.provider_event_id === game.providerGameId || storedProviderIds.includes(game.providerGameId))
+  ));
+  if (providerMatch) {
+    return { game: providerMatch, candidates: [] as MatchCandidateSummary[] };
+  }
+
   const candidates = finals
     .flatMap((game) => {
       const same = candidateSummary(leg, game, aliases, "same");
@@ -1110,6 +1125,7 @@ const settleWagersForFinals = async ({
           gl.market_key,
           gl.starts_at::text AS starts_at,
           (gl.starts_at AT TIME ZONE 'UTC')::date::text AS starts_on,
+          gl.provider_event_id,
           gl.away_team,
           gl.home_team
         FROM wager w
