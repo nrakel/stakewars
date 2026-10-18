@@ -6237,6 +6237,7 @@ export const registerRoutes = (router: Router) => {
             WHERE p.published_for = (now() AT TIME ZONE 'America/Chicago')::date
               AND p.confidence >= $1
               AND (p.locked_at IS NULL OR p.wager_id IS NOT NULL)
+              AND (p.locked_at IS NOT NULL OR l.starts_at > now())
               AND (
                 p.locked_at IS NOT NULL
                 OR NOT EXISTS (

@@ -95,30 +95,53 @@ const fetchNflGamesForCentralDate = async (targetDate: string) => {
 };
 
 const fetchNhlGamesForCentralDate = async (targetDate: string) => {
+  return fetchGamesFromActiveLines("NHL", "h2h", targetDate);
+};
+
+const fetchGamesFromActiveLines = async (
+  sport: "MLB" | "NHL" | "NFL" | "NCAAF",
+  marketKey: "h2h" | "spreads",
+  targetDate: string
+) => {
   const result = await pool.query<{ starts_at: Date }>(
     `
       SELECT DISTINCT starts_at
       FROM game_line
-      WHERE sport = 'NHL'
+      WHERE sport = $1
         AND is_active = true
-        AND market_key = 'h2h'
-        AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
-        AND starts_at > now()
+        AND market_key = $2
+        AND (starts_at AT TIME ZONE 'America/Chicago')::date = $3::date
       ORDER BY starts_at
     `,
-    [targetDate]
+    [sport, marketKey, targetDate]
   );
   return result.rows.map((row) => row.starts_at);
+};
+
+const scheduleWithFallback = async (
+  sport: "MLB" | "NFL" | "NCAAF",
+  marketKey: "h2h" | "spreads",
+  targetDate: string,
+  fetchSchedule: () => Promise<Date[]>
+) => {
+  try {
+    const games = await fetchSchedule();
+    if (games.length) return games;
+    console.warn(`${sport} schedule returned no games; using active game lines`);
+  } catch (error) {
+    console.warn(`${sport} schedule unavailable; using active game lines`, error);
+  }
+  return fetchGamesFromActiveLines(sport, marketKey, targetDate);
 };
 
 const run = async () => {
   const now = new Date();
   const todayCentral = centralDate(now);
   const [mlbGames, nhlGames, ncaafGames, nflGames] = await Promise.all([
-    fetchMlbGamesForCentralDate(todayCentral),
+    scheduleWithFallback("MLB", "h2h", todayCentral, () => fetchMlbGamesForCentralDate(todayCentral)),
     fetchNhlGamesForCentralDate(todayCentral),
-    fetchNcaafGamesForCentralDate(todayCentral),
-    fetchNflGamesForCentralDate(todayCentral)
+    scheduleWithFallback("NCAAF", "spreads", todayCentral, () => fetchNcaafGamesForCentralDate(todayCentral)),
+    scheduleWithFallback("NFL", "spreads", todayCentral, () => fetchNflGamesForCentralDate(todayCentral))
   ]);
   const dailyPicks = await recordDailyChinePicks(todayCentral);
 
