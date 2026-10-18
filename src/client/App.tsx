@@ -4307,6 +4307,9 @@ function App() {
       setChineDailyPicksDate(date);
       await refreshChineDailyPicks(date);
     };
+    const today = centralDate();
+    const previousDate = addDays(chineDailyPicksDate, -1);
+    const nextDate = addDays(chineDailyPicksDate, 1);
 
     return (
       <div className="panel page-panel chine-nfl-picks-card">
@@ -4318,16 +4321,36 @@ function App() {
           </div>
         </div>
         <div className="daily-picks-controls">
+          <button
+            className="icon-button"
+            type="button"
+            title="Previous day"
+            aria-label="Previous day"
+            disabled={chineDailyPicksPending}
+            onClick={() => void changeDate(previousDate)}
+          >
+            <ArrowLeft size={18} />
+          </button>
           <label>
             Date
-            <select
+            <input
+              type="date"
               value={chineDailyPicksDate}
+              max={today}
               disabled={chineDailyPicksPending}
               onChange={(event) => void changeDate(event.target.value)}
-            >
-              {(state?.availableDates ?? [chineDailyPicksDate]).map((date) => <option value={date} key={date}>{date}</option>)}
-            </select>
+            />
           </label>
+          <button
+            className="icon-button"
+            type="button"
+            title="Next day"
+            aria-label="Next day"
+            disabled={chineDailyPicksPending || nextDate > today}
+            onClick={() => void changeDate(nextDate)}
+          >
+            <ArrowRight size={18} />
+          </button>
           <button className="secondary-action" disabled={chineDailyPicksPending} onClick={() => void refreshChineDailyPicks()}>
             {chineDailyPicksPending ? "Loading..." : "Refresh"}
           </button>
@@ -4362,7 +4385,10 @@ function App() {
                     {` • ${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican}`}
                   </small>
                 </div>
-                <div className="chine-nfl-confidence">{Math.round(pick.confidence * 100)}%</div>
+                <div className="chine-nfl-confidence">
+                  {Math.round(pick.confidence * 100)}%
+                  <small className={`pick-result ${pick.result}`}>{aiPickResultLabel(pick.result) ?? "Pending"}</small>
+                </div>
               </div>
             ))}
           </div>

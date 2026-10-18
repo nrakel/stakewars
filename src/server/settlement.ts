@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { transaction } from "./db.js";
 import { awardWeeklyRewardsIfFinal, type WeeklyRewardAwardResult } from "./weeklyRewards.js";
 import { sendPendingWeeklyRewardEmails } from "./weeklyRewardEmails.js";
@@ -1089,6 +1090,38 @@ const settleWagersForFinals = async ({
   finals: FinalGame[];
 }) => {
   const result = await transaction(async (client) => {
+    if (sports.length === 1) {
+      const sport = sports[0];
+      const source = `settlement-${sport.toLowerCase()}`;
+      for (const game of finals) {
+        if (game.noAction || !game.providerGameId) continue;
+        await client.query(
+          `
+            INSERT INTO game_result (
+              id, sport, starts_on, starts_at, away_team, home_team,
+              away_score, home_score, source, provider_game_id, result_metadata
+            )
+            VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+            ON CONFLICT (source, provider_game_id) WHERE provider_game_id IS NOT NULL
+            DO UPDATE SET
+              starts_on = EXCLUDED.starts_on,
+              starts_at = EXCLUDED.starts_at,
+              away_team = EXCLUDED.away_team,
+              home_team = EXCLUDED.home_team,
+              away_score = EXCLUDED.away_score,
+              home_score = EXCLUDED.home_score,
+              result_metadata = EXCLUDED.result_metadata,
+              fetched_at = now()
+          `,
+          [
+            randomUUID(), sport, game.startsOn, game.startsAt ?? null,
+            game.awayTeam, game.homeTeam, game.awayScore, game.homeScore,
+            source, game.providerGameId, JSON.stringify(game.metadata ?? {})
+          ]
+        );
+      }
+    }
+
     const staleTerminalLegs = await client.query(
       `
         UPDATE wager_leg wl

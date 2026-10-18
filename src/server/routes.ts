@@ -13,6 +13,7 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, getTodayRedditLockStatus, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
+import { outcomeForSelection } from "./settlement.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
   dailyAiParlayBankrollFraction,
@@ -2759,15 +2760,47 @@ export const registerRoutes = (router: Router) => {
         id: string; sport: SportKey; awayTeam: string; homeTeam: string;
         startsAt: Date; selectedTeam: string; marketKey: MarketKey; spread: string;
         oddsAmerican: number; confidence: string; modelVersion: string; recordedAt: Date;
+        awayScore: number | null; homeScore: number | null;
       }>(
         `
-          SELECT id, sport, away_team AS "awayTeam", home_team AS "homeTeam",
-            starts_at AS "startsAt", selected_team AS "selectedTeam",
-            market_key AS "marketKey", spread::text, odds_american AS "oddsAmerican",
-            confidence::text, model_version AS "modelVersion", recorded_at AS "recordedAt"
-          FROM chine_daily_pick
-          WHERE pick_date = $1
-          ORDER BY confidence DESC, starts_at ASC, sport ASC
+          SELECT pick.id, pick.sport, pick.away_team AS "awayTeam", pick.home_team AS "homeTeam",
+            pick.starts_at AS "startsAt", pick.selected_team AS "selectedTeam",
+            pick.market_key AS "marketKey", pick.spread::text, pick.odds_american AS "oddsAmerican",
+            pick.confidence::text, pick.model_version AS "modelVersion", pick.recorded_at AS "recordedAt",
+            result.away_score AS "awayScore", result.home_score AS "homeScore"
+          FROM chine_daily_pick pick
+          LEFT JOIN game_line line ON line.id = pick.game_line_id
+          LEFT JOIN LATERAL (
+            SELECT candidate.*
+            FROM game_result candidate
+            WHERE candidate.sport = pick.sport
+              AND (
+                (
+                  candidate.provider_game_id IS NOT NULL
+                  AND (
+                    line.provider_event_id = 'espn:' || candidate.provider_game_id
+                    OR position('espn:' || candidate.provider_game_id || '|' IN coalesce(line.provider_event_id, '')) > 0
+                  )
+                )
+                OR (
+                  candidate.away_team = pick.away_team
+                  AND candidate.home_team = pick.home_team
+                  AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)) <= 43200
+                )
+              )
+            ORDER BY
+              CASE WHEN candidate.provider_game_id IS NOT NULL
+                AND (
+                  line.provider_event_id = 'espn:' || candidate.provider_game_id
+                  OR position('espn:' || candidate.provider_game_id || '|' IN coalesce(line.provider_event_id, '')) > 0
+                )
+                THEN 0 ELSE 1 END,
+              abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)),
+              candidate.fetched_at DESC
+            LIMIT 1
+          ) result ON true
+          WHERE pick.pick_date = $1
+          ORDER BY pick.confidence DESC, pick.starts_at ASC, pick.sport ASC
         `,
         [date]
       );
@@ -2785,21 +2818,41 @@ export const registerRoutes = (router: Router) => {
         date,
         availableDates: dates.rows.map((row) => row.date),
         availableSports,
-        picks: picks.rows.map((pick) => ({
-          id: pick.id,
-          sport: pick.sport,
-          game: `${pick.awayTeam} @ ${pick.homeTeam}`,
-          pick: pick.selectedTeam,
-          confidence: Number(pick.confidence),
-          startsAt: pick.startsAt.toISOString(),
-          awayTeam: pick.awayTeam,
-          homeTeam: pick.homeTeam,
-          marketKey: pick.marketKey,
-          spread: pick.spread,
-          oddsAmerican: pick.oddsAmerican,
-          modelVersion: pick.modelVersion,
-          recordedAt: pick.recordedAt.toISOString()
-        }))
+        picks: picks.rows.map((pick) => {
+          const result = pick.awayScore === null || pick.homeScore === null
+            ? "pending" as const
+            : outcomeForSelection({
+                selectedTeam: pick.selectedTeam,
+                awayTeam: pick.awayTeam,
+                homeTeam: pick.homeTeam,
+                marketKey: pick.marketKey,
+                spread: Number(pick.spread),
+                game: {
+                  startsOn: date,
+                  awayTeam: pick.awayTeam,
+                  homeTeam: pick.homeTeam,
+                  awayScore: pick.awayScore,
+                  homeScore: pick.homeScore
+                },
+                sport: pick.sport
+              });
+          return {
+            id: pick.id,
+            sport: pick.sport,
+            game: `${pick.awayTeam} @ ${pick.homeTeam}`,
+            pick: pick.selectedTeam,
+            confidence: Number(pick.confidence),
+            startsAt: pick.startsAt.toISOString(),
+            awayTeam: pick.awayTeam,
+            homeTeam: pick.homeTeam,
+            marketKey: pick.marketKey,
+            spread: pick.spread,
+            oddsAmerican: pick.oddsAmerican,
+            modelVersion: pick.modelVersion,
+            recordedAt: pick.recordedAt.toISOString(),
+            result
+          };
+        })
       });
     } catch (error) {
       next(error);

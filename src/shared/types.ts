@@ -287,6 +287,7 @@ export type ChineDailyPick = {
   oddsAmerican: number;
   modelVersion: string;
   recordedAt: string;
+  result: "pending" | "won" | "lost" | "push" | "void";
 };
 
 export type ChineDailyPicksState = {

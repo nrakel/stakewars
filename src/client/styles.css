@@ -2698,6 +2698,11 @@ textarea {
   color: #374151;
 }
 
+.pick-result.pending {
+  background: #eef1eb;
+  color: #43524c;
+}
+
 @media (max-width: 860px) {
   .auth-shell,
   .dashboard,
@@ -3714,6 +3719,7 @@ textarea {
   display: flex;
   align-items: end;
   gap: 12px;
+  flex-wrap: wrap;
   margin: 14px 0;
 }
 
@@ -3725,7 +3731,8 @@ textarea {
   font-weight: 700;
 }
 
-.daily-picks-controls select {
+.daily-picks-controls select,
+.daily-picks-controls input[type="date"] {
   min-width: 160px;
   min-height: 40px;
   border: 1px solid #d5ddd7;
@@ -3737,11 +3744,15 @@ textarea {
 
 @media (max-width: 640px) {
   .daily-picks-controls {
-    align-items: stretch;
-    flex-direction: column;
+    align-items: end;
   }
 
-  .daily-picks-controls select {
+  .daily-picks-controls label {
+    flex: 1;
+  }
+
+  .daily-picks-controls select,
+  .daily-picks-controls input[type="date"] {
     width: 100%;
   }
 }
