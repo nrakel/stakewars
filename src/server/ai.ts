@@ -245,6 +245,43 @@ type NhlTeamGame = {
   earnedPoint: boolean;
 };
 
+type BasketballTeamGame = {
+  startsOn: string;
+  isHome: boolean;
+  pointsFor: number;
+  pointsAgainst: number;
+  margin: number;
+};
+
+export type BasketballHeuristicContext = {
+  selectedGamesPlayed: number;
+  opponentGamesPlayed: number;
+  selectedMarginPerGame10: number | null;
+  opponentMarginPerGame10: number | null;
+  marginPerGameDiff10: number | null;
+  selectedMarginPerGame20: number | null;
+  opponentMarginPerGame20: number | null;
+  marginPerGameDiff20: number | null;
+  selectedPointsForPerGame10: number | null;
+  opponentPointsForPerGame10: number | null;
+  pointsForPerGameDiff10: number | null;
+  selectedPointsAgainstPerGame10: number | null;
+  opponentPointsAgainstPerGame10: number | null;
+  pointsAgainstPerGameDiff10: number | null;
+  selectedVenueMarginPerGame: number | null;
+  opponentVenueMarginPerGame: number | null;
+  venueMarginPerGameDiff: number | null;
+  selectedRestDays: number | null;
+  opponentRestDays: number | null;
+  restDaysDiff: number | null;
+  selectedBackToBack: boolean;
+  opponentBackToBack: boolean;
+  projectedMargin: number;
+  listedSpread: number;
+  projectedMarginVsSpread: number;
+  dataCompleteness: number;
+} & MarketMovementContext;
+
 type NhlHeuristicContext = {
   selectedGamesPlayed: number | null;
   opponentGamesPlayed: number | null;
@@ -1757,10 +1794,77 @@ export const scoreNhlMoneyline = (
   };
 };
 
+export const scoreNbaSpreadLine = (
+  line: CandidateLine,
+  eventMarketCounts: Map<string, number>,
+  context: BasketballHeuristicContext | null,
+  options: ScoreOptions = { modelVersion }
+): ScoredCandidate => {
+  const implied = impliedProbability(line.odds_american);
+  if (line.market_key !== "spreads") {
+    return {
+      ...line, score: -100, confidence: 0.1, impliedProbability: implied,
+      fairProbability: implied, edge: 0,
+      features: {
+        impliedProbability: implied, fairProbability: implied, edge: 0,
+        modelVersion: options.modelVersion, modelProfile: "nba-spread-v1",
+        rejectedReason: "NBA Chine model is spread-only"
+      },
+      reasons: ["NBA spread-only model rejects non-spread market"]
+    };
+  }
+
+  const reasons: string[] = [];
+  const atsEdgePoints = context?.projectedMarginVsSpread ?? 0;
+  const completeness = context?.dataCompleteness ?? 0;
+  const modeledCoverProbability = 1 / (1 + Math.exp(-atsEdgePoints / 7.5));
+  const evidenceWeight = 0.2 + completeness * 0.65;
+  let fair = implied + (modeledCoverProbability - implied) * evidenceWeight;
+
+  if ((context?.lineSnapshotCount ?? 0) >= 2) {
+    fair += clamp((context?.lineMovementSpread ?? 0) * 0.004, -0.01, 0.01);
+    if ((context?.lineMovementSpread ?? 0) >= 1) reasons.push("Spread movement supports the pick");
+    else if ((context?.lineMovementSpread ?? 0) <= -1) reasons.push("Spread movement opposes the pick");
+  }
+  if (atsEdgePoints >= 3) reasons.push("Projected margin clears the listed spread");
+  else if (atsEdgePoints >= 1.5) reasons.push("Projected margin shows a spread edge");
+  else if (atsEdgePoints <= -1.5) reasons.push("Projected margin trails the listed spread");
+  if ((context?.marginPerGameDiff10 ?? 0) >= 6) reasons.push("Recent point-differential edge");
+  else if ((context?.marginPerGameDiff10 ?? 0) <= -6) reasons.push("Recent point-differential concern");
+  if ((context?.pointsForPerGameDiff10 ?? 0) >= 7) reasons.push("Recent scoring edge");
+  if ((context?.pointsAgainstPerGameDiff10 ?? 0) <= -7) reasons.push("Recent defensive edge");
+  if ((context?.venueMarginPerGameDiff ?? 0) >= 5) reasons.push("Home/road split edge");
+  if (context?.selectedBackToBack && !context.opponentBackToBack) reasons.push("Back-to-back fatigue concern");
+  else if (!context?.selectedBackToBack && context?.opponentBackToBack) reasons.push("Rest edge against a back-to-back opponent");
+  if (completeness < 0.45) reasons.push("Limited early-season NBA sample");
+
+  fair = clamp(fair, 0.15, 0.85);
+  const edge = fair - implied;
+  return {
+    ...line,
+    score: edge * 100 + fair * 10 + Math.max(atsEdgePoints, 0) * 0.25,
+    confidence: fair,
+    impliedProbability: implied,
+    fairProbability: fair,
+    edge,
+    features: {
+      impliedProbability: implied, fairProbability: fair, edge,
+      isHome: line.selected_team === line.home_team,
+      isFavorite: Number(line.spread) < 0,
+      isMoneyline: false,
+      marketCompleteness: eventMarketCounts.get(eventKey(line)) ?? 1,
+      modelVersion: options.modelVersion, modelProfile: "nba-spread-v1",
+      confidenceBucket: confidenceBucket(fair), decimalOdds: americanToDecimal(line.odds_american),
+      ...context
+    },
+    reasons: reasons.length ? reasons : ["NBA projected margin versus spread"]
+  };
+};
+
 export const scoreLine = (
   line: CandidateLine,
   eventMarketCounts: Map<string, number>,
-  heuristicContext: MlbHeuristicContext | FootballHeuristicContext | NhlHeuristicContext | null = null,
+  heuristicContext: MlbHeuristicContext | FootballHeuristicContext | NhlHeuristicContext | BasketballHeuristicContext | null = null,
   options: ScoreOptions = { modelVersion }
 ): ScoredCandidate => {
   if (isFootballSpreadSport(line.sport)) {
@@ -1768,6 +1872,9 @@ export const scoreLine = (
   }
   if (line.sport === "NHL") {
     return scoreNhlMoneyline(line, eventMarketCounts, heuristicContext as NhlHeuristicContext | null, options);
+  }
+  if (line.sport === "NBA") {
+    return scoreNbaSpreadLine(line, eventMarketCounts, heuristicContext as BasketballHeuristicContext | null, options);
   }
 
   const context = heuristicContext as MlbHeuristicContext | null;
@@ -2821,6 +2928,129 @@ export const buildNhlContexts = async (client: pg.PoolClient, lines: CandidateLi
   return contexts;
 };
 
+const basketballForm = (games: BasketballTeamGame[], count: number) => {
+  const sample = games.slice(-count);
+  if (!sample.length) return null;
+  const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  return {
+    games: sample.length,
+    pointsForPerGame: average(sample.map((game) => game.pointsFor)),
+    pointsAgainstPerGame: average(sample.map((game) => game.pointsAgainst)),
+    marginPerGame: average(sample.map((game) => game.margin))
+  };
+};
+
+export const buildBasketballContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
+  const nbaLines = lines.filter((line) => line.sport === "NBA" && line.market_key === "spreads");
+  if (!nbaLines.length) return new Map<string, BasketballHeuristicContext>();
+
+  const dates = nbaLines.map((line) => dateOnly(line.starts_at)).sort();
+  const historyStart = new Date(`${dates[0]}T00:00:00Z`);
+  historyStart.setUTCDate(historyStart.getUTCDate() - 400);
+  const teams = [...new Set(nbaLines.flatMap((line) => [line.away_team, line.home_team]))];
+  const [results, movements] = await Promise.all([
+    client.query<{
+      starts_on: string; away_team: string; home_team: string; away_score: number; home_score: number;
+    }>(
+      `
+        SELECT starts_on::text, away_team, home_team, away_score, home_score
+        FROM game_result
+        WHERE sport = 'NBA'
+          AND starts_on BETWEEN $1::date AND $2::date
+          AND (away_team = ANY($3::text[]) OR home_team = ANY($3::text[]))
+        ORDER BY starts_on ASC, starts_at ASC NULLS LAST
+      `,
+      [dateOnly(historyStart), dates.at(-1), teams]
+    ),
+    buildMarketMovements(client, nbaLines, "NBA")
+  ]);
+
+  const history = new Map<string, BasketballTeamGame[]>();
+  for (const game of results.rows) {
+    history.set(game.away_team, [...(history.get(game.away_team) ?? []), {
+      startsOn: game.starts_on, isHome: false, pointsFor: game.away_score,
+      pointsAgainst: game.home_score, margin: game.away_score - game.home_score
+    }]);
+    history.set(game.home_team, [...(history.get(game.home_team) ?? []), {
+      startsOn: game.starts_on, isHome: true, pointsFor: game.home_score,
+      pointsAgainst: game.away_score, margin: game.home_score - game.away_score
+    }]);
+  }
+
+  const contexts = new Map<string, BasketballHeuristicContext>();
+  for (const line of nbaLines) {
+    const startsOn = dateOnly(line.starts_at);
+    const selected = line.selected_team;
+    const opponent = selected === line.away_team ? line.home_team : line.away_team;
+    const selectedIsHome = selected === line.home_team;
+    const selectedGames = (history.get(selected) ?? []).filter((game) => game.startsOn < startsOn);
+    const opponentGames = (history.get(opponent) ?? []).filter((game) => game.startsOn < startsOn);
+    const selected10 = basketballForm(selectedGames, 10);
+    const opponent10 = basketballForm(opponentGames, 10);
+    const selected20 = basketballForm(selectedGames, 20);
+    const opponent20 = basketballForm(opponentGames, 20);
+    const selectedVenue = basketballForm(selectedGames.filter((game) => game.isHome === selectedIsHome), 12);
+    const opponentVenue = basketballForm(opponentGames.filter((game) => game.isHome !== selectedIsHome), 12);
+    const selectedLast = selectedGames.at(-1);
+    const opponentLast = opponentGames.at(-1);
+    const selectedRestDays = selectedLast ? Math.max(0, daysBetween(selectedLast.startsOn, startsOn) - 1) : null;
+    const opponentRestDays = opponentLast ? Math.max(0, daysBetween(opponentLast.startsOn, startsOn) - 1) : null;
+    const margin10 = diffOrNull(selected10?.marginPerGame, opponent10?.marginPerGame);
+    const margin20 = diffOrNull(selected20?.marginPerGame, opponent20?.marginPerGame);
+    const venueMargin = diffOrNull(selectedVenue?.marginPerGame, opponentVenue?.marginPerGame);
+    const restAdjustment = selectedRestDays === 0 && opponentRestDays !== 0 ? -1.5
+      : opponentRestDays === 0 && selectedRestDays !== 0 ? 1.5
+        : clamp(((selectedRestDays ?? 1) - (opponentRestDays ?? 1)) * 0.35, -1, 1);
+    const available = [margin10, margin20, venueMargin].filter((value) => value !== null).length;
+    const weightedMargins = [
+      margin10 === null ? null : { value: margin10, weight: 0.5 },
+      margin20 === null ? null : { value: margin20, weight: 0.3 },
+      venueMargin === null ? null : { value: venueMargin, weight: 0.2 }
+    ].filter((item): item is { value: number; weight: number } => item !== null);
+    const weightTotal = weightedMargins.reduce((sum, item) => sum + item.weight, 0);
+    const historicalMargin = weightTotal
+      ? weightedMargins.reduce((sum, item) => sum + item.value * item.weight, 0) / weightTotal
+      : 0;
+    const projectedMargin = historicalMargin + (selectedIsHome ? 2 : -2) + restAdjustment;
+    const listedSpread = Number(line.spread);
+    const movement = movements.get(line.id);
+    const sampleCompleteness = Math.min(Math.min(selectedGames.length, opponentGames.length) / 20, 1);
+    const dataCompleteness = (available / 3) * sampleCompleteness;
+
+    contexts.set(line.id, {
+      selectedGamesPlayed: selectedGames.length, opponentGamesPlayed: opponentGames.length,
+      selectedMarginPerGame10: selected10?.marginPerGame ?? null,
+      opponentMarginPerGame10: opponent10?.marginPerGame ?? null,
+      marginPerGameDiff10: margin10,
+      selectedMarginPerGame20: selected20?.marginPerGame ?? null,
+      opponentMarginPerGame20: opponent20?.marginPerGame ?? null,
+      marginPerGameDiff20: margin20,
+      selectedPointsForPerGame10: selected10?.pointsForPerGame ?? null,
+      opponentPointsForPerGame10: opponent10?.pointsForPerGame ?? null,
+      pointsForPerGameDiff10: diffOrNull(selected10?.pointsForPerGame, opponent10?.pointsForPerGame),
+      selectedPointsAgainstPerGame10: selected10?.pointsAgainstPerGame ?? null,
+      opponentPointsAgainstPerGame10: opponent10?.pointsAgainstPerGame ?? null,
+      pointsAgainstPerGameDiff10: diffOrNull(selected10?.pointsAgainstPerGame, opponent10?.pointsAgainstPerGame),
+      selectedVenueMarginPerGame: selectedVenue?.marginPerGame ?? null,
+      opponentVenueMarginPerGame: opponentVenue?.marginPerGame ?? null,
+      venueMarginPerGameDiff: venueMargin,
+      selectedRestDays, opponentRestDays, restDaysDiff: diffOrNull(selectedRestDays, opponentRestDays),
+      selectedBackToBack: selectedRestDays === 0, opponentBackToBack: opponentRestDays === 0,
+      projectedMargin, listedSpread, projectedMarginVsSpread: projectedMargin + listedSpread,
+      dataCompleteness,
+      openingOddsAmerican: movement?.openingOddsAmerican ?? null,
+      previousOddsAmerican: movement?.previousOddsAmerican ?? null,
+      lineMovementAmerican: movement?.lineMovementAmerican ?? null,
+      lineMovementImplied: movement?.lineMovementImplied ?? null,
+      openingSpread: movement?.openingSpread ?? null,
+      previousSpread: movement?.previousSpread ?? null,
+      lineMovementSpread: movement?.lineMovementSpread ?? null,
+      lineSnapshotCount: movement?.lineSnapshotCount ?? null
+    });
+  }
+  return contexts;
+};
+
 export const buildFootballContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
   const footballLines = lines.filter((line) => isFootballSpreadSport(line.sport));
   if (!footballLines.length) {
@@ -3415,6 +3645,8 @@ export const generateAiPicks = async ({
   aiRoundRobinBankrollFraction?: number;
   aiRoundRobinPicks?: number;
 } = {}) => {
+  // NBA is observation-only until its spread model has enough tracked results to validate.
+  if (sport === "NBA") placeWagers = false;
   const result = await transaction(async (client) => {
     const runId = randomUUID();
     const today = forDate ?? centralDate();
@@ -3459,7 +3691,7 @@ export const generateAiPicks = async ({
           AND starts_at > now()
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $2::date
           AND ($3::text IS NULL OR market_key = $3::text)
-          AND ($1::text NOT IN ('NFL', 'NCAAF') OR market_key = 'spreads')
+          AND ($1::text NOT IN ('NFL', 'NCAAF', 'NBA') OR market_key = 'spreads')
         ORDER BY starts_at ASC, market_key ASC
       `,
       [sport, today, marketKey ?? null]
@@ -3473,6 +3705,7 @@ export const generateAiPicks = async ({
     const mlbContexts = await buildMlbContexts(client, activeLines.rows);
     const nhlContexts = await buildNhlContexts(client, activeLines.rows);
     const footballContexts = await buildFootballContexts(client, activeLines.rows);
+    const basketballContexts = await buildBasketballContexts(client, activeLines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, today)
       : undefined;
@@ -3481,6 +3714,8 @@ export const generateAiPicks = async ({
         ? footballContexts.get(line.id) ?? null
         : line.sport === "NHL"
           ? nhlContexts.get(line.id) ?? null
+          : line.sport === "NBA"
+            ? basketballContexts.get(line.id) ?? null
           : mlbContexts.get(line.id) ?? null, {
         modelVersion: activeModelVersion,
         confidenceCalibration
@@ -4138,7 +4373,7 @@ export const snapshotAiCandidates = async ({
         WHERE is_active = true
           AND sport = $1
           AND starts_at > now()
-          AND ($1::text NOT IN ('NFL', 'NCAAF') OR market_key = 'spreads')
+          AND ($1::text NOT IN ('NFL', 'NCAAF', 'NBA') OR market_key = 'spreads')
         ORDER BY starts_at ASC, market_key ASC
       `,
       [sport]
@@ -4152,6 +4387,7 @@ export const snapshotAiCandidates = async ({
     const mlbContexts = await buildMlbContexts(client, activeLines.rows);
     const nhlContexts = await buildNhlContexts(client, activeLines.rows);
     const footballContexts = await buildFootballContexts(client, activeLines.rows);
+    const basketballContexts = await buildBasketballContexts(client, activeLines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, today)
       : undefined;
@@ -4159,6 +4395,8 @@ export const snapshotAiCandidates = async ({
       ? footballContexts.get(line.id) ?? null
       : line.sport === "NHL"
         ? nhlContexts.get(line.id) ?? null
+        : line.sport === "NBA"
+          ? basketballContexts.get(line.id) ?? null
         : mlbContexts.get(line.id) ?? null, {
       modelVersion: activeModelVersion,
       confidenceCalibration
@@ -4240,8 +4478,8 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
           AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF')
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
           AND (
-            (sport IN ('NFL', 'NCAAF') AND market_key = 'spreads')
-            OR (sport IN ('MLB', 'NHL', 'NBA', 'NCAAMB') AND market_key = 'h2h')
+            (sport IN ('NFL', 'NCAAF', 'NBA') AND market_key = 'spreads')
+            OR (sport IN ('MLB', 'NHL', 'NCAAMB') AND market_key = 'h2h')
           )
         ORDER BY starts_at ASC, sport ASC
       `,
@@ -4261,6 +4499,7 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
     const mlbContexts = await buildMlbContexts(client, mlbLines);
     const nhlContexts = await buildNhlContexts(client, nhlLines);
     const footballContexts = await buildFootballContexts(client, footballLines);
+    const basketballContexts = await buildBasketballContexts(client, lines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, forDate)
       : undefined;
@@ -4272,6 +4511,8 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
         ? footballContexts.get(line.id) ?? null
         : line.sport === "NHL"
           ? nhlContexts.get(line.id) ?? null
+          : line.sport === "NBA"
+            ? basketballContexts.get(line.id) ?? null
           : line.sport === "MLB"
             ? mlbContexts.get(line.id) ?? null
             : null,

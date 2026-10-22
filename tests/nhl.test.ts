@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isRegularSeasonWindow } from "../src/server/odds.js";
 import { outcomeForSelection } from "../src/server/settlement.js";
-import { scoreNhlMoneyline, type CandidateLine } from "../src/server/ai.js";
+import { scoreNbaSpreadLine, scoreNhlMoneyline, type CandidateLine } from "../src/server/ai.js";
 
 test("NHL availability includes preseason through the Stanley Cup window", () => {
   assert.equal(isRegularSeasonWindow("NHL", new Date("2026-09-15T12:00:00Z")), true);
@@ -47,6 +47,40 @@ test("NBA spreads, totals, and moneylines settle through the shared engine", () 
   assert.equal(outcomeForSelection({ selectedTeam: "Boston Celtics", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "h2h", spread: 0, game, sport: "NBA" }), "won");
   assert.equal(outcomeForSelection({ selectedTeam: "New York Knicks", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "spreads", spread: 5.5, game, sport: "NBA" }), "lost");
   assert.equal(outcomeForSelection({ selectedTeam: "Over", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "totals", spread: 225.5, game, sport: "NBA" }), "won");
+});
+
+const nbaLine = (marketKey: "h2h" | "spreads" = "spreads"): CandidateLine => ({
+  id: "nba-line", provider_event_id: "nba-game", sport: "NBA",
+  starts_at: new Date("2026-10-22T23:00:00Z"), away_team: "Cleveland Cavaliers",
+  home_team: "Philadelphia 76ers", selected_team: "Cleveland Cavaliers",
+  spread: marketKey === "spreads" ? "+2.5" : "0", odds_american: -110, market_key: marketKey
+});
+
+test("NBA Chine model rejects moneylines", () => {
+  const scored = scoreNbaSpreadLine(nbaLine("h2h"), new Map(), null);
+  assert.equal(scored.confidence, 0.1);
+  assert.match(String(scored.features.rejectedReason), /spread-only/);
+});
+
+test("NBA Chine model converts a projected margin advantage into cover confidence", () => {
+  const context = {
+    selectedGamesPlayed: 20, opponentGamesPlayed: 20,
+    selectedMarginPerGame10: 7, opponentMarginPerGame10: -3, marginPerGameDiff10: 10,
+    selectedMarginPerGame20: 5, opponentMarginPerGame20: -2, marginPerGameDiff20: 7,
+    selectedPointsForPerGame10: 118, opponentPointsForPerGame10: 109, pointsForPerGameDiff10: 9,
+    selectedPointsAgainstPerGame10: 108, opponentPointsAgainstPerGame10: 115, pointsAgainstPerGameDiff10: -7,
+    selectedVenueMarginPerGame: 4, opponentVenueMarginPerGame: -2, venueMarginPerGameDiff: 6,
+    selectedRestDays: 2, opponentRestDays: 0, restDaysDiff: 2,
+    selectedBackToBack: false, opponentBackToBack: true,
+    projectedMargin: 6, listedSpread: 2.5, projectedMarginVsSpread: 8.5, dataCompleteness: 1,
+    openingOddsAmerican: -110, previousOddsAmerican: -110, lineMovementAmerican: 0,
+    lineMovementImplied: 0, openingSpread: 1.5, previousSpread: 2,
+    lineMovementSpread: 1, lineSnapshotCount: 3
+  };
+  const scored = scoreNbaSpreadLine(nbaLine(), new Map(), context);
+  assert.ok(scored.confidence > 0.65);
+  assert.ok(scored.edge > 0);
+  assert.equal(scored.features.modelProfile, "nba-spread-v1");
 });
 
 const nhlLine = (marketKey: "h2h" | "spreads" = "h2h"): CandidateLine => ({

@@ -295,6 +295,14 @@ export type ChineDailyPicksState = {
   availableDates: string[];
   availableSports: SportKey[];
   picks: ChineDailyPick[];
+  performance: Array<{
+    sport: SportKey | "ALL";
+    wins: number;
+    losses: number;
+    pushes: number;
+    settled: number;
+    winPct: number | null;
+  }>;
 };
 
 export type OpenBetLeg = {

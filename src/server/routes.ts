@@ -2814,10 +2814,61 @@ export const registerRoutes = (router: Router) => {
       );
       const availableSports = [...new Set(picks.rows.map((pick) => pick.sport))];
 
+      const performanceRows = await query<{
+        sport: SportKey; selectedTeam: string; awayTeam: string; homeTeam: string;
+        marketKey: MarketKey; spread: string; startsOn: string;
+        awayScore: number; homeScore: number;
+      }>(
+        `
+          SELECT pick.sport, pick.selected_team AS "selectedTeam", pick.away_team AS "awayTeam",
+            pick.home_team AS "homeTeam", pick.market_key AS "marketKey", pick.spread::text,
+            pick.pick_date::text AS "startsOn", result.away_score AS "awayScore", result.home_score AS "homeScore"
+          FROM chine_daily_pick pick
+          LEFT JOIN game_line line ON line.id = pick.game_line_id
+          JOIN LATERAL (
+            SELECT candidate.* FROM game_result candidate
+            WHERE candidate.sport = pick.sport
+              AND ((candidate.provider_game_id IS NOT NULL AND (
+                line.provider_event_id = 'espn:' || candidate.provider_game_id
+                OR position('espn:' || candidate.provider_game_id || '|' IN coalesce(line.provider_event_id, '')) > 0
+              )) OR (candidate.away_team = pick.away_team AND candidate.home_team = pick.home_team
+                AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)) <= 43200))
+            ORDER BY abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)), candidate.fetched_at DESC
+            LIMIT 1
+          ) result ON true
+          WHERE pick.pick_date <= $1::date
+            AND (pick.sport <> 'NBA' OR pick.market_key = 'spreads')
+        `,
+        [date]
+      );
+      const records = new Map<string, { wins: number; losses: number; pushes: number }>();
+      for (const row of performanceRows.rows) {
+        const outcome = outcomeForSelection({
+          selectedTeam: row.selectedTeam, awayTeam: row.awayTeam, homeTeam: row.homeTeam,
+          marketKey: row.marketKey, spread: Number(row.spread), sport: row.sport,
+          game: { startsOn: row.startsOn, awayTeam: row.awayTeam, homeTeam: row.homeTeam, awayScore: row.awayScore, homeScore: row.homeScore }
+        });
+        for (const key of ["ALL", row.sport]) {
+          const record = records.get(key) ?? { wins: 0, losses: 0, pushes: 0 };
+          if (outcome === "won") record.wins += 1;
+          if (outcome === "lost") record.losses += 1;
+          if (outcome === "push") record.pushes += 1;
+          records.set(key, record);
+        }
+      }
+      const performance = [...records.entries()].map(([sport, record]) => {
+        const decisions = record.wins + record.losses;
+        return {
+          sport, ...record, settled: decisions + record.pushes,
+          winPct: decisions ? record.wins / decisions : null
+        };
+      });
+
       res.json({
         date,
         availableDates: dates.rows.map((row) => row.date),
         availableSports,
+        performance,
         picks: picks.rows.map((pick) => {
           const result = pick.awayScore === null || pick.homeScore === null
             ? "pending" as const

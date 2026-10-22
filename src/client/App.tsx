@@ -4310,6 +4310,7 @@ function App() {
     const today = centralDate();
     const previousDate = addDays(chineDailyPicksDate, -1);
     const nextDate = addDays(chineDailyPicksDate, 1);
+    const performance = state?.performance.find((record) => record.sport === chineDailyPicksSport);
 
     return (
       <div className="panel page-panel chine-nfl-picks-card">
@@ -4362,6 +4363,12 @@ function App() {
             </button>
           ))}
         </div>
+        {performance && (
+          <p className="muted">
+            Tracked {chineDailyPicksSport === "ALL" ? "overall" : chineDailyPicksSport} results through {state?.date}: {performance.wins}-{performance.losses}
+            {performance.pushes > 0 ? `-${performance.pushes}` : ""} • Win rate {performance.winPct === null ? "N/A" : `${(performance.winPct * 100).toFixed(1)}%`}
+          </p>
+        )}
         {chineDailyPicksNotice && <p className="error">{chineDailyPicksNotice}</p>}
         {picks.length === 0 ? (
           <p className="muted">No modeled games were recorded for this date.</p>
