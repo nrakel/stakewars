@@ -42,6 +42,13 @@ test("NHL favorite covers a minus-1.5 puck line by winning by two", () => {
   }), "won");
 });
 
+test("NBA spreads, totals, and moneylines settle through the shared engine", () => {
+  const game = { startsOn: "2026-10-21", awayTeam: "Boston Celtics", homeTeam: "New York Knicks", awayScore: 116, homeScore: 110 };
+  assert.equal(outcomeForSelection({ selectedTeam: "Boston Celtics", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "h2h", spread: 0, game, sport: "NBA" }), "won");
+  assert.equal(outcomeForSelection({ selectedTeam: "New York Knicks", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "spreads", spread: 5.5, game, sport: "NBA" }), "lost");
+  assert.equal(outcomeForSelection({ selectedTeam: "Over", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "totals", spread: 225.5, game, sport: "NBA" }), "won");
+});
+
 const nhlLine = (marketKey: "h2h" | "spreads" = "h2h"): CandidateLine => ({
   id: "nhl-line",
   provider_event_id: "nhl-game",

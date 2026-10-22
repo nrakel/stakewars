@@ -70,7 +70,7 @@ type PendingLeg = {
   spread: string;
   odds_american: number;
   leg_status: WagerOutcome | "pending";
-  sport: "MLB" | "NHL" | "NFL" | "NCAAF" | "EPL" | "WORLDCUP";
+  sport: "MLB" | "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
   market_key: "h2h" | "spreads" | "totals";
   starts_at: string;
   starts_on: string;
@@ -142,6 +142,13 @@ type EspnScoreboardResponse = {
   events?: Array<{
     id: string;
     date: string;
+    status?: {
+      type?: {
+        completed?: boolean;
+        state?: string;
+        name?: string;
+      };
+    };
     competitions?: Array<{
       status?: {
         type?: {
@@ -509,6 +516,62 @@ export const fetchFootballFinals = async (sport: "NFL" | "NCAAF", startDate: str
       homeScore,
       metadata: { source: "espn-scoreboard", sport, status }
     });
+  }
+
+  return finals;
+};
+
+export const fetchBasketballFinals = async (sport: "NBA" | "NCAAMB", startDate: string, endDate: string) => {
+  const finals: FinalGame[] = [];
+  const cursor = new Date(`${startDate}T12:00:00.000Z`);
+  const finalDate = new Date(`${endDate}T12:00:00.000Z`);
+
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(finalDate.getTime()) || cursor > finalDate) {
+    throw new Error(`Invalid ESPN basketball date range: ${startDate} to ${endDate}`);
+  }
+
+  const league = sport === "NBA" ? "nba" : "mens-college-basketball";
+  while (cursor <= finalDate) {
+    const date = yyyyMmDd(cursor);
+    const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/basketball/${league}/scoreboard`);
+    url.searchParams.set("limit", "300");
+    url.searchParams.set("dates", date.replace(/-/g, ""));
+
+    const response = await fetch(url, { headers: espnFetchHeaders });
+    if (!response.ok) {
+      throw new Error(`ESPN basketball scoreboard ${sport} failed with ${response.status} for ${date}`);
+    }
+    const body = (await response.json()) as EspnScoreboardResponse;
+
+    for (const event of body.events ?? []) {
+      const startsAt = new Date(event.date);
+      if (Number.isNaN(startsAt.getTime())) continue;
+
+      const competition = event.competitions?.[0];
+      const status = event.status?.type ?? competition?.status?.type;
+      if (!status?.completed && status?.state !== "post" && status?.name !== "STATUS_FINAL") continue;
+
+      const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
+      const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
+      const homeScore = Number(home?.score);
+      const awayScore = Number(away?.score);
+      const homeTeam = home?.team?.displayName ?? home?.team?.name ?? home?.team?.shortDisplayName;
+      const awayTeam = away?.team?.displayName ?? away?.team?.name ?? away?.team?.shortDisplayName;
+      if (!homeTeam || !awayTeam || !Number.isFinite(homeScore) || !Number.isFinite(awayScore)) continue;
+
+      finals.push({
+        providerGameId: event.id,
+        startsAt: startsAt.toISOString(),
+        startsOn: yyyyMmDd(startsAt),
+        awayTeam,
+        homeTeam,
+        awayScore,
+        homeScore,
+        metadata: { source: "espn-scoreboard", sport, status }
+      });
+    }
+
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
 
   return finals;
@@ -1420,4 +1483,12 @@ export const settleNhlWagers = async (
   expandedStart.setUTCDate(expandedStart.getUTCDate() - 1);
   const finals = await fetchNhlFinals(yyyyMmDd(expandedStart), endDate);
   return settleWagersForFinals({ startDate, endDate, sports: ["NHL"], finals });
+};
+
+export const settleNbaWagers = async (
+  startDate = yyyyMmDd(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+  endDate = yyyyMmDd(new Date())
+) => {
+  const finals = await fetchBasketballFinals("NBA", startDate, endDate);
+  return settleWagersForFinals({ startDate, endDate, sports: ["NBA"], finals });
 };
