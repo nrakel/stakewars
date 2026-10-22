@@ -96,10 +96,17 @@ const nhlLine = (marketKey: "h2h" | "spreads" = "h2h"): CandidateLine => ({
   market_key: marketKey
 });
 
-test("NHL Chine model rejects non-moneyline candidates", () => {
-  const scored = scoreNhlMoneyline(nhlLine("spreads"), new Map(), null);
+test("NHL Chine model rejects markets other than moneyline and puck line", () => {
+  const scored = scoreNhlMoneyline({ ...nhlLine("spreads"), market_key: "totals" } as unknown as CandidateLine, new Map(), null);
   assert.equal(scored.confidence, 0.1);
-  assert.match(String(scored.features.rejectedReason), /moneyline-only/);
+  assert.match(String(scored.features.rejectedReason), /moneyline and puck-line/);
+});
+
+test("NHL Chine model evaluates puck lines with a distinct expected value", () => {
+  const scored = scoreNhlMoneyline(nhlLine("spreads"), new Map(), null);
+  assert.equal(scored.features.modelProfile, "nhl-puckline-v1");
+  assert.equal(typeof scored.features.expectedValue, "number");
+  assert.ok(scored.reasons.some((reason) => reason.includes("puck-line")));
 });
 
 test("NHL Chine model rewards team strength, recent form, venue, and rest", () => {

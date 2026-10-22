@@ -478,7 +478,7 @@ const confidenceBucket = (confidence: number): ConfidenceBucket => {
 };
 
 const isFootballSpreadSport = (sport: CandidateLine["sport"]) => sport === "NFL" || sport === "NCAAF";
-const isNhlMoneyline = (line: CandidateLine) => line.sport === "NHL" && line.market_key === "h2h";
+const isNhlMarket = (line: CandidateLine) => line.sport === "NHL" && (line.market_key === "h2h" || line.market_key === "spreads");
 
 const defaultConfidenceCalibration = new Map<ConfidenceBucket, number>([
   ["80%+", -0.018],
@@ -1672,7 +1672,7 @@ export const scoreNhlMoneyline = (
   const implied = impliedProbability(line.odds_american);
   const reasons: string[] = [];
 
-  if (!isNhlMoneyline(line)) {
+  if (!isNhlMarket(line)) {
     return {
       ...line,
       score: -100,
@@ -1686,9 +1686,9 @@ export const scoreNhlMoneyline = (
         edge: 0,
         modelVersion: options.modelVersion,
         modelProfile: "nhl-moneyline-v1",
-        rejectedReason: "NHL Chine model is moneyline-only"
+        rejectedReason: "NHL Chine model supports moneyline and puck-line markets only"
       },
-      reasons: ["NHL moneyline-only model rejects non-moneyline market"]
+      reasons: ["NHL model rejects unsupported market"]
     };
   }
 
@@ -1760,11 +1760,28 @@ export const scoreNhlMoneyline = (
     fair = implied + (fair - implied) * 0.72;
   }
 
-  fair = clamp(fair, 0.08, 0.88);
+  if (line.market_key === "spreads") {
+    const projectedGoalMargin = goalDiff * 0.45
+      + recentGoalDiff * 0.35
+      + venueGoalDiff * 0.2
+      + (line.selected_team === line.home_team ? 0.2 : -0.08)
+      + (context?.selectedBackToBack && !context.opponentBackToBack ? -0.18 : 0)
+      + (!context?.selectedBackToBack && context?.opponentBackToBack ? 0.15 : 0);
+    const puckLine = Number(line.spread);
+    const modeledCoverProbability = 1 / (1 + Math.exp(-(projectedGoalMargin + puckLine) / 1.1));
+    const evidenceWeight = 0.3 + completeness * 0.65;
+    fair = implied + (modeledCoverProbability - implied) * evidenceWeight;
+    reasons.push(puckLine < 0 ? "Favorite puck-line evaluation" : "Underdog puck-line protection");
+    if (projectedGoalMargin + puckLine >= 0.35) reasons.push("Projected goal margin clears the puck line");
+    else if (projectedGoalMargin + puckLine <= -0.35) reasons.push("Projected goal margin trails the puck line");
+  }
+
+  fair = clamp(fair, 0.08, 0.92);
   const edge = fair - implied;
+  const expectedValue = fair * americanToDecimal(line.odds_american) - 1;
   const uncalibratedConfidence = 0.5 + (fair - 0.5) * 0.72 + Math.max(edge, 0) * 0.2;
-  const confidence = clamp(uncalibratedConfidence, 0.1, 0.9);
-  const score = edge * 100 + confidence * 10;
+  const confidence = line.market_key === "spreads" ? fair : clamp(uncalibratedConfidence, 0.1, 0.9);
+  const score = expectedValue * 100 + confidence * 5;
 
   return {
     ...line,
@@ -1779,10 +1796,11 @@ export const scoreNhlMoneyline = (
       edge,
       isHome: line.selected_team === line.home_team,
       isFavorite: line.odds_american < 0,
-      isMoneyline: true,
+      isMoneyline: line.market_key === "h2h",
       marketCompleteness: eventMarketCounts.get(eventKey(line)) ?? 1,
       modelVersion: options.modelVersion,
-      modelProfile: "nhl-moneyline-v1",
+      modelProfile: line.market_key === "h2h" ? "nhl-moneyline-v2" : "nhl-puckline-v1",
+      expectedValue,
       confidenceBucket: confidenceBucket(confidence),
       confidenceCalibrationAdjustment: 0,
       uncalibratedConfidence,
@@ -1790,8 +1808,17 @@ export const scoreNhlMoneyline = (
       decimalOdds: americanToDecimal(line.odds_american),
       ...context
     },
-    reasons: reasons.length ? reasons : ["NHL moneyline price and team-strength projection"]
+    reasons: reasons.length ? reasons : ["NHL price and team-strength projection"]
   };
+};
+
+const isAiWagerEligible = (candidate: ScoredCandidate, minimumConfidence: number) => {
+  if (candidate.sport !== "NHL") return candidate.confidence >= minimumConfidence;
+  const expectedValue = Number(candidate.features.expectedValue ?? -1);
+  if (expectedValue < 0.03) return false;
+  if (candidate.market_key === "h2h") return candidate.fairProbability >= 0.58;
+  const spread = Number(candidate.spread);
+  return spread < 0 ? candidate.fairProbability >= 0.3 : candidate.fairProbability >= 0.62;
 };
 
 export const scoreNbaSpreadLine = (
@@ -3721,7 +3748,9 @@ export const generateAiPicks = async ({
         confidenceCalibration
       }))
       .sort((a, b) =>
-        sortBy === "confidence"
+        sport === "NHL"
+          ? b.score - a.score || b.confidence - a.confidence
+          : sortBy === "confidence"
           ? b.confidence - a.confidence || b.score - a.score
           : b.score - a.score || b.confidence - a.confidence
       );
@@ -3788,21 +3817,21 @@ export const generateAiPicks = async ({
       if (lockedGameKeys.has(gameKey)) {
         return;
       }
-      if (uniqueGames && acc.some((pick) => gameKeyForPick(pick) === gameKey)) {
+      if ((uniqueGames || candidate.sport === "NHL") && acc.some((pick) => gameKeyForPick(pick) === gameKey)) {
         return;
       }
       acc.push(candidate);
     };
 
     const projected = scored.reduce<ScoredCandidate[]>((acc, candidate) => {
-      if (candidate.confidence < aiWagerMinConfidence) {
+      if (!isAiWagerEligible(candidate, aiWagerMinConfidence)) {
         return acc;
       }
       addUniquePick(acc, candidate, openSlots);
       return acc;
     }, []);
     const wageringCandidates = scored.reduce<ScoredCandidate[]>((acc, candidate) => {
-      if (candidate.confidence >= aiWagerMinConfidence) {
+      if (isAiWagerEligible(candidate, aiWagerMinConfidence)) {
         addUniquePick(acc, candidate);
       }
       return acc;
@@ -4134,7 +4163,7 @@ export const generateAiPicks = async ({
     for (const candidate of selected) {
       const lockAt = new Date(candidate.starts_at.getTime() - lockWindowMinutes * 60 * 1000);
       const shouldLock = now >= lockAt && now < candidate.starts_at;
-      const shouldWagerStraight = shouldLock && candidate.confidence >= aiWagerMinConfidence;
+      const shouldWagerStraight = shouldLock && isAiWagerEligible(candidate, aiWagerMinConfidence);
       let wagerId: string | null = null;
       let wagerSkippedReason: string | null = null;
 
@@ -4479,7 +4508,8 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
           AND (
             (sport IN ('NFL', 'NCAAF', 'NBA') AND market_key = 'spreads')
-            OR (sport IN ('MLB', 'NHL', 'NCAAMB') AND market_key = 'h2h')
+            OR (sport = 'NHL' AND market_key IN ('h2h', 'spreads'))
+            OR (sport IN ('MLB', 'NCAAMB') AND market_key = 'h2h')
           )
         ORDER BY starts_at ASC, sport ASC
       `,
@@ -4523,8 +4553,11 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
     for (const candidate of scored) {
       const key = eventKey(candidate);
       const current = bestByGame.get(key);
-      if (!current || candidate.confidence > current.confidence ||
-        (candidate.confidence === current.confidence && candidate.score > current.score)) {
+      const candidateLeads = candidate.sport === "NHL"
+        ? !current || candidate.score > current.score || (candidate.score === current.score && candidate.confidence > current.confidence)
+        : !current || candidate.confidence > current.confidence ||
+          (candidate.confidence === current.confidence && candidate.score > current.score);
+      if (candidateLeads) {
         bestByGame.set(key, candidate);
       }
     }

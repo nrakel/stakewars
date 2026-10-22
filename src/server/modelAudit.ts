@@ -203,6 +203,8 @@ export const getChineModelAudit = async ({
     ), params),
     query<AuditRow>(aggregateSql(
       `CASE
+        WHEN sport = 'NHL' AND market_key = 'h2h' THEN 'NHL moneyline'
+        WHEN sport = 'NHL' AND market_key = 'spreads' THEN 'NHL puck line'
         WHEN market_key = 'h2h' THEN 'Moneyline'
         WHEN market_key = 'spreads' THEN 'Runline/spread'
         WHEN market_key = 'totals' THEN 'Total'
