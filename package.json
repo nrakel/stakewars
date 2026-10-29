@@ -51,6 +51,8 @@
     "ai:report-snapshots:prod": "node dist/scripts/report-ai-snapshots.js",
     "ai:nfl-contests": "tsx scripts/pick-nfl-contests-for-chine.ts",
     "ai:nfl-contests:prod": "node dist/scripts/pick-nfl-contests-for-chine.js",
+    "ai:nfl-player-projections": "tsx scripts/generate-nfl-player-projections.ts",
+    "ai:nfl-player-projections:prod": "node dist/scripts/generate-nfl-player-projections.js",
     "ai:daily-model-report": "tsx scripts/daily-model-performance-report.ts",
     "ai:daily-model-report:prod": "node dist/scripts/daily-model-performance-report.js",
     "ai:compare": "tsx scripts/compare-ai-variants.ts",
@@ -86,7 +88,7 @@
     "nightly": "tsx scripts/nightly-automation.ts",
     "nightly:prod": "node dist/scripts/nightly-automation.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "test": "node --import tsx --test tests/tower-engine.test.ts tests/merch.test.ts tests/football-odds.test.ts tests/nhl.test.ts tests/live-notifications.test.ts",
+    "test": "node --import tsx --test tests/tower-engine.test.ts tests/merch.test.ts tests/football-odds.test.ts tests/nhl.test.ts tests/live-notifications.test.ts tests/nfl-player-projections.test.ts",
     "simulate:tower": "tsx scripts/simulate-tower.ts",
     "security:smoke": "tsx scripts/security-smoke.ts"
   },

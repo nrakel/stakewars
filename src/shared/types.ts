@@ -254,6 +254,25 @@ export type ChineNflWeeklyPick = {
   spread: string;
   oddsAmerican: number;
   result: "pending" | "won" | "lost" | "push" | "void";
+  projections: NflPlayerProjection[];
+};
+
+export type NflPlayerProjection = {
+  playerId: string;
+  playerName: string;
+  team: string;
+  opponent: string;
+  position: "QB" | "RB" | "WR" | "TE";
+  roleRank: number;
+  projectedStats: Record<string, number>;
+  modelInputs: {
+    gamesUsed: number;
+    offense: Record<string, number>;
+    opponentDefense: Record<string, number>;
+    projectedTeam: Record<string, number>;
+  };
+  modelVersion: string;
+  generatedAt: string;
 };
 
 export type ChineNflPickRecord = {

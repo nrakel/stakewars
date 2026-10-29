@@ -2676,12 +2676,12 @@ export const registerRoutes = (router: Router) => {
         END
       `;
       const picks = await query<{
-        id: string; gameLineId: string | null; awayTeam: string; homeTeam: string;
+        id: string; gameId: string; gameLineId: string | null; awayTeam: string; homeTeam: string;
         startsAt: Date; selectedTeam: string; spread: string; oddsAmerican: number;
         confidence: string; createdAt: Date; result: "pending" | "won" | "lost" | "push" | "void";
       }>(
         `
-          SELECT p.id, p.game_line_id AS "gameLineId", p.away_team AS "awayTeam",
+          SELECT p.id, p.game_id AS "gameId", p.game_line_id AS "gameLineId", p.away_team AS "awayTeam",
             p.home_team AS "homeTeam", p.starts_at AS "startsAt",
             p.selected_team AS "selectedTeam", p.spread::text, p.odds_american AS "oddsAmerican",
             p.confidence::text, p.created_at AS "createdAt", ${resultFor("p")} AS result
@@ -2692,6 +2692,22 @@ export const registerRoutes = (router: Router) => {
         `,
         [pool.id, week]
       );
+      const projections = await query<{
+        gameId: string; playerId: string; playerName: string; team: string; opponent: string;
+        position: "QB" | "RB" | "WR" | "TE"; roleRank: number;
+        projectedStats: Record<string, number>; modelInputs: any; modelVersion: string; generatedAt: Date;
+      }>(
+        `SELECT game_id AS "gameId", player_id AS "playerId", player_name AS "playerName", team, opponent,
+          position, role_rank AS "roleRank", projected_stats AS "projectedStats", model_inputs AS "modelInputs",
+          model_version AS "modelVersion", generated_at AS "generatedAt"
+        FROM nfl_player_projection WHERE pool_id = $1 AND week = $2
+        ORDER BY team, position, role_rank`,
+        [pool.id, week]
+      );
+      const projectionsByGame = new Map<string, typeof projections.rows>();
+      for (const projection of projections.rows) {
+        projectionsByGame.set(projection.gameId, [...(projectionsByGame.get(projection.gameId) ?? []), projection]);
+      }
       const availableWeeksResult = await query<{ week: number }>(
         "SELECT DISTINCT week FROM chine_nfl_weekly_pick WHERE pool_id = $1 ORDER BY week DESC",
         [pool.id]
@@ -2735,7 +2751,11 @@ export const registerRoutes = (router: Router) => {
           homeTeam: pick.homeTeam,
           spread: pick.spread,
           oddsAmerican: pick.oddsAmerican,
-          result: pick.result
+          result: pick.result,
+          projections: (projectionsByGame.get(pick.gameId) ?? []).map((projection) => ({
+            ...projection,
+            generatedAt: projection.generatedAt.toISOString()
+          }))
         }))
       });
     } catch (error) {

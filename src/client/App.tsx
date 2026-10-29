@@ -4216,6 +4216,7 @@ function App() {
 
   const ChineNflPicksPage = () => {
     const state = chineNflPicks;
+    const [expandedPickId, setExpandedPickId] = useState<string | null>(null);
     const week = state?.week ?? nflConfidenceState?.currentWeek ?? nflConfidenceLeaderboard?.currentWeek ?? 1;
     const picks = [...(state?.picks ?? [])].sort((a, b) => Number(b.confidence) - Number(a.confidence));
     const confidenceBandClass = (confidence: number | string) => {
@@ -4277,22 +4278,72 @@ function App() {
               <span>Pick</span>
               <span>Confidence</span>
             </div>
-            {picks.map((pick) => (
-              <div className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)}`} key={pick.id}>
-                <div>
-                  <strong>{pick.game}</strong>
-                  <small>{shortDateTime(pick.startsAt)}</small>
+            {picks.map((pick) => {
+              const expanded = expandedPickId === pick.id;
+              const teams = [...new Set(pick.projections.map((projection) => projection.team))];
+              const labels: Record<string, string> = {
+                completions: "Cmp", passYards: "Pass Yds", carries: "Car", rushYards: "Rush Yds",
+                passTds: "Pass TD", rushTds: "Rush TD", receptions: "Rec", receivingYards: "Rec Yds", receivingTds: "Rec TD"
+              };
+              return (
+                <div className="chine-nfl-pick-group" key={pick.id}>
+                  <button
+                    type="button"
+                    className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)} ${pick.projections.length ? "expandable" : ""}`}
+                    onClick={() => pick.projections.length && setExpandedPickId(expanded ? null : pick.id)}
+                    aria-expanded={pick.projections.length ? expanded : undefined}
+                  >
+                    <div>
+                      <strong>{pick.game}</strong>
+                      <small>{shortDateTime(pick.startsAt)}{pick.projections.length ? " • Player projections" : ""}</small>
+                    </div>
+                    <div>
+                      <strong>{pick.pick}</strong>
+                      <small>Spread {pick.spread} • {pick.oddsAmerican > 0 ? "+" : ""}{pick.oddsAmerican}</small>
+                    </div>
+                    <div className="chine-nfl-confidence">
+                      {Math.round(Number(pick.confidence) * 100)}%
+                      {pick.result !== "pending" && <small className={`pick-result ${pick.result}`}>{statusLabel(pick.result)}</small>}
+                    </div>
+                    {pick.projections.length > 0 && <ChevronDown className={`pick-expand-icon ${expanded ? "open" : ""}`} size={18} />}
+                  </button>
+                  {expanded && (
+                    <div className="nfl-player-projections">
+                      <div className="projection-note">
+                        <strong>Player projections</strong>
+                        <span>Recent box-score production adjusted for opponent pass and run results. Pressure and scheme are not included yet.</span>
+                      </div>
+                      {teams.map((team) => {
+                        const players = pick.projections.filter((projection) => projection.team === team);
+                        const inputs = players[0]?.modelInputs;
+                        return (
+                          <section key={team}>
+                            <h3>{team}</h3>
+                            {inputs && (
+                              <p className="projection-matchup-line">
+                                Recent offense: {inputs.offense.passYards} pass / {inputs.offense.rushYards} rush yds · Opponent allows: {inputs.opponentDefense.passYardsAllowed} pass / {inputs.opponentDefense.rushYardsAllowed} rush yds
+                              </p>
+                            )}
+                            <div className="projection-player-list">
+                              {players.map((player) => (
+                                <div className="projection-player" key={player.playerId}>
+                                  <div><strong>{player.playerName}</strong><small>{player.position}{player.roleRank > 1 ? player.roleRank : ""}</small></div>
+                                  <dl>
+                                    {Object.entries(player.projectedStats).map(([key, value]) => (
+                                      <div key={key}><dt>{labels[key] ?? key}</dt><dd>{value}</dd></div>
+                                    ))}
+                                  </dl>
+                                </div>
+                              ))}
+                            </div>
+                          </section>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <strong>{pick.pick}</strong>
-                  <small>Spread {pick.spread} • {pick.oddsAmerican > 0 ? "+" : ""}{pick.oddsAmerican}</small>
-                </div>
-                <div className="chine-nfl-confidence">
-                  {Math.round(Number(pick.confidence) * 100)}%
-                  {pick.result !== "pending" && <small className={`pick-result ${pick.result}`}>{statusLabel(pick.result)}</small>}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -3774,10 +3774,121 @@ textarea {
 }
 
 .chine-nfl-pick-row {
+  position: relative;
+  width: 100%;
   padding: 12px;
   border: 1px solid #f2dcc9;
   border-radius: 8px;
   background: #fff;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.chine-nfl-pick-row.expandable {
+  padding-right: 40px;
+  cursor: pointer;
+}
+
+.pick-expand-icon {
+  position: absolute;
+  right: 12px;
+  color: #65736d;
+  transition: transform 140ms ease;
+}
+
+.pick-expand-icon.open {
+  transform: rotate(180deg);
+}
+
+.nfl-player-projections {
+  display: grid;
+  gap: 16px;
+  margin-top: -8px;
+  padding: 18px;
+  border: 1px solid #dfe5df;
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+  background: #f8faf8;
+}
+
+.projection-note {
+  display: grid;
+  gap: 3px;
+}
+
+.projection-note span,
+.projection-matchup-line {
+  color: #65736d;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.nfl-player-projections section h3 {
+  margin: 0 0 3px;
+  font-size: 1rem;
+}
+
+.projection-matchup-line {
+  margin: 0 0 10px;
+}
+
+.projection-player-list {
+  display: grid;
+  gap: 7px;
+}
+
+.projection-player {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(0, 2fr);
+  gap: 12px;
+  align-items: center;
+  padding: 9px 10px;
+  border: 1px solid #e2e7e3;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.projection-player > div small {
+  display: block;
+  color: #65736d;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.projection-player dl {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px 14px;
+  margin: 0;
+}
+
+.projection-player dl div {
+  min-width: 48px;
+  text-align: right;
+}
+
+.projection-player dt {
+  color: #65736d;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.projection-player dd {
+  margin: 1px 0 0;
+  color: #14201c;
+  font-weight: 950;
+}
+
+@media (max-width: 640px) {
+  .chine-nfl-picks-header { display: none; }
+  .chine-nfl-pick-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .chine-nfl-pick-row > div:nth-child(2) { grid-column: 1; }
+  .chine-nfl-confidence { grid-column: 2; grid-row: 1 / span 2; }
+  .projection-player { grid-template-columns: 1fr; }
+  .projection-player dl { justify-content: flex-start; }
+  .projection-player dl div { text-align: left; }
 }
 
 .chine-nfl-pick-row.confidence-high {
