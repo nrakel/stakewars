@@ -4279,8 +4279,9 @@ function App() {
               <span>Confidence</span>
             </div>
             {picks.map((pick) => {
+              const projections = pick.projections ?? [];
               const expanded = expandedPickId === pick.id;
-              const teams = [...new Set(pick.projections.map((projection) => projection.team))];
+              const teams = [...new Set(projections.map((projection) => projection.team))];
               const labels: Record<string, string> = {
                 completions: "Cmp", passYards: "Pass Yds", carries: "Car", rushYards: "Rush Yds",
                 passTds: "Pass TD", rushTds: "Rush TD", receptions: "Rec", receivingYards: "Rec Yds", receivingTds: "Rec TD"
@@ -4289,13 +4290,13 @@ function App() {
                 <div className="chine-nfl-pick-group" key={pick.id}>
                   <button
                     type="button"
-                    className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)} ${pick.projections.length ? "expandable" : ""}`}
-                    onClick={() => pick.projections.length && setExpandedPickId(expanded ? null : pick.id)}
-                    aria-expanded={pick.projections.length ? expanded : undefined}
+                    className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)} ${projections.length ? "expandable" : ""}`}
+                    onClick={() => projections.length && setExpandedPickId(expanded ? null : pick.id)}
+                    aria-expanded={projections.length ? expanded : undefined}
                   >
                     <div>
                       <strong>{pick.game}</strong>
-                      <small>{shortDateTime(pick.startsAt)}{pick.projections.length ? " • Player projections" : ""}</small>
+                      <small>{shortDateTime(pick.startsAt)}{projections.length ? " • Player projections" : ""}</small>
                     </div>
                     <div>
                       <strong>{pick.pick}</strong>
@@ -4305,7 +4306,7 @@ function App() {
                       {Math.round(Number(pick.confidence) * 100)}%
                       {pick.result !== "pending" && <small className={`pick-result ${pick.result}`}>{statusLabel(pick.result)}</small>}
                     </div>
-                    {pick.projections.length > 0 && <ChevronDown className={`pick-expand-icon ${expanded ? "open" : ""}`} size={18} />}
+                    {projections.length > 0 && <ChevronDown className={`pick-expand-icon ${expanded ? "open" : ""}`} size={18} />}
                   </button>
                   {expanded && (
                     <div className="nfl-player-projections">
@@ -4314,7 +4315,7 @@ function App() {
                         <span>Recent box-score production adjusted for opponent pass and run results. Pressure and scheme are not included yet.</span>
                       </div>
                       {teams.map((team) => {
-                        const players = pick.projections.filter((projection) => projection.team === team);
+                        const players = projections.filter((projection) => projection.team === team);
                         const inputs = players[0]?.modelInputs;
                         return (
                           <section key={team}>

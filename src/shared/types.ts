@@ -254,7 +254,7 @@ export type ChineNflWeeklyPick = {
   spread: string;
   oddsAmerican: number;
   result: "pending" | "won" | "lost" | "push" | "void";
-  projections: NflPlayerProjection[];
+  projections?: NflPlayerProjection[];
 };
 
 export type NflPlayerProjection = {
