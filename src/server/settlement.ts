@@ -191,6 +191,8 @@ type NhlScheduleResponse = {
   }>;
 };
 
+export const isNhlFinalState = (state: string | undefined) => state === "FINAL" || state === "OFF";
+
 const espnLeagueForSport = (sport: "EPL" | "WORLDCUP") => sport === "EPL" ? "eng.1" : "fifa.world";
 
 const espnFootballLeagueForSport = (sport: "NFL" | "NCAAF") => sport === "NCAAF" ? "college-football" : sport.toLowerCase();
@@ -598,8 +600,8 @@ export const fetchNhlFinals = async (startDate: string, endDate: string) => {
     const games = body.gameWeek?.find((day) => day.date === date)?.games ?? [];
     for (const game of games) {
       const startsAt = new Date(game.startTimeUTC ?? "");
-      // OFF is the NHL's post-final state after scoring corrections are complete.
-      if (Number.isNaN(startsAt.getTime()) || game.gameState !== "OFF") {
+      // FINAL is complete; OFF follows later after the NHL closes postgame processing.
+      if (Number.isNaN(startsAt.getTime()) || !isNhlFinalState(game.gameState)) {
         continue;
       }
 

@@ -1,13 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { isRegularSeasonWindow } from "../src/server/odds.js";
-import { outcomeForSelection } from "../src/server/settlement.js";
+import { isNhlFinalState, outcomeForSelection } from "../src/server/settlement.js";
 import { scoreNbaSpreadLine, scoreNhlMoneyline, type CandidateLine } from "../src/server/ai.js";
 
 test("NHL availability includes preseason through the Stanley Cup window", () => {
   assert.equal(isRegularSeasonWindow("NHL", new Date("2026-09-15T12:00:00Z")), true);
   assert.equal(isRegularSeasonWindow("NHL", new Date("2027-04-20T12:00:00Z")), true);
   assert.equal(isRegularSeasonWindow("NHL", new Date("2027-06-01T12:00:00Z")), false);
+});
+
+test("NHL settlement accepts both terminal API states", () => {
+  assert.equal(isNhlFinalState("FINAL"), true);
+  assert.equal(isNhlFinalState("OFF"), true);
+  assert.equal(isNhlFinalState("LIVE"), false);
+  assert.equal(isNhlFinalState("FUT"), false);
 });
 
 test("MLB availability includes the postseason", () => {
