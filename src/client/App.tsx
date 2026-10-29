@@ -1915,6 +1915,7 @@ function App() {
   const [chineNflPicksWeek, setChineNflPicksWeek] = useState<number | null>(null);
   const [chineNflPicksNotice, setChineNflPicksNotice] = useState("");
   const [chineNflPicksPending, setChineNflPicksPending] = useState(false);
+  const [expandedNflPickId, setExpandedNflPickId] = useState<string | null>(null);
   const [chineDailyPicks, setChineDailyPicks] = useState<ChineDailyPicksState | null>(null);
   const [chineDailyPicksDate, setChineDailyPicksDate] = useState(centralDate());
   const [chineDailyPicksSport, setChineDailyPicksSport] = useState<"ALL" | SportKey>("ALL");
@@ -4216,7 +4217,6 @@ function App() {
 
   const ChineNflPicksPage = () => {
     const state = chineNflPicks;
-    const [expandedPickId, setExpandedPickId] = useState<string | null>(null);
     const week = state?.week ?? nflConfidenceState?.currentWeek ?? nflConfidenceLeaderboard?.currentWeek ?? 1;
     const picks = [...(state?.picks ?? [])].sort((a, b) => Number(b.confidence) - Number(a.confidence));
     const confidenceBandClass = (confidence: number | string) => {
@@ -4280,7 +4280,7 @@ function App() {
             </div>
             {picks.map((pick) => {
               const projections = pick.projections ?? [];
-              const expanded = expandedPickId === pick.id;
+              const expanded = expandedNflPickId === pick.id;
               const teams = [...new Set(projections.map((projection) => projection.team))];
               const labels: Record<string, string> = {
                 completions: "Cmp", passYards: "Pass Yds", carries: "Car", rushYards: "Rush Yds",
@@ -4291,7 +4291,7 @@ function App() {
                   <button
                     type="button"
                     className={`chine-nfl-pick-row confidence-${confidenceBandClass(pick.confidence)} ${projections.length ? "expandable" : ""}`}
-                    onClick={() => projections.length && setExpandedPickId(expanded ? null : pick.id)}
+                    onClick={() => projections.length && setExpandedNflPickId(expanded ? null : pick.id)}
                     aria-expanded={projections.length ? expanded : undefined}
                   >
                     <div>
