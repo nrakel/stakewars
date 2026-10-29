@@ -4283,8 +4283,8 @@ function App() {
               const expanded = expandedNflPickId === pick.id;
               const positionGroups = [
                 { position: "QB", title: "Quarterbacks", sortKey: "passYards", minimum: 0, limit: 2, stats: [["completions", "Completions"], ["passYards", "Pass Yards"], ["passTds", "Pass TDs"], ["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"]] },
-                { position: "WR", title: "Wide Receivers", sortKey: "receivingYards", minimum: 10, limit: 3, stats: [["receptions", "Receptions"], ["receivingYards", "Receiving Yards"], ["receivingTds", "Receiving TDs"], ["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"]] },
-                { position: "RB", title: "Running Backs", sortKey: "rushYards", minimum: 10, limit: 3, stats: [["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"], ["receptions", "Receptions"], ["receivingYards", "Receiving Yards"], ["receivingTds", "Receiving TDs"]] }
+                { position: "WR", title: "Wide Receivers", sortKey: "receivingYards", minimum: 10, limit: null, stats: [["receptions", "Receptions"], ["receivingYards", "Receiving Yards"], ["receivingTds", "Receiving TDs"], ["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"]] },
+                { position: "RB", title: "Running Backs", sortKey: "rushYards", minimum: 10, limit: null, stats: [["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"], ["receptions", "Receptions"], ["receivingYards", "Receiving Yards"], ["receivingTds", "Receiving TDs"]] }
               ] as const;
               return (
                 <div className="chine-nfl-pick-group" key={pick.id}>
@@ -4325,10 +4325,10 @@ function App() {
                         })}
                       </div>
                       {positionGroups.map((group) => {
-                        const players = projections
+                        const rankedPlayers = projections
                           .filter((projection) => projection.position === group.position && Number(projection.projectedStats[group.sortKey] ?? 0) >= group.minimum)
-                          .sort((a, b) => Number(b.projectedStats[group.sortKey] ?? 0) - Number(a.projectedStats[group.sortKey] ?? 0))
-                          .slice(0, group.limit);
+                          .sort((a, b) => Number(b.projectedStats[group.sortKey] ?? 0) - Number(a.projectedStats[group.sortKey] ?? 0));
+                        const players = group.limit === null ? rankedPlayers : rankedPlayers.slice(0, group.limit);
                         if (!players.length) return null;
                         return (
                           <section key={group.position}>
