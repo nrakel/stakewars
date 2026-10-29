@@ -3881,6 +3881,26 @@ textarea {
   font-weight: 950;
 }
 
+.projection-line-comparison {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.65rem;
+  font-weight: 850;
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.projection-line-comparison.higher { color: #147a36; }
+.projection-line-comparison.lower { color: #b33a2f; }
+.projection-line-comparison.equal { color: #65736d; }
+
+.projection-line-comparison span {
+  display: block;
+  color: #7b8782;
+  font-size: 0.6rem;
+  font-weight: 700;
+}
+
 @media (max-width: 640px) {
   .chine-nfl-picks-header { display: none; }
   .chine-nfl-pick-row { grid-template-columns: minmax(0, 1fr) auto; }

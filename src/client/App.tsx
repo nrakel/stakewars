@@ -4342,7 +4342,29 @@ function App() {
                                   </div>
                                   <dl>
                                     {group.stats.map(([key, label]) => (
-                                      <div key={key}><dt>{label}</dt><dd>{player.projectedStats[key] ?? 0}</dd></div>
+                                      <div key={key}>
+                                        <dt>{label}</dt>
+                                        <dd>
+                                          {player.projectedStats[key] ?? 0}
+                                          {(() => {
+                                            const line = (player.lineData ?? []).find((candidate) => candidate.statKey === key);
+                                            if (!line) return null;
+                                            const projection = Number(player.projectedStats[key] ?? 0);
+                                            const difference = projection - line.point;
+                                            const direction = difference > 0 ? "Higher" : difference < 0 ? "Lower" : "Equal";
+                                            const prices = [
+                                              line.overOdds !== null ? `O ${americanOdds(line.overOdds)}` : null,
+                                              line.underOdds !== null ? `U ${americanOdds(line.underOdds)}` : null
+                                            ].filter(Boolean).join(" / ");
+                                            return (
+                                              <small className={`projection-line-comparison ${difference > 0 ? "higher" : difference < 0 ? "lower" : "equal"}`}>
+                                                Line {line.point}{prices ? ` (${prices})` : ""} · {direction}{difference !== 0 ? ` by ${Math.abs(Number(difference.toFixed(2)))}` : ""}
+                                                <span>{line.bookmakerTitle}</span>
+                                              </small>
+                                            );
+                                          })()}
+                                        </dd>
+                                      </div>
                                     ))}
                                   </dl>
                                 </div>

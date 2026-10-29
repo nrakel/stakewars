@@ -13,6 +13,7 @@ import { fetchMlbProbablePitcherFallbacks, type MlbProbablePitcherFallback } fro
 import { buildRedditAllPicksPreview, buildRedditParlayPreview, buildRedditPreview, getTodayRedditLockStatus, lockRedditPostTracking } from "./reddit.js";
 import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
+import { nflPlayerKey } from "./nflPlayerProps.js";
 import { outcomeForSelection } from "./settlement.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
@@ -2708,6 +2709,26 @@ export const registerRoutes = (router: Router) => {
       for (const projection of projections.rows) {
         projectionsByGame.set(projection.gameId, [...(projectionsByGame.get(projection.gameId) ?? []), projection]);
       }
+      const propLines = await query<{
+        gameId: string; playerKey: string; statKey: string; point: string; overOdds: number | null;
+        underOdds: number | null; bookmakerKey: string; bookmakerTitle: string; fetchedAt: Date;
+      }>(
+        `SELECT game_id AS "gameId", player_key AS "playerKey", stat_key AS "statKey", point::text,
+          over_odds AS "overOdds", under_odds AS "underOdds", bookmaker_key AS "bookmakerKey",
+          bookmaker_title AS "bookmakerTitle", fetched_at AS "fetchedAt"
+        FROM nfl_player_prop_line WHERE game_id = ANY($1::uuid[])
+        ORDER BY CASE bookmaker_key
+          WHEN 'fanduel' THEN 1 WHEN 'pinnacle' THEN 2 WHEN 'draftkings' THEN 3
+          WHEN 'betmgm' THEN 4 WHEN 'caesars' THEN 5 WHEN 'bovada' THEN 6
+          WHEN 'sleeper' THEN 7 WHEN 'underdog' THEN 8 ELSE 20 END, fetched_at DESC`,
+        [picks.rows.map((pick) => pick.gameId)]
+      );
+      const propsByPlayer = new Map<string, typeof propLines.rows>();
+      for (const line of propLines.rows) {
+        const key = `${line.gameId}|${line.playerKey}`;
+        const existing = propsByPlayer.get(key) ?? [];
+        if (!existing.some((candidate) => candidate.statKey === line.statKey)) propsByPlayer.set(key, [...existing, line]);
+      }
       const availableWeeksResult = await query<{ week: number }>(
         "SELECT DISTINCT week FROM chine_nfl_weekly_pick WHERE pool_id = $1 ORDER BY week DESC",
         [pool.id]
@@ -2752,10 +2773,14 @@ export const registerRoutes = (router: Router) => {
           spread: pick.spread,
           oddsAmerican: pick.oddsAmerican,
           result: pick.result,
-          projections: (projectionsByGame.get(pick.gameId) ?? []).map((projection) => ({
-            ...projection,
-            generatedAt: projection.generatedAt.toISOString()
-          }))
+          projections: (projectionsByGame.get(pick.gameId) ?? []).map((projection) => {
+            const lineData = propsByPlayer.get(`${pick.gameId}|${nflPlayerKey(projection.playerName)}`) ?? [];
+            return {
+              ...projection,
+              generatedAt: projection.generatedAt.toISOString(),
+              lineData: lineData.map((line) => ({ ...line, point: Number(line.point), fetchedAt: line.fetchedAt.toISOString() }))
+            };
+          })
         }))
       });
     } catch (error) {

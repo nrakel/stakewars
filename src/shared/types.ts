@@ -273,6 +273,17 @@ export type NflPlayerProjection = {
   };
   modelVersion: string;
   generatedAt: string;
+  lineData?: NflPlayerPropLine[];
+};
+
+export type NflPlayerPropLine = {
+  statKey: string;
+  point: number;
+  overOdds: number | null;
+  underOdds: number | null;
+  bookmakerKey: string;
+  bookmakerTitle: string;
+  fetchedAt: string;
 };
 
 export type ChineNflPickRecord = {

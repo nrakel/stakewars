@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseFootballTeamBoxScore } from "../src/server/nflPlayerProjections.js";
+import { nflPlayerKey } from "../src/server/nflPlayerProps.js";
 
 test("parses ESPN passing, rushing, and receiving lines into one player record", () => {
   const athlete = { athlete: { id: "qb-1", displayName: "Test Quarterback" } };
@@ -24,4 +25,9 @@ test("aggregates player box-score production into team totals", () => {
   assert.equal(parsed.totals.carries, 17);
   assert.equal(parsed.totals.rushYards, 85);
   assert.equal(parsed.totals.rushTds, 1);
+});
+
+test("normalizes player names for projection-to-prop matching", () => {
+  assert.equal(nflPlayerKey("D.J. Moore Jr."), "djmoorejr");
+  assert.equal(nflPlayerKey("  Christian Watson  "), "christianwatson");
 });
