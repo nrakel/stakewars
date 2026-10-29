@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { query, transaction } from "./db.js";
 
-const MODEL_VERSION = "nfl-boxscore-projection-v1";
+const MODEL_VERSION = "nfl-boxscore-projection-v2";
 const ESPN_SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=";
 const ESPN_ROSTER = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/";
 
@@ -101,7 +101,10 @@ const projectPlayer = (position: Position, baseline: StatLine, recentTeam: TeamG
   return {
     receptions: round(scale(baseline.receptions, teamAverage(recentTeam, "completions"), projected.completions ?? 0)),
     receivingYards: round(scale(baseline.receivingYards, teamAverage(recentTeam, "passYards"), projected.passYards ?? 0), 0),
-    receivingTds: round(scale(baseline.receivingTds, teamAverage(recentTeam, "passTds"), projected.passTds ?? 0), 2)
+    receivingTds: round(scale(baseline.receivingTds, teamAverage(recentTeam, "passTds"), projected.passTds ?? 0), 2),
+    carries: round(scale(baseline.carries, teamAverage(recentTeam, "carries"), projected.carries ?? 0)),
+    rushYards: round(scale(baseline.rushYards, teamAverage(recentTeam, "rushYards"), projected.rushYards ?? 0), 0),
+    rushTds: round(scale(baseline.rushTds, teamAverage(recentTeam, "rushTds"), projected.rushTds ?? 0), 2)
   };
 };
 

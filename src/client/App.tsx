@@ -4281,11 +4281,11 @@ function App() {
             {picks.map((pick) => {
               const projections = pick.projections ?? [];
               const expanded = expandedNflPickId === pick.id;
-              const teams = [...new Set(projections.map((projection) => projection.team))];
-              const labels: Record<string, string> = {
-                completions: "Cmp", passYards: "Pass Yds", carries: "Car", rushYards: "Rush Yds",
-                passTds: "Pass TD", rushTds: "Rush TD", receptions: "Rec", receivingYards: "Rec Yds", receivingTds: "Rec TD"
-              };
+              const positionGroups = [
+                { position: "QB", title: "Quarterbacks", sortKey: "passYards", minimum: 0, limit: 2, stats: [["completions", "Completions"], ["passYards", "Pass Yards"], ["passTds", "Pass TDs"], ["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"]] },
+                { position: "WR", title: "Wide Receivers", sortKey: "receivingYards", minimum: 10, limit: 3, stats: [["receptions", "Receptions"], ["receivingYards", "Receiving Yards"], ["receivingTds", "Receiving TDs"], ["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"]] },
+                { position: "RB", title: "Running Backs", sortKey: "rushYards", minimum: 10, limit: 3, stats: [["carries", "Rush Attempts"], ["rushYards", "Rush Yards"], ["rushTds", "Rush TDs"], ["receptions", "Receptions"], ["receivingYards", "Receiving Yards"], ["receivingTds", "Receiving TDs"]] }
+              ] as const;
               return (
                 <div className="chine-nfl-pick-group" key={pick.id}>
                   <button
@@ -4314,24 +4314,35 @@ function App() {
                         <strong>Player projections</strong>
                         <span>Recent box-score production adjusted for opponent pass and run results. Pressure and scheme are not included yet.</span>
                       </div>
-                      {teams.map((team) => {
-                        const players = projections.filter((projection) => projection.team === team);
-                        const inputs = players[0]?.modelInputs;
+                      <div className="projection-matchup-context">
+                        {[...new Set(projections.map((projection) => projection.team))].map((team) => {
+                          const inputs = projections.find((projection) => projection.team === team)?.modelInputs;
+                          return inputs ? (
+                            <p className="projection-matchup-line" key={team}>
+                              <strong>{team}:</strong> {inputs.offense.passYards} pass / {inputs.offense.rushYards} rush yds recently; opponent allows {inputs.opponentDefense.passYardsAllowed} pass / {inputs.opponentDefense.rushYardsAllowed} rush yds.
+                            </p>
+                          ) : null;
+                        })}
+                      </div>
+                      {positionGroups.map((group) => {
+                        const players = projections
+                          .filter((projection) => projection.position === group.position && Number(projection.projectedStats[group.sortKey] ?? 0) >= group.minimum)
+                          .sort((a, b) => Number(b.projectedStats[group.sortKey] ?? 0) - Number(a.projectedStats[group.sortKey] ?? 0))
+                          .slice(0, group.limit);
+                        if (!players.length) return null;
                         return (
-                          <section key={team}>
-                            <h3>{team}</h3>
-                            {inputs && (
-                              <p className="projection-matchup-line">
-                                Recent offense: {inputs.offense.passYards} pass / {inputs.offense.rushYards} rush yds · Opponent allows: {inputs.opponentDefense.passYardsAllowed} pass / {inputs.opponentDefense.rushYardsAllowed} rush yds
-                              </p>
-                            )}
+                          <section key={group.position}>
+                            <h3>{group.title}</h3>
                             <div className="projection-player-list">
-                              {players.map((player) => (
+                              {players.map((player, index) => (
                                 <div className="projection-player" key={player.playerId}>
-                                  <div><strong>{player.playerName}</strong><small>{player.position}{player.roleRank > 1 ? player.roleRank : ""}</small></div>
+                                  <div>
+                                    <strong>{group.position}{index + 1} · {player.playerName}</strong>
+                                    <small>{player.team}</small>
+                                  </div>
                                   <dl>
-                                    {Object.entries(player.projectedStats).map(([key, value]) => (
-                                      <div key={key}><dt>{labels[key] ?? key}</dt><dd>{value}</dd></div>
+                                    {group.stats.map(([key, label]) => (
+                                      <div key={key}><dt>{label}</dt><dd>{player.projectedStats[key] ?? 0}</dd></div>
                                     ))}
                                   </dl>
                                 </div>
