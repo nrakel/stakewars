@@ -1491,6 +1491,9 @@ export const settleNbaWagers = async (
   startDate = yyyyMmDd(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
   endDate = yyyyMmDd(new Date())
 ) => {
-  const finals = await fetchBasketballFinals("NBA", startDate, endDate);
+  // ESPN groups evening games by the local slate date even when tipoff is after midnight UTC.
+  const expandedStart = new Date(`${startDate}T00:00:00.000Z`);
+  expandedStart.setUTCDate(expandedStart.getUTCDate() - 1);
+  const finals = await fetchBasketballFinals("NBA", yyyyMmDd(expandedStart), endDate);
   return settleWagersForFinals({ startDate, endDate, sports: ["NBA"], finals });
 };
