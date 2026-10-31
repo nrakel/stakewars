@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { eventKey, scoreLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
-import { footballEventIdentity, isExpectedSportEvent } from "../src/server/odds.js";
+import { footballEventIdentity, footballTeamKey, isExpectedSportEvent } from "../src/server/odds.js";
 import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
 
 const baseEvent = {
@@ -17,6 +17,12 @@ const baseEvent = {
 test("NFL season week advances from the configured Monday start", () => {
   assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-10T18:00:00Z")), 1);
   assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-17T18:00:00Z")), 2);
+});
+
+test("NCAAF model history keys match short and mascot team names", () => {
+  assert.equal(footballTeamKey("NCAAF", "SMU"), footballTeamKey("NCAAF", "SMU Mustangs"));
+  assert.equal(footballTeamKey("NCAAF", "Syracuse"), footballTeamKey("NCAAF", "Syracuse Orange"));
+  assert.equal(footballTeamKey("NCAAF", "UAB Blazers"), footballTeamKey("NCAAF", "UAB"));
 });
 
 test("settlement start matching tolerates a kickoff change across UTC midnight", () => {

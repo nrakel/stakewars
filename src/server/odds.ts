@@ -222,6 +222,8 @@ const ncaafMascotSuffixes = [
   "red raiders",
   "scarlet knights",
   "yellow jackets",
+  "thundering herd",
+  "black knights",
   "demon deacons",
   "crimson tide",
   "fighting irish",
@@ -231,6 +233,7 @@ const ncaafMascotSuffixes = [
   "sun devils",
   "rainbow warriors",
   "mountaineers",
+  "wolf pack",
   "delta devils",
   "mean green",
   "blue devils",
@@ -244,8 +247,10 @@ const ncaafMascotSuffixes = [
   "commodores",
   "midshipmen",
   "roadrunners",
+  "razorbacks",
   "thunderbirds",
   "terrapins",
+  "warhawks",
   "catamounts",
   "wolverines",
   "boilermakers",
@@ -255,8 +260,13 @@ const ncaafMascotSuffixes = [
   "hoosiers",
   "nittany",
   "wildcats",
+  "monarchs",
   "redhawks",
   "seminoles",
+  "blazers",
+  "aztecs",
+  "flames",
+  "utes",
   "mustangs",
   "minutemen",
   "buffaloes",
@@ -339,6 +349,9 @@ const ncaafTeamKey = (team: string, batchAliases?: Map<string, string>) => {
   const canonical = ncaafTeamAliases[stripped] ?? stripped;
   return batchAliases?.get(canonical) ?? canonical;
 };
+
+export const footballTeamKey = (sport: "NFL" | "NCAAF", team: string) =>
+  sport === "NCAAF" ? ncaafTeamKey(team) : normalizeFootballTeamKey(team);
 
 const ncaafDisplayNames: Record<string, string> = {
   "umass": "UMass",

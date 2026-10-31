@@ -3,9 +3,10 @@ import type pg from "pg";
 import { americanToDecimal, ensureWeeklyEntry, estimatePayoutCents, roundRobinPayoutCents, roundRobinWays } from "./betting.js";
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
+import { footballTeamKey } from "./odds.js";
 
 export const legacyModelVersion = "phase3-context-heuristic-v6";
-export const modelVersion = "phase3-context-heuristic-v8";
+export const modelVersion = "phase3-context-heuristic-v9";
 const modelActivationDate = process.env.STAKEWARS_AI_V7_START_DATE ?? "2026-07-09";
 
 const modelVersionForDate = (runFor: string) => runFor >= modelActivationDate ? modelVersion : legacyModelVersion;
@@ -3089,9 +3090,9 @@ export const buildFootballContexts = async (client: pg.PoolClient, lines: Candid
   const start = new Date(`${dates[0]}T00:00:00Z`);
   start.setUTCDate(start.getUTCDate() - 75);
   const end = dates[dates.length - 1];
-  const teams = [...new Set(footballLines.flatMap((line) => [line.away_team, line.home_team]))];
 
   const results = await client.query<{
+    sport: "NFL" | "NCAAF";
     starts_on: string;
     away_team: string;
     home_team: string;
@@ -3099,21 +3100,22 @@ export const buildFootballContexts = async (client: pg.PoolClient, lines: Candid
     home_score: number;
   }>(
     `
-      SELECT starts_on::text, away_team, home_team, away_score, home_score
+      SELECT sport, starts_on::text, away_team, home_team, away_score, home_score
       FROM game_result
-      WHERE sport = ANY($4::sport_key[])
+      WHERE sport = ANY($3::sport_key[])
         AND starts_on BETWEEN $1::date AND $2::date
-        AND (away_team = ANY($3::text[]) OR home_team = ANY($3::text[]))
       ORDER BY starts_on ASC, starts_at ASC NULLS LAST
     `,
-    [dateOnly(start), end, teams, sports]
+    [dateOnly(start), end, sports]
   );
 
   const history = new Map<string, FootballTeamGame[]>();
   for (const game of results.rows) {
     const awayMargin = game.away_score - game.home_score;
     const homeMargin = game.home_score - game.away_score;
-    history.set(game.away_team, [...(history.get(game.away_team) ?? []), {
+    const awayKey = `${game.sport}|${footballTeamKey(game.sport, game.away_team)}`;
+    const homeKey = `${game.sport}|${footballTeamKey(game.sport, game.home_team)}`;
+    history.set(awayKey, [...(history.get(awayKey) ?? []), {
       startsOn: game.starts_on,
       team: game.away_team,
       opponent: game.home_team,
@@ -3124,7 +3126,7 @@ export const buildFootballContexts = async (client: pg.PoolClient, lines: Candid
       margin: awayMargin,
       won: awayMargin > 0
     }]);
-    history.set(game.home_team, [...(history.get(game.home_team) ?? []), {
+    history.set(homeKey, [...(history.get(homeKey) ?? []), {
       startsOn: game.starts_on,
       team: game.home_team,
       opponent: game.away_team,
@@ -3143,14 +3145,15 @@ export const buildFootballContexts = async (client: pg.PoolClient, lines: Candid
   const contexts = new Map<string, FootballHeuristicContext>();
 
   for (const line of footballLines) {
+    const footballSport = line.sport as "NFL" | "NCAAF";
     const startsOn = dateOnly(line.starts_at);
     const selected = line.selected_team;
     const opponent = selected === line.away_team ? line.home_team : line.away_team;
     const selectedIsHome = selected === line.home_team;
     const opponentIsHome = opponent === line.home_team;
     const spread = Number(line.spread);
-    const selectedGames = (history.get(selected) ?? []).filter((game) => game.startsOn < startsOn);
-    const opponentGames = (history.get(opponent) ?? []).filter((game) => game.startsOn < startsOn);
+    const selectedGames = (history.get(`${footballSport}|${footballTeamKey(footballSport, selected)}`) ?? []).filter((game) => game.startsOn < startsOn);
+    const opponentGames = (history.get(`${footballSport}|${footballTeamKey(footballSport, opponent)}`) ?? []).filter((game) => game.startsOn < startsOn);
     const selected3 = footballFormForGames(selectedGames, 3);
     const opponent3 = footballFormForGames(opponentGames, 3);
     const selected6 = footballFormForGames(selectedGames, 6);
@@ -3187,19 +3190,18 @@ export const buildFootballContexts = async (client: pg.PoolClient, lines: Candid
     const baseFormMargin = (recentPerformance ?? diffOrNull(selected6?.marginPerGame, opponent6?.marginPerGame) ?? 0) * 0.32;
     const venueMargin = (diffOrNull(selectedVenue?.marginPerGame, opponentVenue?.marginPerGame) ?? 0) * 0.12;
     const marketMargin = (marketLineMovement ?? 0) * 0.45;
-    const projectedMargin = Number((priorSeasonPowerMargin + baseFormMargin + venueMargin + homeFieldAdvantage + restAdvantage + travelDisadvantage + shortWeekDisadvantage + letdownSpot + largeSpreadFavoriteBehavior + marketMargin).toFixed(2));
-    const projectedMarginVsSpread = Number((projectedMargin + spread).toFixed(2));
+    const rawProjectedMargin = priorSeasonPowerMargin + baseFormMargin + venueMargin + homeFieldAdvantage + restAdvantage + travelDisadvantage + shortWeekDisadvantage + letdownSpot + largeSpreadFavoriteBehavior + marketMargin;
     const dataSignals = [
-      selected3,
-      opponent3,
-      selected6,
-      opponent6,
-      selectedVenue,
-      opponentVenue,
-      selectedPriorSeason,
-      opponentPriorSeason,
-      movement && (movement.lineSnapshotCount ?? 0) >= 2 ? movement : null
+      selected3 && opponent3,
+      selected6 && opponent6,
+      selectedVenue && opponentVenue,
+      selectedPriorSeason && opponentPriorSeason,
+      movement && (movement.lineSnapshotCount ?? 0) >= 2
     ].filter(Boolean).length;
+    const dataCompleteness = dataSignals / 5;
+    const marketBaselineMargin = -spread;
+    const projectedMargin = Number((marketBaselineMargin + (rawProjectedMargin - marketBaselineMargin) * dataCompleteness).toFixed(2));
+    const projectedMarginVsSpread = Number((projectedMargin + spread).toFixed(2));
 
     contexts.set(line.id, {
       selectedPointsForPerGame3: selected3?.pointsForPerGame ?? null,
@@ -3270,7 +3272,7 @@ export const buildFootballContexts = async (client: pg.PoolClient, lines: Candid
       largeSpreadFavoriteBehavior,
       backupDepthAdvantage: null,
       motivationGameImportance: null,
-      dataCompleteness: dataSignals / 7,
+      dataCompleteness,
       openingOddsAmerican: movement?.openingOddsAmerican ?? null,
       previousOddsAmerican: movement?.previousOddsAmerican ?? null,
       lineMovementAmerican: movement?.lineMovementAmerican ?? null,
