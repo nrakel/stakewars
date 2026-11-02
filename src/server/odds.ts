@@ -90,6 +90,13 @@ const soccerBookmakerFallbacks = () => unique([
   "bovada"
 ].filter(Boolean));
 
+const ncaambBookmakerFallbacks = () => unique([
+  ...config.parlayBookmakers,
+  "fanduel",
+  "pinnacle",
+  "prophetx"
+].filter(Boolean));
+
 export const isRegularSeasonWindow = (sport: LocalSport, date = new Date()) => {
   const month = date.getUTCMonth() + 1;
   const day = date.getUTCDate();
@@ -998,6 +1005,15 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
     };
   }
 
+  if (sport === "NCAAMB") {
+    const events = await fetchSportOdds(sportKey, markets, []);
+    return {
+      events,
+      bookmakerPriority: ncaambBookmakerFallbacks(),
+      bookmakerFetches: [{ bookmakers: [], events: events.length }]
+    };
+  }
+
   if (sport !== "MLB") {
     const events = await fetchSportOdds(sportKey, markets, config.parlayBookmakers);
     return {
@@ -1085,8 +1101,8 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
     }
 
     const isFootball = sport.local === "NFL" || sport.local === "NCAAF";
-    const includeMoneyline = sport.local === "MLB" || sport.local === "NHL" || soccerSports.has(sport.local) || isFootball;
-    const includeTotals = sport.local === "MLB" || sport.local === "NHL" || isFootball;
+    const includeMoneyline = sport.local === "MLB" || sport.local === "NHL" || sport.local === "NCAAMB" || soccerSports.has(sport.local) || isFootball;
+    const includeTotals = sport.local === "MLB" || sport.local === "NHL" || sport.local === "NCAAMB" || isFootball;
     const requestedMarkets: MarketKey[] = ["spreads"];
     if (includeMoneyline) requestedMarkets.push("h2h");
     if (includeTotals) requestedMarkets.push("totals");

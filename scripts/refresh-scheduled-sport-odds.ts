@@ -158,18 +158,36 @@ const run = async () => {
   const sport = requestedSport();
   const sportInfo = sportConfig[sport];
   const todayCentral = centralDate();
-  const starts = await fetchStartsForCentralDate(sport, todayCentral);
+  let targetDate = todayCentral;
+  let starts = await fetchStartsForCentralDate(sport, targetDate);
+  let preload = false;
+
+  if (!starts.length && sport === "NCAAMB") {
+    targetDate = addDays(todayCentral, 1);
+    starts = await fetchStartsForCentralDate(sport, targetDate);
+    preload = starts.length > 0;
+  }
 
   if (!starts.length) {
-    return { status: "skipped", reason: `no ${sportInfo.label} games today`, todayCentral, sport };
+    return { status: "skipped", reason: `no ${sportInfo.label} games today or tomorrow`, todayCentral, sport };
   }
 
   if (centralMinuteOfDay() < 8 * 60) {
     return { status: "skipped", reason: "before 8 AM CT", todayCentral, sport };
   }
 
+  if (preload && centralMinuteOfDay() % 60 !== 0) {
+    return {
+      status: "skipped",
+      reason: "NCAAB next-day preload runs hourly",
+      todayCentral,
+      targetDate,
+      sport
+    };
+  }
+
   const lastStart = starts.at(-1)!;
-  if (Date.now() > lastStart.getTime()) {
+  if (!preload && Date.now() > lastStart.getTime()) {
     return {
       status: "skipped",
       reason: `after last ${sportInfo.label} start`,
@@ -204,10 +222,12 @@ const run = async () => {
     };
   }
 
-  const odds = await refreshOdds({ sports: [sport] });
+  const odds = await refreshOdds({ sports: [sport], ignoreUpcomingWindow: preload });
   const after = await fetchUsage();
   await logUsage(sportInfo.jobName, before, after, {
     todayCentral,
+    targetDate,
+    preload,
     sport,
     firstStart: starts[0].toISOString(),
     lastStart: lastStart.toISOString(),
@@ -218,6 +238,8 @@ const run = async () => {
   return {
     status: "refreshed",
     todayCentral,
+    targetDate,
+    preload,
     sport,
     firstStart: starts[0].toISOString(),
     lastStart: lastStart.toISOString(),
