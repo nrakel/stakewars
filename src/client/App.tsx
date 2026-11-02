@@ -2,7 +2,7 @@ import { FormEvent, ReactNode, useEffect, useMemo, useRef, useState } from "reac
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, BadgeDollarSign, BarChart3, Bot, Check, ChevronDown, ChevronRight, ClipboardList, Download, FileText, History, Layers, Lock, LogOut, Mail, Radio, Save, ShieldCheck, ShoppingBag, Sparkles, Star, Trophy, User, UserPlus, Wallet, WifiOff, X } from "lucide-react";
 import { createRoot } from "react-dom/client";
 import QRCode from "qrcode";
-import type { ChineDailyPicksState, ChineNflWeeklyPicksState, DailyAiPick, DailyChineParlay, DailyChineParlayLeg, FootballBoxScore, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SportKey, SurvivorStanding, SurvivorState, WagerKind } from "../shared/types";
+import type { ChineDailyPicksState, ChineNflWeeklyPicksState, DailyAiPick, DailyChineParlay, DailyChineParlayLeg, FootballBoxScore, GameCard, GameLine, GameMarket, GameMarketSide, LeaderboardRow, LiveGameState, NflConfidenceStanding, NflConfidenceState, OpenBet, RewardAward, SessionUser, SettledBet, SportKey, SurvivorStanding, SurvivorState, WagerKind, WagerSportStats } from "../shared/types";
 import { merchNavItemForUser } from "../shared/merch";
 import "./styles.css";
 
@@ -1967,6 +1967,8 @@ function App() {
   const [accountEmailNotice, setAccountEmailNotice] = useState("");
   const [emailEditing, setEmailEditing] = useState(false);
   const [accountSaving, setAccountSaving] = useState(false);
+  const [wagerSportStats, setWagerSportStats] = useState<WagerSportStats | null>(null);
+  const [wagerSportStatsPeriod, setWagerSportStatsPeriod] = useState<"week" | "all">("all");
   const [displayName, setDisplayName] = useState("");
   const [payoutMethod, setPayoutMethod] = useState<SessionUser["payoutMethod"]>("none");
   const [payoutHandle, setPayoutHandle] = useState("");
@@ -2127,7 +2129,7 @@ function App() {
     setDailyChineParlay(aiResult.parlay);
     setLiveGames([...liveMlbResult.games, ...liveNhlResult.games, ...liveNflResult.games, ...liveEplResult.games, ...liveNcaafResult.games]);
     if (authToken) {
-      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult, scoreFavoriteResult] = await Promise.all([
+      const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult, scoreFavoriteResult, sportStatsResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
         api<{ wagers: OpenBet[] }>("/wagers/open", {}, authToken),
         api<{ preferences: PushPreferences }>("/push/preferences", {}, authToken),
@@ -2135,7 +2137,8 @@ function App() {
         api<SurvivorState>("/survivor", {}, authToken).catch(() => null),
         api<{ rewards: RewardAward[] }>("/me/rewards", {}, authToken),
         api<{ withdrawals: RewardWithdrawalRequest[]; pendingWithdrawal: RewardWithdrawalRequest | null }>("/me/reward-withdrawals", {}, authToken),
-        api<{ favorites: ScoreFavorite[] }>("/score-favorites", {}, authToken)
+        api<{ favorites: ScoreFavorite[] }>("/score-favorites", {}, authToken),
+        api<WagerSportStats>(`/me/wager-stats?period=${wagerSportStatsPeriod}`, {}, authToken)
       ]);
       setUser(me.user);
       setFullName(me.user.fullName ?? "");
@@ -2170,6 +2173,7 @@ function App() {
       setOpenBets(openBetResult.wagers);
       setPushPreferences(pushPreferenceResult.preferences);
       setScoreFavorites(new Set(scoreFavoriteResult.favorites.map((favorite) => scoreFavoriteKey(favorite.sport, favorite.eventKey))));
+      setWagerSportStats(sportStatsResult);
       setReferralInfo(referralResult);
       setSurvivorState(survivorResult);
       if (TOWER_FEATURE_ENABLED) {
@@ -2224,6 +2228,15 @@ function App() {
         light: "#ffffff"
       }
     }));
+  };
+
+  const refreshWagerSportStats = async (period: "week" | "all", authToken = token) => {
+    if (!authToken) {
+      setWagerSportStats(null);
+      return;
+    }
+    const result = await api<WagerSportStats>(`/me/wager-stats?period=${period}`, {}, authToken);
+    setWagerSportStats(result);
   };
 
   const loadLeaderboardWeek = async (weekStart: string) => {
@@ -6890,6 +6903,56 @@ function App() {
               Display name
               <input value={displayName} minLength={2} maxLength={40} onChange={(event) => setDisplayName(event.target.value)} />
             </label>
+            <section className="account-wager-stats" aria-labelledby="account-wager-stats-title">
+              <div className="account-section-heading">
+                <div>
+                  <strong id="account-wager-stats-title">Wager Performance</strong>
+                  <span>Record and net units by sport</span>
+                </div>
+                <select
+                  aria-label="Wager performance period"
+                  value={wagerSportStatsPeriod}
+                  onChange={(event) => {
+                    const period = event.target.value as "week" | "all";
+                    setWagerSportStatsPeriod(period);
+                    void refreshWagerSportStats(period);
+                  }}
+                >
+                  <option value="all">All Time</option>
+                  <option value="week">This Week</option>
+                </select>
+              </div>
+              {wagerSportStats?.stats.length ? (
+                <div className="account-wager-stats-table-wrap">
+                  <table className="account-wager-stats-table">
+                    <thead>
+                      <tr>
+                        <th>Sport</th>
+                        <th>Record</th>
+                        <th>Units</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {wagerSportStats.stats.map((row) => (
+                        <tr key={row.sport}>
+                          <td>
+                            <strong>{row.sport === "MULTI" ? "Multi-sport" : row.sport === "NCAAMB" ? "NCAAB" : row.sport}</strong>
+                            <small>{row.wagers} wager{row.wagers === 1 ? "" : "s"}{row.voids ? ` • ${row.voids} void` : ""}</small>
+                          </td>
+                          <td>{row.wins}-{row.losses}-{row.pushes}</td>
+                          <td className={row.netUnits > 0 ? "profit-positive" : row.netUnits < 0 ? "profit-negative" : ""}>
+                            {row.netUnits > 0 ? "+" : ""}{row.netUnits.toFixed(2)}u
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted account-wager-stats-empty">No settled wagers for this period.</p>
+              )}
+              <small className="account-wager-stats-note">Record is W-L-P. One unit equals {wagerSportStats?.unitCredits ?? 100} credits.</small>
+            </section>
             <div className="reward-card">
               <span>Reward Balance</span>
               <strong>{user ? money(user.rewardBalanceCents) : "$0.00"}</strong>

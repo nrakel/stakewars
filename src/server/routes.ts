@@ -6856,6 +6856,78 @@ export const registerRoutes = (router: Router) => {
     }
   });
 
+  router.get("/me/wager-stats", requireAuth, async (req, res, next) => {
+    try {
+      const period = req.query.period === "week" ? "week" : "all";
+      const result = await query<{
+        sport: SportKey | "MULTI";
+        wagers: number;
+        wins: number;
+        losses: number;
+        pushes: number;
+        voids: number;
+        netUnits: string;
+      }>(
+        `
+          WITH wager_games AS (
+            SELECT
+              w.id,
+              w.kind,
+              w.status,
+              w.stake_cents,
+              w.potential_payout_cents,
+              max(gl.starts_at) AS latest_starts_at,
+              count(DISTINCT gl.sport) AS sport_count,
+              max(gl.sport::text) AS single_sport
+            FROM wager w
+            JOIN wager_leg wl ON wl.wager_id = w.id
+            JOIN game_line gl ON gl.id = wl.game_line_id
+            WHERE w.user_id = $1
+              AND w.status <> 'pending'
+            GROUP BY w.id
+          ), settled AS (
+            SELECT
+              CASE WHEN sport_count = 1 THEN single_sport ELSE 'MULTI' END AS sport,
+              status,
+              CASE
+                WHEN kind = 'round_robin' THEN potential_payout_cents - stake_cents
+                WHEN status = 'won' THEN potential_payout_cents - stake_cents
+                WHEN status = 'lost' THEN -stake_cents
+                ELSE 0
+              END AS profit_cents
+            FROM wager_games
+            WHERE $2 = 'all'
+              OR (latest_starts_at AT TIME ZONE 'America/Chicago')::date >=
+                (date_trunc('week', now() AT TIME ZONE 'America/Chicago'))::date
+          )
+          SELECT
+            sport,
+            count(*)::integer AS wagers,
+            count(*) FILTER (WHERE status = 'won')::integer AS wins,
+            count(*) FILTER (WHERE status = 'lost')::integer AS losses,
+            count(*) FILTER (WHERE status = 'push')::integer AS pushes,
+            count(*) FILTER (WHERE status = 'void')::integer AS voids,
+            round(sum(profit_cents) / 10000.0, 2)::text AS "netUnits"
+          FROM settled
+          GROUP BY sport
+          ORDER BY CASE WHEN sport = 'MULTI' THEN 1 ELSE 0 END, sport
+        `,
+        [req.user!.id, period]
+      );
+
+      res.json({
+        period,
+        unitCredits: 100,
+        stats: result.rows.map((row) => ({
+          ...row,
+          netUnits: Number(row.netUnits)
+        }))
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   router.post("/wagers", requireAuth, async (req, res, next) => {
     try {
       const input = placeWagerSchema.parse(req.body);

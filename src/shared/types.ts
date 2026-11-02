@@ -382,6 +382,22 @@ export type SettledBet = {
   legs: SettledBetLeg[];
 };
 
+export type WagerSportStat = {
+  sport: SportKey | "MULTI";
+  wagers: number;
+  wins: number;
+  losses: number;
+  pushes: number;
+  voids: number;
+  netUnits: number;
+};
+
+export type WagerSportStats = {
+  period: "week" | "all";
+  unitCredits: number;
+  stats: WagerSportStat[];
+};
+
 export type SurvivorStatus = "active" | "eliminated" | "winner";
 export type SurvivorPickStatus = "pending" | "won" | "lost" | "tie" | "no_pick" | "void";
 
