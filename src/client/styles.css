@@ -867,6 +867,28 @@ textarea {
   overflow-x: auto;
 }
 
+.account-wager-overall {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dfe5df;
+  border-radius: 6px;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.account-wager-overall span {
+  color: #65736d;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.account-wager-overall strong {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .account-wager-stats-table {
   width: 100%;
   border-collapse: collapse;

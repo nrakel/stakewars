@@ -6915,13 +6915,16 @@ export const registerRoutes = (router: Router) => {
         [req.user!.id, period]
       );
 
+      const stats = result.rows.map((row) => ({
+        ...row,
+        netUnits: Number(row.netUnits)
+      }));
+
       res.json({
         period,
         unitCredits: 100,
-        stats: result.rows.map((row) => ({
-          ...row,
-          netUnits: Number(row.netUnits)
-        }))
+        overallNetUnits: Number(stats.reduce((total, row) => total + row.netUnits, 0).toFixed(2)),
+        stats
       });
     } catch (error) {
       next(error);

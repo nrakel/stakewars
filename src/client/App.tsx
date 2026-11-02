@@ -6922,6 +6922,18 @@ function App() {
                   <option value="week">This Week</option>
                 </select>
               </div>
+              <div className="account-wager-overall">
+                <span>Overall</span>
+                <strong className={
+                  (wagerSportStats?.overallNetUnits ?? 0) > 0
+                    ? "profit-positive"
+                    : (wagerSportStats?.overallNetUnits ?? 0) < 0
+                      ? "profit-negative"
+                      : ""
+                }>
+                  {(wagerSportStats?.overallNetUnits ?? 0) > 0 ? "+" : ""}{(wagerSportStats?.overallNetUnits ?? 0).toFixed(2)}u
+                </strong>
+              </div>
               {wagerSportStats?.stats.length ? (
                 <div className="account-wager-stats-table-wrap">
                   <table className="account-wager-stats-table">

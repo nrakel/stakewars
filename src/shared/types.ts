@@ -395,6 +395,7 @@ export type WagerSportStat = {
 export type WagerSportStats = {
   period: "week" | "all";
   unitCredits: number;
+  overallNetUnits: number;
   stats: WagerSportStat[];
 };
 
