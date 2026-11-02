@@ -1296,7 +1296,7 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
 
 export const refreshLiveMlb = async () => refreshLiveSports(["MLB"]);
 
-export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NHL", "NCAAF"]);
+export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NHL", "NCAAF", "EPL"]);
 
 export const refreshLiveNfl = async () => refreshLiveSports(["NFL"]);
 
@@ -1350,11 +1350,9 @@ export const getLiveStates = async (sport: SportKey) => {
             ($1 = 'MLB' AND provider = 'mlb-stats-api')
             OR ($1 IN ('NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF', 'EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
           )
-          AND in_play = true
-          AND (
-            last_event_at > now() - INTERVAL '20 minutes'
-            OR fetched_at > now() - INTERVAL '20 minutes'
-          )
+          AND starts_at IS NOT NULL
+          AND (starts_at AT TIME ZONE 'America/Chicago')::date =
+              (now() AT TIME ZONE 'America/Chicago')::date
       )
       SELECT
         match_id AS "matchId",
@@ -1384,18 +1382,77 @@ export const getLiveStates = async (sport: SportKey) => {
       FROM ranked
       WHERE row_rank = 1
       ORDER BY COALESCE(starts_at, fetched_at) ASC, away_team ASC
-      LIMIT 40
+      LIMIT 500
     `
     ,
     [sport]
   );
 
-  return result.rows.map((row) => ({
+  const rows = result.rows.map((row) => ({
     ...row,
     startsAt: row.startsAt?.toISOString() ?? null,
     lastEventAt: row.lastEventAt?.toISOString() ?? null,
     fetchedAt: row.fetchedAt.toISOString()
   })) satisfies LiveGameState[];
+
+  const [scheduled, completed] = await Promise.all([
+    query<{ startsAt: Date; awayTeam: string; homeTeam: string }>(`
+      SELECT min(starts_at) AS "startsAt", away_team AS "awayTeam", home_team AS "homeTeam"
+      FROM game_line
+      WHERE sport=$1 AND is_active=true
+        AND (starts_at AT TIME ZONE 'America/Chicago')::date=(now() AT TIME ZONE 'America/Chicago')::date
+      GROUP BY away_team, home_team
+    `, [sport]),
+    query<{ providerGameId: string | null; startsAt: Date | null; awayTeam: string; homeTeam: string; awayScore: number; homeScore: number; fetchedAt: Date }>(`
+      SELECT DISTINCT ON (away_team, home_team)
+        provider_game_id AS "providerGameId", starts_at AS "startsAt",
+        away_team AS "awayTeam", home_team AS "homeTeam",
+        away_score AS "awayScore", home_score AS "homeScore", fetched_at AS "fetchedAt"
+      FROM game_result
+      WHERE sport=$1
+        AND COALESCE((starts_at AT TIME ZONE 'America/Chicago')::date, starts_on)=
+            (now() AT TIME ZONE 'America/Chicago')::date
+      ORDER BY away_team, home_team, fetched_at DESC
+    `, [sport])
+  ]);
+
+  const normalizedTeam = (team: string) => team.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
+  const sameGame = (left: { startsAt: string | Date | null; awayTeam: string; homeTeam: string }, right: { startsAt: string | Date | null; awayTeam: string; homeTeam: string }) => {
+    if (normalizedTeam(left.awayTeam) !== normalizedTeam(right.awayTeam) || normalizedTeam(left.homeTeam) !== normalizedTeam(right.homeTeam)) return false;
+    if (!left.startsAt || !right.startsAt) return true;
+    return Math.abs(new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime()) <= 90 * 60 * 1000;
+  };
+
+  for (const game of completed.rows) {
+    if (rows.some((row) => sameGame(row, game))) continue;
+    rows.push({
+      matchId: `result:${sport.toLowerCase()}:${game.providerGameId ?? `${game.awayTeam}-${game.homeTeam}`}`,
+      sport, eventKey: game.providerGameId, startsAt: game.startsAt?.toISOString() ?? null,
+      awayTeam: game.awayTeam, homeTeam: game.homeTeam,
+      awayScore: game.awayScore, homeScore: game.homeScore,
+      period: "Final", gameStatus: "Final", description: null, lastPlay: null,
+      batter: null, pitcher: null, balls: null, strikes: null, outs: null,
+      pitcherPitches: null, batterHits: null, batterAtBats: null,
+      inPlay: false, lastEventAt: null, bases: {}, fetchedAt: game.fetchedAt.toISOString()
+    });
+  }
+  for (const game of scheduled.rows) {
+    if (rows.some((row) => sameGame(row, game))) continue;
+    rows.push({
+      matchId: `scheduled:${sport.toLowerCase()}:${game.startsAt.toISOString()}:${normalizedTeam(game.awayTeam)}:${normalizedTeam(game.homeTeam)}`,
+      sport, eventKey: null, startsAt: game.startsAt.toISOString(),
+      awayTeam: game.awayTeam, homeTeam: game.homeTeam,
+      awayScore: null, homeScore: null, period: null, gameStatus: "Scheduled",
+      description: null, lastPlay: null, batter: null, pitcher: null,
+      balls: null, strikes: null, outs: null, pitcherPitches: null,
+      batterHits: null, batterAtBats: null, inPlay: false, lastEventAt: null,
+      bases: {}, fetchedAt: new Date().toISOString()
+    });
+  }
+  return rows.sort((left, right) =>
+    new Date(left.startsAt ?? left.fetchedAt).getTime() - new Date(right.startsAt ?? right.fetchedAt).getTime()
+    || left.awayTeam.localeCompare(right.awayTeam)
+  );
 };
 
 export const getLiveMlbStates = async () => getLiveStates("MLB");

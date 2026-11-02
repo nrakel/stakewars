@@ -481,6 +481,12 @@ const shortDateTime = (value: string) => new Date(value).toLocaleString(undefine
   hour: "numeric",
   minute: "2-digit"
 });
+const centralStartTime = (value: string) => new Date(value).toLocaleTimeString("en-US", {
+  timeZone: "America/Chicago",
+  hour: "numeric",
+  minute: "2-digit",
+  timeZoneName: "short"
+});
 const lineDateTime = (value: string) => {
   const date = new Date(value);
   const dateLabel = date.toLocaleDateString("en-US", { month: "numeric", day: "2-digit" });
@@ -5631,12 +5637,12 @@ function App() {
           <div className="panel page-panel">
             <div className="panel-title">
               <Radio size={20} />
-              <h2>{scoreboardSport} live box scores</h2>
+              <h2>{scoreboardSport} scores</h2>
             </div>
             {scoreFavoriteNotice && <p className="score-favorite-notice" role="status">{scoreFavoriteNotice}</p>}
-            {scoreboardSport === "MLB" || scoreboardSport === "NHL" || scoreboardSport === "NFL" || scoreboardSport === "EPL" || scoreboardSport === "NCAAF" ? (
+            {scoreboardSport === "MLB" || scoreboardSport === "NHL" || scoreboardSport === "NFL" || scoreboardSport === "NBA" || scoreboardSport === "NCAAMB" || scoreboardSport === "EPL" || scoreboardSport === "NCAAF" ? (
               <div className="live-list scoreboard-grid">
-                {scoreboardGames.length === 0 ? <p className="muted">No live {scoreboardSport} snapshots yet.</p> : scoreboardGames.map((game) => {
+                {scoreboardGames.length === 0 ? <p className="muted">No {scoreboardSport} games scheduled today.</p> : scoreboardGames.map((game) => {
                   const eventKey = game.eventKey ?? game.matchId;
                   const favoriteKey = scoreFavoriteKey(game.sport, eventKey);
                   const isFavorite = scoreFavorites.has(favoriteKey);
@@ -5666,7 +5672,12 @@ function App() {
                     {game.sport === "MLB" && <BaseDiamond game={game} />}
                     {game.sport === "NFL" && <FootballSituation game={game} />}
                     <div className="live-meta">
-                      <span>{[game.period ?? game.gameStatus ?? "Live", liveCount(game), liveOuts(game.outs)].filter(Boolean).join(" • ")}</span>
+                      <span>{[
+                        !game.inPlay && game.gameStatus?.toLowerCase().includes("scheduled") && game.startsAt
+                          ? centralStartTime(game.startsAt)
+                          : game.period ?? game.gameStatus ?? "Live",
+                        liveCount(game), liveOuts(game.outs)
+                      ].filter(Boolean).join(" • ")}</span>
                       <div className="live-details">
                         {game.sport === "MLB" && pitcherDetail(game) && <small>{pitcherDetail(game)}</small>}
                         {game.sport === "MLB" && batterDetail(game) && <small>{batterDetail(game)}</small>}
