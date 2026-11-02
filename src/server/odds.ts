@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
+import { collegeTeamKey, primeCollegeTeamAliases, resolveCollegeTeam } from "./collegeTeams.js";
 
 type LocalSport = "MLB" | "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 
@@ -350,6 +351,8 @@ const normalizeFootballTeamKey = (team: string) =>
     .replace(/\s+/g, " ");
 
 const ncaafTeamKey = (team: string, batchAliases?: Map<string, string>) => {
+  const registryKey = collegeTeamKey("NCAAF", team);
+  if (!registryKey.startsWith("name:")) return `espn:${registryKey}`;
   const normalized = normalizeFootballTeamKey(team);
   const aliased = ncaafTeamAliases[normalized] ?? normalized;
   const stripped = stripNcaafMascotSuffix(aliased);
@@ -379,7 +382,27 @@ const ncaafDisplayNames: Record<string, string> = {
 const toDisplayName = (key: string) =>
   ncaafDisplayNames[key] ?? key.replace(/\b\w/g, (letter) => letter.toUpperCase());
 
-const ncaafDisplayName = (team: string, batchAliases?: Map<string, string>) => toDisplayName(ncaafTeamKey(team, batchAliases));
+const ncaafDisplayName = (team: string, batchAliases?: Map<string, string>) =>
+  resolveCollegeTeam("NCAAF", team)?.shortName ?? toDisplayName(ncaafTeamKey(team, batchAliases));
+
+const collegeTeamMatches = (sport: LocalSport | undefined, left: string, right: string, batchAliases?: Map<string, string>) => {
+  if (left === right) return true;
+  if (sport === "NCAAF") return ncaafTeamKey(left, batchAliases) === ncaafTeamKey(right, batchAliases);
+  if (sport === "NCAAMB") {
+    const leftTeam = resolveCollegeTeam("NCAAMB", left, "parlay-api") ?? resolveCollegeTeam("NCAAMB", left);
+    const rightTeam = resolveCollegeTeam("NCAAMB", right, "parlay-api") ?? resolveCollegeTeam("NCAAMB", right);
+    return Boolean(leftTeam && rightTeam && leftTeam.id === rightTeam.id);
+  }
+  return false;
+};
+
+const collegeDisplayName = (sport: LocalSport, team: string, batchAliases?: Map<string, string>) => {
+  if (sport === "NCAAF") return ncaafDisplayName(team, batchAliases);
+  if (sport === "NCAAMB") return (
+    resolveCollegeTeam("NCAAMB", team, "parlay-api") ?? resolveCollegeTeam("NCAAMB", team)
+  )?.canonicalName ?? team;
+  return team;
+};
 
 export const footballEventIdentity = (
   sport: LocalSport,
@@ -415,6 +438,12 @@ export const isExpectedSportEvent = (sport: LocalSport, event: ParlayEvent) => {
   }
   if (sport === "NCAAF") {
     return !nflTeamNameSet.has(event.away_team) && !nflTeamNameSet.has(event.home_team);
+  }
+  if (sport === "NCAAMB") {
+    return Boolean(
+      resolveCollegeTeam("NCAAMB", event.away_team, "parlay-api")
+      && resolveCollegeTeam("NCAAMB", event.home_team, "parlay-api")
+    );
   }
   return true;
 };
@@ -483,8 +512,7 @@ const hasCompleteMarket = (
   }
 
   const teamMatches = (outcome: ParlayOutcome, team: string) =>
-    outcome.name === team
-    || (sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases));
+    collegeTeamMatches(sport, outcome.name, team, batchAliases);
 
   const sides = [event.away_team, event.home_team].map((team) =>
     outcomes.find((outcome) =>
@@ -525,10 +553,7 @@ const median = (values: number[]) => {
 };
 
 const eventTeamOutcome = (outcomes: ParlayOutcome[], team: string, sport?: LocalSport, batchAliases?: Map<string, string>) =>
-  outcomes.find((outcome) =>
-    outcome.name === team
-    || (sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases))
-  );
+  outcomes.find((outcome) => collegeTeamMatches(sport, outcome.name, team, batchAliases));
 
 const h2hHoldIsReasonable = (outcomes: ParlayOutcome[], event: ParlayEvent, sport?: LocalSport, batchAliases?: Map<string, string>) => {
   const away = eventTeamOutcome(outcomes, event.away_team, sport, batchAliases);
@@ -696,6 +721,13 @@ const eventIdentity = (event: ParlayEvent, sport?: LocalSport, batchAliases?: Ma
     return footballEventIdentity(sport, event, batchAliases);
   }
   const startKey = eventStartKey(event.commence_time);
+  if (sport === "NCAAMB") {
+    const start = new Date(event.commence_time).getTime();
+    const collegeStartKey = new Date(Math.round(start / 300_000) * 300_000).toISOString().replace(/[:.]/g, "");
+    return [event.sport_key, collegeStartKey,
+      collegeTeamKey("NCAAMB", event.away_team, "parlay-api"),
+      collegeTeamKey("NCAAMB", event.home_team, "parlay-api")].join("|");
+  }
   const teamKey = (team: string) => team.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   return [
     event.canonical_event_id ?? event.id,
@@ -818,22 +850,21 @@ const normalizeSpreads = (
     return [];
   }
   const eventId = eventIdentity(event, sport, batchAliases);
-  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team, batchAliases) : event.away_team;
-  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team, batchAliases) : event.home_team;
+  const awayTeam = collegeDisplayName(sport, event.away_team, batchAliases);
+  const homeTeam = collegeDisplayName(sport, event.home_team, batchAliases);
 
   return spread.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
       (
-        [event.home_team, event.away_team].includes(outcome.name)
-        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases)))
+        [event.home_team, event.away_team].some((team) => collegeTeamMatches(sport, outcome.name, team, batchAliases))
       )
       && typeof outcome.point === "number"
       && typeof outcome.price === "number"
     )
     .map((outcome) => {
-      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(awayTeam, batchAliases)
+      const selectedTeam = collegeTeamMatches(sport, outcome.name, event.away_team, batchAliases)
         ? awayTeam
-        : sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(event.home_team, batchAliases)
+        : collegeTeamMatches(sport, outcome.name, event.home_team, batchAliases)
           ? homeTeam
           : outcome.name;
       return {
@@ -860,22 +891,21 @@ const normalizeMoneylines = (
     return [];
   }
   const eventId = eventIdentity(event, sport, batchAliases);
-  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team, batchAliases) : event.away_team;
-  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team, batchAliases) : event.home_team;
+  const awayTeam = collegeDisplayName(sport, event.away_team, batchAliases);
+  const homeTeam = collegeDisplayName(sport, event.home_team, batchAliases);
 
   return moneyline.outcomes
     .filter((outcome): outcome is PricedOutcome =>
       (
-        [event.home_team, event.away_team].includes(outcome.name)
-        || (sport === "NCAAF" && [event.home_team, event.away_team].some((team) => ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(team, batchAliases)))
+        [event.home_team, event.away_team].some((team) => collegeTeamMatches(sport, outcome.name, team, batchAliases))
         || (event.sport_key.startsWith("soccer_") && outcome.name === "Draw")
       )
       && typeof outcome.price === "number"
     )
     .map((outcome) => {
-      const selectedTeam = sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(awayTeam, batchAliases)
+      const selectedTeam = collegeTeamMatches(sport, outcome.name, event.away_team, batchAliases)
         ? awayTeam
-        : sport === "NCAAF" && ncaafTeamKey(outcome.name, batchAliases) === ncaafTeamKey(event.home_team, batchAliases)
+        : collegeTeamMatches(sport, outcome.name, event.home_team, batchAliases)
           ? homeTeam
           : outcome.name;
       return {
@@ -902,8 +932,8 @@ const normalizeTotals = (
     return [];
   }
   const eventId = eventIdentity(event, sport, batchAliases);
-  const awayTeam = sport === "NCAAF" ? ncaafDisplayName(event.away_team, batchAliases) : event.away_team;
-  const homeTeam = sport === "NCAAF" ? ncaafDisplayName(event.home_team, batchAliases) : event.home_team;
+  const awayTeam = collegeDisplayName(sport, event.away_team, batchAliases);
+  const homeTeam = collegeDisplayName(sport, event.home_team, batchAliases);
 
   return total.outcomes
     .filter((outcome): outcome is PricedSpreadOutcome =>
@@ -1085,6 +1115,10 @@ export const refreshOdds = async (options: RefreshOddsOptions = {}) => {
   for (const sport of sports) {
     if (allowedSports && !allowedSports.has(sport.local)) {
       continue;
+    }
+
+    if (sport.local === "NCAAF" || sport.local === "NCAAMB") {
+      await primeCollegeTeamAliases();
     }
 
     if (!soccerSports.has(sport.local) && !isRegularSeasonWindow(sport.local)) {

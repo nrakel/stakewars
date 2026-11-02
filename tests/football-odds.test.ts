@@ -3,6 +3,7 @@ import test from "node:test";
 import { eventKey, scoreLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
 import { footballEventIdentity, footballTeamKey, isExpectedSportEvent } from "../src/server/odds.js";
+import { normalizeCollegeAlias } from "../src/server/collegeTeams.js";
 import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
 
 const baseEvent = {
@@ -23,6 +24,12 @@ test("NCAAF model history keys match short and mascot team names", () => {
   assert.equal(footballTeamKey("NCAAF", "SMU"), footballTeamKey("NCAAF", "SMU Mustangs"));
   assert.equal(footballTeamKey("NCAAF", "Syracuse"), footballTeamKey("NCAAF", "Syracuse Orange"));
   assert.equal(footballTeamKey("NCAAF", "UAB Blazers"), footballTeamKey("NCAAF", "UAB"));
+});
+
+test("college aliases normalize punctuation and Saint consistently", () => {
+  assert.equal(normalizeCollegeAlias("St. Thomas-Minnesota"), "st thomas minnesota");
+  assert.equal(normalizeCollegeAlias("Saint Thomas Minnesota"), "st thomas minnesota");
+  assert.equal(normalizeCollegeAlias("Mount St. Mary's"), "mount st marys");
 });
 
 test("settlement start matching tolerates a kickoff change across UTC midnight", () => {

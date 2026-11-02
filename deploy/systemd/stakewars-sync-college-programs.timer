@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh StakeWars college program registry weekly
+
+[Timer]
+OnCalendar=Mon *-*-* 04:15:00 America/Chicago
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

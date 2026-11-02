@@ -251,6 +251,19 @@ Run manually if needed:
 systemctl start stakewars-nightly.service
 ```
 
+## College program registry
+
+NCAAF and NCAAB share a canonical ESPN-ID-based program registry. Refresh the
+official team directory and generated aliases with:
+
+```bash
+npm run sync:college-programs
+```
+
+Production runs `stakewars-sync-college-programs.timer` weekly. Provider names
+that resolve to more than one school are stored as ambiguous and rejected until
+an explicit provider alias is added; they are never matched by best guess.
+
 ## Historical backfill
 
 Backfill Parlay MLB historical responses and normalized historical lines:

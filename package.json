@@ -31,6 +31,8 @@
     "refresh:live-nfl:prod": "node dist/scripts/refresh-live-nfl.js",
     "refresh:visitors": "tsx scripts/refresh-visitor-metrics.ts",
     "refresh:visitors:prod": "node dist/scripts/refresh-visitor-metrics.js",
+    "sync:college-programs": "tsx scripts/sync-college-programs.ts",
+    "sync:college-programs:prod": "node dist/scripts/sync-college-programs.js",
     "ai:snapshot": "tsx scripts/snapshot-ai-candidates.ts",
     "ai:snapshot:prod": "node dist/scripts/snapshot-ai-candidates.js",
     "backfill:parlay": "tsx scripts/backfill-parlay-history.ts",

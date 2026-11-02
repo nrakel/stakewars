@@ -1,0 +1,11 @@
+[Unit]
+Description=StakeWars college program registry synchronization
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run sync:college-programs:prod
+User=stakewars
+Group=stakewars
