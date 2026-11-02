@@ -2081,13 +2081,15 @@ function App() {
 
   const refresh = async (authToken = token) => {
     const leaderboardPath = leaderboardWeekStart ? `/leaderboard?weekStart=${encodeURIComponent(leaderboardWeekStart)}` : "/leaderboard";
-    const [lineResult, boardResult, aiResult, liveMlbResult, liveNhlResult, liveNflResult, liveEplResult, liveNcaafResult] = await Promise.all([
+    const [lineResult, boardResult, aiResult, liveMlbResult, liveNhlResult, liveNflResult, liveNbaResult, liveNcaambResult, liveEplResult, liveNcaafResult] = await Promise.all([
       api<{ lines: GameLine[]; markets: GameMarket[]; games: GameCard[] }>("/lines"),
       api<LeaderboardResponse>(leaderboardPath, {}, authToken),
       api<{ picks: DailyAiPick[]; parlay: DailyChineParlay | null }>("/ai-picks"),
       api<{ games: LiveGameState[] }>("/live/mlb"),
       api<{ games: LiveGameState[] }>("/live/nhl"),
       api<{ games: LiveGameState[] }>("/live/nfl"),
+      api<{ games: LiveGameState[] }>("/live/nba"),
+      api<{ games: LiveGameState[] }>("/live/ncaamb"),
       api<{ games: LiveGameState[] }>("/live/epl"),
       api<{ games: LiveGameState[] }>("/live/ncaaf")
     ]);
@@ -2133,7 +2135,15 @@ function App() {
     }
     setAiPicks(aiResult.picks);
     setDailyChineParlay(aiResult.parlay);
-    setLiveGames([...liveMlbResult.games, ...liveNhlResult.games, ...liveNflResult.games, ...liveEplResult.games, ...liveNcaafResult.games]);
+    setLiveGames([
+      ...liveMlbResult.games,
+      ...liveNhlResult.games,
+      ...liveNflResult.games,
+      ...liveNbaResult.games,
+      ...liveNcaambResult.games,
+      ...liveEplResult.games,
+      ...liveNcaafResult.games
+    ]);
     if (authToken) {
       const [me, openBetResult, pushPreferenceResult, referralResult, survivorResult, rewardResult, withdrawalResult, scoreFavoriteResult, sportStatsResult] = await Promise.all([
         api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken),
