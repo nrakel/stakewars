@@ -1418,7 +1418,11 @@ export const getLiveStates = async (sport: SportKey) => {
 
   const normalizedTeam = (team: string) => team.toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
   const sameGame = (left: { startsAt: string | Date | null; awayTeam: string; homeTeam: string }, right: { startsAt: string | Date | null; awayTeam: string; homeTeam: string }) => {
-    if (normalizedTeam(left.awayTeam) !== normalizedTeam(right.awayTeam) || normalizedTeam(left.homeTeam) !== normalizedTeam(right.homeTeam)) return false;
+    const sameOrientation = normalizedTeam(left.awayTeam) === normalizedTeam(right.awayTeam)
+      && normalizedTeam(left.homeTeam) === normalizedTeam(right.homeTeam);
+    const reversedOrientation = normalizedTeam(left.awayTeam) === normalizedTeam(right.homeTeam)
+      && normalizedTeam(left.homeTeam) === normalizedTeam(right.awayTeam);
+    if (!sameOrientation && !reversedOrientation) return false;
     if (!left.startsAt || !right.startsAt) return true;
     return Math.abs(new Date(left.startsAt).getTime() - new Date(right.startsAt).getTime()) <= 90 * 60 * 1000;
   };

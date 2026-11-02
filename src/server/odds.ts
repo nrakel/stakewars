@@ -67,6 +67,8 @@ type CanonicalFootballEvent = {
   homeTeam: string;
 };
 
+type CanonicalCollegeBasketballEvent = CanonicalFootballEvent;
+
 const sports: Array<{ local: LocalSport; parlay: string; league: string }> = [
   { local: "MLB", parlay: "baseball_mlb", league: "MLB" },
   { local: "NHL", parlay: "icehockey_nhl", league: "NHL" },
@@ -657,6 +659,55 @@ const fetchEspnFootballSchedule = async (
   });
 };
 
+const fetchEspnCollegeBasketballSchedule = async (events: ParlayEvent[]): Promise<CanonicalCollegeBasketballEvent[]> => {
+  const dates = [...new Set(events.flatMap((event) => {
+    const date = yyyyMmDd(new Date(event.commence_time));
+    return [addDays(date, -1), date, addDays(date, 1)];
+  }))];
+  const bodies = await Promise.all(dates.map(async (date) => {
+    const url = new URL("https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard");
+    url.searchParams.set("limit", "500");
+    url.searchParams.set("dates", date.replaceAll("-", ""));
+    const response = await fetch(url, { headers: { accept: "*/*", "user-agent": "curl/8.0.1" } });
+    if (!response.ok) throw new Error(`ESPN NCAAB schedule ${date} failed with ${response.status}`);
+    return await response.json() as EspnFootballScoreboardResponse;
+  }));
+  const schedule = new Map<string, CanonicalCollegeBasketballEvent>();
+  for (const event of bodies.flatMap((body) => body.events ?? [])) {
+    const competition = event.competitions?.[0];
+    const away = competition?.competitors?.find((team) => team.homeAway === "away")?.team;
+    const home = competition?.competitors?.find((team) => team.homeAway === "home")?.team;
+    const awayName = away?.displayName ?? away?.shortDisplayName ?? away?.name ?? away?.abbreviation;
+    const homeName = home?.displayName ?? home?.shortDisplayName ?? home?.name ?? home?.abbreviation;
+    if (!awayName || !homeName || !event.date) continue;
+    schedule.set(event.id, { id: event.id, startsAt: new Date(event.date).toISOString(), awayTeam: awayName, homeTeam: homeName });
+  }
+  return [...schedule.values()];
+};
+
+const applyCanonicalCollegeBasketballEvents = (events: ParlayEvent[], schedule: CanonicalCollegeBasketballEvent[]) =>
+  events.map((event) => {
+    const eventTime = new Date(event.commence_time).getTime();
+    const awayId = resolveCollegeTeam("NCAAMB", event.away_team, "parlay-api")?.id;
+    const homeId = resolveCollegeTeam("NCAAMB", event.home_team, "parlay-api")?.id;
+    if (!awayId || !homeId) return event;
+    const match = schedule.find((candidate) => {
+      const candidateAway = resolveCollegeTeam("NCAAMB", candidate.awayTeam)?.id;
+      const candidateHome = resolveCollegeTeam("NCAAMB", candidate.homeTeam)?.id;
+      const sameTeams = (awayId === candidateAway && homeId === candidateHome)
+        || (awayId === candidateHome && homeId === candidateAway);
+      return sameTeams && Math.abs(new Date(candidate.startsAt).getTime() - eventTime) <= 90 * 60 * 1000;
+    });
+    if (!match) return event;
+    return {
+      ...event,
+      canonical_event_id: `espn:${match.id}`,
+      commence_time: match.startsAt,
+      away_team: match.awayTeam,
+      home_team: match.homeTeam
+    };
+  });
+
 const canonicalFootballEventFor = (
   event: ParlayEvent,
   sport: "NFL" | "NCAAF",
@@ -1037,10 +1088,12 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
 
   if (sport === "NCAAMB") {
     const events = await fetchSportOdds(sportKey, markets, []);
+    const schedule = await fetchEspnCollegeBasketballSchedule(events);
     return {
-      events,
+      events: applyCanonicalCollegeBasketballEvents(events, schedule),
       bookmakerPriority: ncaambBookmakerFallbacks(),
-      bookmakerFetches: [{ bookmakers: [], events: events.length }]
+      bookmakerFetches: [{ bookmakers: [], events: events.length }],
+      scheduleEvents: schedule.length
     };
   }
 
