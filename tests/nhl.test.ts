@@ -87,7 +87,7 @@ test("NBA Chine model converts a projected margin advantage into cover confidenc
   const scored = scoreNbaSpreadLine(nbaLine(), new Map(), context);
   assert.ok(scored.confidence > 0.65);
   assert.ok(scored.edge > 0);
-  assert.equal(scored.features.modelProfile, "nba-spread-v1");
+  assert.equal(scored.features.modelProfile, "nba-spread-v2");
 });
 
 const nhlLine = (marketKey: "h2h" | "spreads" = "h2h"): CandidateLine => ({

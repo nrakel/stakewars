@@ -4,6 +4,7 @@ import { americanToDecimal, ensureWeeklyEntry, estimatePayoutCents, roundRobinPa
 import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { footballTeamKey } from "./odds.js";
+import { refreshNbaContext } from "./nba-context.js";
 
 export const legacyModelVersion = "phase3-context-heuristic-v6";
 export const modelVersion = "phase3-context-heuristic-v9";
@@ -248,10 +249,16 @@ type NhlTeamGame = {
 
 type BasketballTeamGame = {
   startsOn: string;
+  opponent: string;
+  venueTeam: string;
   isHome: boolean;
   pointsFor: number;
   pointsAgainst: number;
   margin: number;
+  offensiveRating: number | null;
+  defensiveRating: number | null;
+  pace: number | null;
+  playerMinutes: Record<string, number>;
 };
 
 export type BasketballHeuristicContext = {
@@ -277,6 +284,27 @@ export type BasketballHeuristicContext = {
   restDaysDiff: number | null;
   selectedBackToBack: boolean;
   opponentBackToBack: boolean;
+  selectedOffensiveRating10: number | null;
+  opponentOffensiveRating10: number | null;
+  offensiveRatingDiff10: number | null;
+  selectedDefensiveRating10: number | null;
+  opponentDefensiveRating10: number | null;
+  defensiveRatingDiff10: number | null;
+  selectedPace10: number | null;
+  opponentPace10: number | null;
+  paceMismatch: number | null;
+  selectedStrengthOfSchedule: number | null;
+  opponentStrengthOfSchedule: number | null;
+  strengthOfScheduleDiff: number | null;
+  selectedUnavailableRotationMinutes: number | null;
+  opponentUnavailableRotationMinutes: number | null;
+  availabilityAdvantage: number | null;
+  selectedRotationContinuity: number | null;
+  opponentRotationContinuity: number | null;
+  rotationContinuityAdvantage: number | null;
+  selectedTravelMiles: number | null;
+  opponentTravelMiles: number | null;
+  travelAdvantage: number | null;
   projectedMargin: number;
   listedSpread: number;
   projectedMarginVsSpread: number;
@@ -1835,7 +1863,7 @@ export const scoreNbaSpreadLine = (
       fairProbability: implied, edge: 0,
       features: {
         impliedProbability: implied, fairProbability: implied, edge: 0,
-        modelVersion: options.modelVersion, modelProfile: "nba-spread-v1",
+        modelVersion: options.modelVersion, modelProfile: "nba-spread-v2",
         rejectedReason: "NBA Chine model is spread-only"
       },
       reasons: ["NBA spread-only model rejects non-spread market"]
@@ -1862,6 +1890,14 @@ export const scoreNbaSpreadLine = (
   if ((context?.pointsForPerGameDiff10 ?? 0) >= 7) reasons.push("Recent scoring edge");
   if ((context?.pointsAgainstPerGameDiff10 ?? 0) <= -7) reasons.push("Recent defensive edge");
   if ((context?.venueMarginPerGameDiff ?? 0) >= 5) reasons.push("Home/road split edge");
+  if ((context?.offensiveRatingDiff10 ?? 0) >= 4) reasons.push("Possession-adjusted offensive efficiency edge");
+  if ((context?.defensiveRatingDiff10 ?? 0) <= -4) reasons.push("Possession-adjusted defensive efficiency edge");
+  if ((context?.strengthOfScheduleDiff ?? 0) >= 2) reasons.push("Stronger recent schedule");
+  if ((context?.availabilityAdvantage ?? 0) >= 20) reasons.push("Healthier projected rotation");
+  else if ((context?.availabilityAdvantage ?? 0) <= -20) reasons.push("Projected rotation availability concern");
+  if ((context?.rotationContinuityAdvantage ?? 0) >= 0.25) reasons.push("More stable recent rotation");
+  if ((context?.travelAdvantage ?? 0) >= 1000) reasons.push("Travel advantage");
+  else if ((context?.travelAdvantage ?? 0) <= -1000) reasons.push("Travel burden concern");
   if (context?.selectedBackToBack && !context.opponentBackToBack) reasons.push("Back-to-back fatigue concern");
   else if (!context?.selectedBackToBack && context?.opponentBackToBack) reasons.push("Rest edge against a back-to-back opponent");
   if (completeness < 0.45) reasons.push("Limited early-season NBA sample");
@@ -1881,7 +1917,7 @@ export const scoreNbaSpreadLine = (
       isFavorite: Number(line.spread) < 0,
       isMoneyline: false,
       marketCompleteness: eventMarketCounts.get(eventKey(line)) ?? 1,
-      modelVersion: options.modelVersion, modelProfile: "nba-spread-v1",
+      modelVersion: options.modelVersion, modelProfile: "nba-spread-v2",
       confidenceBucket: confidenceBucket(fair), decimalOdds: americanToDecimal(line.odds_american),
       ...context
     },
@@ -2960,12 +2996,59 @@ const basketballForm = (games: BasketballTeamGame[], count: number) => {
   const sample = games.slice(-count);
   if (!sample.length) return null;
   const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const nullableAverage = (values: Array<number | null>) => {
+    const usable = values.filter((value): value is number => value !== null && Number.isFinite(value));
+    return usable.length ? average(usable) : null;
+  };
   return {
     games: sample.length,
     pointsForPerGame: average(sample.map((game) => game.pointsFor)),
     pointsAgainstPerGame: average(sample.map((game) => game.pointsAgainst)),
-    marginPerGame: average(sample.map((game) => game.margin))
+    marginPerGame: average(sample.map((game) => game.margin)),
+    offensiveRating: nullableAverage(sample.map((game) => game.offensiveRating)),
+    defensiveRating: nullableAverage(sample.map((game) => game.defensiveRating)),
+    pace: nullableAverage(sample.map((game) => game.pace))
   };
+};
+
+const nbaCoordinates: Record<string, [number, number]> = {
+  "Atlanta Hawks": [33.757, -84.396], "Boston Celtics": [42.366, -71.062], "Brooklyn Nets": [40.683, -73.975],
+  "Charlotte Hornets": [35.225, -80.839], "Chicago Bulls": [41.881, -87.674], "Cleveland Cavaliers": [41.497, -81.688],
+  "Dallas Mavericks": [32.790, -96.810], "Denver Nuggets": [39.749, -105.008], "Detroit Pistons": [42.341, -83.055],
+  "Golden State Warriors": [37.768, -122.388], "Houston Rockets": [29.751, -95.362], "Indiana Pacers": [39.764, -86.156],
+  "LA Clippers": [33.953, -118.339], "Los Angeles Clippers": [33.953, -118.339], "Los Angeles Lakers": [34.043, -118.267],
+  "Memphis Grizzlies": [35.138, -90.051], "Miami Heat": [25.781, -80.188], "Milwaukee Bucks": [43.045, -87.917],
+  "Minnesota Timberwolves": [44.980, -93.276], "New Orleans Pelicans": [29.949, -90.082], "New York Knicks": [40.751, -73.994],
+  "Oklahoma City Thunder": [35.463, -97.515], "Orlando Magic": [28.539, -81.384], "Philadelphia 76ers": [39.901, -75.172],
+  "Phoenix Suns": [33.446, -112.071], "Portland Trail Blazers": [45.532, -122.667], "Sacramento Kings": [38.580, -121.500],
+  "San Antonio Spurs": [29.427, -98.438], "Toronto Raptors": [43.643, -79.379], "Utah Jazz": [40.768, -111.901],
+  "Washington Wizards": [38.898, -77.021]
+};
+
+const travelMiles = (from: string | undefined, to: string) => {
+  const a = from ? nbaCoordinates[from] : null;
+  const b = nbaCoordinates[to];
+  if (!a || !b) return null;
+  const radians = (value: number) => value * Math.PI / 180;
+  const dLat = radians(b[0] - a[0]);
+  const dLon = radians(b[1] - a[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(radians(a[0])) * Math.cos(radians(b[0])) * Math.sin(dLon / 2) ** 2;
+  return 3958.8 * 2 * Math.asin(Math.sqrt(h));
+};
+
+const rotationContinuity = (games: BasketballTeamGame[]) => {
+  if (games.length < 6) return null;
+  const rotation = (sample: BasketballTeamGame[]) => {
+    const totals = new Map<string, number>();
+    for (const game of sample) for (const [player, minutes] of Object.entries(game.playerMinutes)) {
+      totals.set(player, (totals.get(player) ?? 0) + minutes);
+    }
+    return new Set([...totals].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([player]) => player));
+  };
+  const recent = rotation(games.slice(-3));
+  const prior = rotation(games.slice(-6, -3));
+  if (!recent.size || !prior.size) return null;
+  return [...recent].filter((player) => prior.has(player)).length / Math.max(recent.size, prior.size);
 };
 
 export const buildBasketballContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
@@ -2978,10 +3061,10 @@ export const buildBasketballContexts = async (client: pg.PoolClient, lines: Cand
   const teams = [...new Set(nbaLines.flatMap((line) => [line.away_team, line.home_team]))];
   const [results, movements] = await Promise.all([
     client.query<{
-      starts_on: string; away_team: string; home_team: string; away_score: number; home_score: number;
+      provider_game_id: string | null; starts_on: string; away_team: string; home_team: string; away_score: number; home_score: number;
     }>(
       `
-        SELECT starts_on::text, away_team, home_team, away_score, home_score
+        SELECT provider_game_id, starts_on::text, away_team, home_team, away_score, home_score
         FROM game_result
         WHERE sport = 'NBA'
           AND starts_on BETWEEN $1::date AND $2::date
@@ -2993,17 +3076,58 @@ export const buildBasketballContexts = async (client: pg.PoolClient, lines: Cand
     buildMarketMovements(client, nbaLines, "NBA")
   ]);
 
+  await refreshNbaContext(
+    client,
+    results.rows.filter((game) => game.provider_game_id).map((game) => ({
+      providerGameId: game.provider_game_id!, startsOn: game.starts_on
+    })),
+    dates
+  );
+  const [metricResult, availabilityResult] = await Promise.all([
+    client.query<{
+      provider_game_id: string; team: string; offensive_rating: string; defensive_rating: string; pace: string;
+      player_minutes: Record<string, number>;
+    }>(`
+      SELECT provider_game_id, team, offensive_rating::text, defensive_rating::text, pace::text, player_minutes
+      FROM nba_team_game_metric WHERE starts_on BETWEEN $1::date AND $2::date
+    `, [dateOnly(historyStart), dates.at(-1)]),
+    client.query<{
+      starts_on: string; team: string; unavailable_rotation_minutes: string; questionable_rotation_minutes: string;
+    }>(`
+      SELECT starts_on::text, team, unavailable_rotation_minutes::text, questionable_rotation_minutes::text
+      FROM nba_event_availability WHERE starts_on = ANY($1::date[])
+    `, [dates])
+  ]);
+  const metrics = new Map(metricResult.rows.map((row) => [`${row.provider_game_id}:${row.team}`, row]));
+  const availability = new Map(availabilityResult.rows.map((row) => [`${row.starts_on}:${row.team}`,
+    Number(row.unavailable_rotation_minutes) + Number(row.questionable_rotation_minutes) * 0.35]));
+
   const history = new Map<string, BasketballTeamGame[]>();
   for (const game of results.rows) {
+    const awayMetric = game.provider_game_id ? metrics.get(`${game.provider_game_id}:${game.away_team}`) : null;
+    const homeMetric = game.provider_game_id ? metrics.get(`${game.provider_game_id}:${game.home_team}`) : null;
     history.set(game.away_team, [...(history.get(game.away_team) ?? []), {
-      startsOn: game.starts_on, isHome: false, pointsFor: game.away_score,
-      pointsAgainst: game.home_score, margin: game.away_score - game.home_score
+      startsOn: game.starts_on, opponent: game.home_team, venueTeam: game.home_team,
+      isHome: false, pointsFor: game.away_score, pointsAgainst: game.home_score,
+      margin: game.away_score - game.home_score,
+      offensiveRating: awayMetric ? Number(awayMetric.offensive_rating) : null,
+      defensiveRating: awayMetric ? Number(awayMetric.defensive_rating) : null,
+      pace: awayMetric ? Number(awayMetric.pace) : null
+      , playerMinutes: awayMetric?.player_minutes ?? {}
     }]);
     history.set(game.home_team, [...(history.get(game.home_team) ?? []), {
-      startsOn: game.starts_on, isHome: true, pointsFor: game.home_score,
-      pointsAgainst: game.away_score, margin: game.home_score - game.away_score
+      startsOn: game.starts_on, opponent: game.away_team, venueTeam: game.home_team,
+      isHome: true, pointsFor: game.home_score, pointsAgainst: game.away_score,
+      margin: game.home_score - game.away_score,
+      offensiveRating: homeMetric ? Number(homeMetric.offensive_rating) : null,
+      defensiveRating: homeMetric ? Number(homeMetric.defensive_rating) : null,
+      pace: homeMetric ? Number(homeMetric.pace) : null
+      , playerMinutes: homeMetric?.player_minutes ?? {}
     }]);
   }
+
+  const teamSeasonMargin = new Map([...history].map(([team, games]) => [team,
+    games.length ? games.slice(-30).reduce((sum, game) => sum + game.margin, 0) / Math.min(games.length, 30) : 0]));
 
   const contexts = new Map<string, BasketballHeuristicContext>();
   for (const line of nbaLines) {
@@ -3029,7 +3153,32 @@ export const buildBasketballContexts = async (client: pg.PoolClient, lines: Cand
     const restAdjustment = selectedRestDays === 0 && opponentRestDays !== 0 ? -1.5
       : opponentRestDays === 0 && selectedRestDays !== 0 ? 1.5
         : clamp(((selectedRestDays ?? 1) - (opponentRestDays ?? 1)) * 0.35, -1, 1);
-    const available = [margin10, margin20, venueMargin].filter((value) => value !== null).length;
+    const selectedOffensiveRating = selected10 && Number.isFinite(selected10.offensiveRating) ? selected10.offensiveRating : null;
+    const opponentOffensiveRating = opponent10 && Number.isFinite(opponent10.offensiveRating) ? opponent10.offensiveRating : null;
+    const selectedDefensiveRating = selected10 && Number.isFinite(selected10.defensiveRating) ? selected10.defensiveRating : null;
+    const opponentDefensiveRating = opponent10 && Number.isFinite(opponent10.defensiveRating) ? opponent10.defensiveRating : null;
+    const selectedPace = selected10 && Number.isFinite(selected10.pace) ? selected10.pace : null;
+    const opponentPace = opponent10 && Number.isFinite(opponent10.pace) ? opponent10.pace : null;
+    const efficiencyEdge = selectedOffensiveRating === null || opponentOffensiveRating === null ||
+      selectedDefensiveRating === null || opponentDefensiveRating === null ? null
+      : ((selectedOffensiveRating - opponentDefensiveRating) - (opponentOffensiveRating - selectedDefensiveRating)) / 2;
+    const selectedSos = selectedGames.slice(-20).map((game) => teamSeasonMargin.get(game.opponent) ?? 0);
+    const opponentSos = opponentGames.slice(-20).map((game) => teamSeasonMargin.get(game.opponent) ?? 0);
+    const averageOrNull = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    const selectedStrengthOfSchedule = averageOrNull(selectedSos);
+    const opponentStrengthOfSchedule = averageOrNull(opponentSos);
+    const sosEdge = diffOrNull(selectedStrengthOfSchedule, opponentStrengthOfSchedule);
+    const selectedUnavailable = availability.get(`${startsOn}:${selected}`) ?? 0;
+    const opponentUnavailable = availability.get(`${startsOn}:${opponent}`) ?? 0;
+    const availabilityAdvantage = opponentUnavailable - selectedUnavailable;
+    const selectedRotationContinuity = rotationContinuity(selectedGames);
+    const opponentRotationContinuity = rotationContinuity(opponentGames);
+    const rotationContinuityAdvantage = diffOrNull(selectedRotationContinuity, opponentRotationContinuity);
+    const currentVenue = line.home_team;
+    const selectedTravelMiles = travelMiles(selectedLast?.venueTeam, currentVenue);
+    const opponentTravelMiles = travelMiles(opponentLast?.venueTeam, currentVenue);
+    const travelAdvantage = selectedTravelMiles === null || opponentTravelMiles === null ? null : opponentTravelMiles - selectedTravelMiles;
+    const available = [margin10, margin20, venueMargin, efficiencyEdge, sosEdge].filter((value) => value !== null).length;
     const weightedMargins = [
       margin10 === null ? null : { value: margin10, weight: 0.5 },
       margin20 === null ? null : { value: margin20, weight: 0.3 },
@@ -3039,11 +3188,17 @@ export const buildBasketballContexts = async (client: pg.PoolClient, lines: Cand
     const historicalMargin = weightTotal
       ? weightedMargins.reduce((sum, item) => sum + item.value * item.weight, 0) / weightTotal
       : 0;
-    const projectedMargin = historicalMargin + (selectedIsHome ? 2 : -2) + restAdjustment;
+    const efficiencyAdjustment = clamp((efficiencyEdge ?? 0) * 0.22, -3, 3);
+    const sosAdjustment = clamp((sosEdge ?? 0) * 0.12, -1.25, 1.25);
+    const availabilityAdjustment = clamp(availabilityAdvantage * 0.045, -2.5, 2.5);
+    const travelAdjustment = clamp((travelAdvantage ?? 0) / 1000 * 0.35, -0.75, 0.75);
+    const rotationAdjustment = clamp((rotationContinuityAdvantage ?? 0) * 1.5, -0.75, 0.75);
+    const projectedMargin = historicalMargin + (selectedIsHome ? 2 : -2) + restAdjustment +
+      efficiencyAdjustment + sosAdjustment + availabilityAdjustment + travelAdjustment + rotationAdjustment;
     const listedSpread = Number(line.spread);
     const movement = movements.get(line.id);
     const sampleCompleteness = Math.min(Math.min(selectedGames.length, opponentGames.length) / 20, 1);
-    const dataCompleteness = (available / 3) * sampleCompleteness;
+    const dataCompleteness = (available / 5) * sampleCompleteness;
 
     contexts.set(line.id, {
       selectedGamesPlayed: selectedGames.length, opponentGamesPlayed: opponentGames.length,
@@ -3064,6 +3219,21 @@ export const buildBasketballContexts = async (client: pg.PoolClient, lines: Cand
       venueMarginPerGameDiff: venueMargin,
       selectedRestDays, opponentRestDays, restDaysDiff: diffOrNull(selectedRestDays, opponentRestDays),
       selectedBackToBack: selectedRestDays === 0, opponentBackToBack: opponentRestDays === 0,
+      selectedOffensiveRating10: selectedOffensiveRating,
+      opponentOffensiveRating10: opponentOffensiveRating,
+      offensiveRatingDiff10: diffOrNull(selectedOffensiveRating, opponentOffensiveRating),
+      selectedDefensiveRating10: selectedDefensiveRating,
+      opponentDefensiveRating10: opponentDefensiveRating,
+      defensiveRatingDiff10: diffOrNull(selectedDefensiveRating, opponentDefensiveRating),
+      selectedPace10: selectedPace, opponentPace10: opponentPace,
+      paceMismatch: diffOrNull(selectedPace, opponentPace),
+      selectedStrengthOfSchedule, opponentStrengthOfSchedule,
+      strengthOfScheduleDiff: sosEdge,
+      selectedUnavailableRotationMinutes: selectedUnavailable,
+      opponentUnavailableRotationMinutes: opponentUnavailable,
+      availabilityAdvantage,
+      selectedRotationContinuity, opponentRotationContinuity, rotationContinuityAdvantage,
+      selectedTravelMiles, opponentTravelMiles, travelAdvantage,
       projectedMargin, listedSpread, projectedMarginVsSpread: projectedMargin + listedSpread,
       dataCompleteness,
       openingOddsAmerican: movement?.openingOddsAmerican ?? null,
