@@ -32,6 +32,32 @@ test("college aliases normalize punctuation and Saint consistently", () => {
   assert.equal(normalizeCollegeAlias("Mount St. Mary's"), "mount st marys");
 });
 
+test("NCAAB daily pick keys ignore provider ids and home-away inversion", () => {
+  const base = {
+    id: "line-ncaamb",
+    sport: "NCAAMB" as const,
+    starts_at: new Date("2026-11-02T04:59:00Z"),
+    selected_team: "High Point",
+    spread: "0",
+    odds_american: -110,
+    market_key: "h2h" as const
+  };
+  const first = eventKey({
+    ...base,
+    provider_event_id: "provider-one",
+    away_team: "High Point",
+    home_team: "Liberty"
+  });
+  const reversed = eventKey({
+    ...base,
+    provider_event_id: "provider-two",
+    away_team: "Liberty",
+    home_team: "High Point"
+  });
+
+  assert.equal(first, reversed);
+});
+
 test("settlement start matching tolerates a kickoff change across UTC midnight", () => {
   assert.equal(
     settlementStartTimeDifferenceMinutes("2026-10-10T23:30:00Z", "2026-10-11T00:10:00Z"),

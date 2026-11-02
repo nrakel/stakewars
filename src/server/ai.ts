@@ -5,6 +5,7 @@ import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { footballTeamKey } from "./odds.js";
 import { refreshNbaContext } from "./nba-context.js";
+import { collegeTeamKey, primeCollegeTeamAliases } from "./collegeTeams.js";
 
 export const legacyModelVersion = "phase3-context-heuristic-v6";
 export const modelVersion = "phase3-context-heuristic-v9";
@@ -536,6 +537,13 @@ const stableProviderMatchId = (providerEventId: string | null) => {
 };
 
 export const eventKey = (line: CandidateLine) => {
+  if (line.sport === "NCAAMB") {
+    const teams = [
+      collegeTeamKey("NCAAMB", line.away_team),
+      collegeTeamKey("NCAAMB", line.home_team)
+    ].sort();
+    return `NCAAMB:${centralDate(line.starts_at)}:${teams.join(":")}`;
+  }
   return stableProviderMatchId(line.provider_event_id)
     ?? `${line.sport}:${line.starts_at.toISOString()}:${line.away_team}:${line.home_team}:${line.market_key}`;
 };
@@ -4660,6 +4668,35 @@ export const snapshotAiCandidates = async ({
 
 export const recordDailyChinePicks = async (forDate = centralDate()) => {
   return transaction(async (client) => {
+    await primeCollegeTeamAliases(client);
+
+    const existingCollegePicks = await client.query<{
+      id: string; awayTeam: string; homeTeam: string; startsAt: Date; confidence: string;
+    }>(`
+      SELECT id, away_team AS "awayTeam", home_team AS "homeTeam",
+        starts_at AS "startsAt", confidence::text
+      FROM chine_daily_pick
+      WHERE pick_date = $1::date AND sport = 'NCAAMB'
+      ORDER BY confidence DESC, recorded_at ASC
+    `, [forDate]);
+    const existingByGame = new Map<string, typeof existingCollegePicks.rows>();
+    for (const pick of existingCollegePicks.rows) {
+      const teams = [
+        collegeTeamKey("NCAAMB", pick.awayTeam),
+        collegeTeamKey("NCAAMB", pick.homeTeam)
+      ].sort();
+      const key = `NCAAMB:${centralDate(pick.startsAt)}:${teams.join(":")}`;
+      existingByGame.set(key, [...(existingByGame.get(key) ?? []), pick]);
+    }
+    for (const [key, picks] of existingByGame) {
+      const [keeper, ...duplicates] = picks;
+      if (!keeper) continue;
+      if (duplicates.length) {
+        await client.query(`DELETE FROM chine_daily_pick WHERE id = ANY($1::uuid[])`, [duplicates.map((pick) => pick.id)]);
+      }
+      await client.query(`UPDATE chine_daily_pick SET game_key = $1 WHERE id = $2 AND game_key <> $1`, [key, keeper.id]);
+    }
+
     const activeModelVersion = modelVersionForDate(forDate);
     const lines = await client.query<CandidateLine>(
       `
