@@ -3,6 +3,7 @@ import { pool } from "../src/server/db.js";
 import {
   settleMlbStraightWagers,
   settleNbaWagers,
+  settleNcaambWagers,
   settleNcaafWagers,
   settleNflWagers,
   settleNhlWagers,
@@ -56,8 +57,8 @@ const classifyStatus = (state: string, detail: string, completed = false): Provi
   return "scheduled";
 };
 
-const fetchEspn = async (sport: "NHL" | "NBA" | "NFL" | "NCAAF" | "EPL", startDate: string, endDate: string) => {
-  const path = sport === "NHL" ? "hockey/nhl" : sport === "NBA" ? "basketball/nba" : sport === "NFL" ? "football/nfl" : sport === "NCAAF" ? "football/college-football" : "soccer/eng.1";
+const fetchEspn = async (sport: "NHL" | "NBA" | "NCAAMB" | "NFL" | "NCAAF" | "EPL", startDate: string, endDate: string) => {
+  const path = sport === "NHL" ? "hockey/nhl" : sport === "NBA" ? "basketball/nba" : sport === "NCAAMB" ? "basketball/mens-college-basketball" : sport === "NFL" ? "football/nfl" : sport === "NCAAF" ? "football/college-football" : "soccer/eng.1";
   const games: ProviderGame[] = [];
   for (let cursor = startDate; cursor <= endDate; cursor = shiftDate(cursor, 1)) {
     const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/${path}/scoreboard`);
@@ -136,6 +137,7 @@ const settleBySport = async (sport: SportKey, startDate: string, endDate: string
   if (sport === "MLB") return settleMlbStraightWagers(startDate, endDate);
   if (sport === "NHL") return settleNhlWagers(startDate, endDate);
   if (sport === "NBA") return settleNbaWagers(startDate, endDate);
+  if (sport === "NCAAMB") return settleNcaambWagers(startDate, endDate);
   if (sport === "NFL") return settleNflWagers(startDate, endDate);
   if (sport === "NCAAF") return settleNcaafWagers(startDate, endDate);
   if (sport === "EPL") return settleSoccerWagers(startDate, endDate);
@@ -159,7 +161,7 @@ for (const sport of [...new Set(unresolved.map((game) => game.sport))]) {
   const dates = games.map((game) => dateText(game.startsAt)).sort();
   let providerGames: ProviderGame[] = [];
   if (sport === "MLB") providerGames = await fetchMlb(shiftDate(dates[0], -1), shiftDate(dates.at(-1)!, 1));
-  else if (sport === "NHL" || sport === "NBA" || sport === "NFL" || sport === "NCAAF" || sport === "EPL") providerGames = await fetchEspn(sport, shiftDate(dates[0], -1), shiftDate(dates.at(-1)!, 1));
+  else if (sport === "NHL" || sport === "NBA" || sport === "NCAAMB" || sport === "NFL" || sport === "NCAAF" || sport === "EPL") providerGames = await fetchEspn(sport, shiftDate(dates[0], -1), shiftDate(dates.at(-1)!, 1));
   else {
     actions.push(...games.map((game) => ({ ...game, classification: "unsupported" })));
     continue;

@@ -1,0 +1,9 @@
+[Unit]
+Description=StakeWars NCAAB settlement
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run settle:ncaamb-scheduled:prod

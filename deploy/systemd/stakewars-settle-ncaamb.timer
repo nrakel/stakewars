@@ -1,0 +1,10 @@
+[Unit]
+Description=Run StakeWars NCAAB settlement every two minutes
+
+[Timer]
+OnCalendar=*:0/2
+Persistent=true
+Unit=stakewars-settle-ncaamb.service
+
+[Install]
+WantedBy=timers.target

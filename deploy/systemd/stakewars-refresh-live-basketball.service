@@ -1,0 +1,9 @@
+[Unit]
+Description=StakeWars NBA and NCAAB live score refresh
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run refresh:live-basketball:prod

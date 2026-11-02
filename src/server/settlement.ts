@@ -382,6 +382,12 @@ const loadTeamAliases = async (client: pg.PoolClient, sports: Array<PendingLeg["
       SELECT sport, provider, canonical_name AS "canonicalName", alias_name AS "aliasName"
       FROM team_alias
       WHERE sport IS NULL OR sport = ANY($1::sport_key[])
+      UNION ALL
+      SELECT alias.sport, alias.provider, program.canonical_name, alias.alias_name
+      FROM college_program_alias alias
+      JOIN college_program_sport program
+        ON program.espn_team_id=alias.espn_team_id AND program.sport=alias.sport
+      WHERE NOT alias.is_ambiguous AND alias.sport = ANY($1::sport_key[])
     `,
     [sports]
   );
@@ -1496,4 +1502,14 @@ export const settleNbaWagers = async (
   expandedStart.setUTCDate(expandedStart.getUTCDate() - 1);
   const finals = await fetchBasketballFinals("NBA", yyyyMmDd(expandedStart), endDate);
   return settleWagersForFinals({ startDate, endDate, sports: ["NBA"], finals });
+};
+
+export const settleNcaambWagers = async (
+  startDate = yyyyMmDd(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)),
+  endDate = yyyyMmDd(new Date())
+) => {
+  const expandedStart = new Date(`${startDate}T00:00:00.000Z`);
+  expandedStart.setUTCDate(expandedStart.getUTCDate() - 1);
+  const finals = await fetchBasketballFinals("NCAAMB", yyyyMmDd(expandedStart), endDate);
+  return settleWagersForFinals({ startDate, endDate, sports: ["NCAAMB"], finals });
 };

@@ -3,7 +3,7 @@ import { query, transaction } from "./db.js";
 import { sendLiveGameNotifications, type LiveStateChange } from "./liveNotifications.js";
 import type { SportKey } from "../shared/types.js";
 
-type LiveSport = "MLB" | "NHL" | "NFL" | "NCAAF" | "EPL" | "WORLDCUP";
+type LiveSport = "MLB" | "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF" | "EPL" | "WORLDCUP";
 
 type ParlayLiveMatch = {
   match_id?: string | number;
@@ -291,6 +291,8 @@ const liveSports: Record<LiveSport, string> = {
   MLB: "baseball_mlb",
   NHL: "icehockey_nhl",
   NFL: "americanfootball_nfl",
+  NBA: "basketball_nba",
+  NCAAMB: "basketball_ncaab",
   NCAAF: "americanfootball_ncaaf",
   EPL: "soccer_epl",
   WORLDCUP: "soccer_fifa_world_cup"
@@ -655,7 +657,7 @@ const normalizeEspnSoccerEvent = async (sport: Extract<LiveSport, "EPL" | "WORLD
   };
 };
 
-const normalizeEspnTeamEvent = async (sport: Extract<LiveSport, "NHL" | "NFL" | "NCAAF">, event: EspnFootballEvent): Promise<NormalizedLiveMatch | null> => {
+const normalizeEspnTeamEvent = async (sport: Extract<LiveSport, "NHL" | "NFL" | "NBA" | "NCAAMB" | "NCAAF">, event: EspnFootballEvent): Promise<NormalizedLiveMatch | null> => {
   const competition = event.competitions?.[0];
   const away = competition?.competitors?.find((competitor) => competitor.homeAway === "away");
   const home = competition?.competitors?.find((competitor) => competitor.homeAway === "home");
@@ -877,6 +879,20 @@ const fetchEspnFootballLive = async (sport: Extract<LiveSport, "NFL" | "NCAAF">)
     throw new Error(`ESPN football live ${sport} failed with ${response.status}: ${body.slice(0, 240)}`);
   }
 
+  const body = await response.json() as { events?: EspnFootballEvent[] };
+  return body.events ?? [];
+};
+
+const fetchEspnBasketballLive = async (sport: Extract<LiveSport, "NBA" | "NCAAMB">) => {
+  const league = sport === "NBA" ? "nba" : "mens-college-basketball";
+  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/basketball/${league}/scoreboard`);
+  url.searchParams.set("limit", sport === "NBA" ? "100" : "500");
+  url.searchParams.set("dates", centralDate().replace(/-/g, ""));
+  const response = await fetch(url, { headers: espnFetchHeaders });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`ESPN basketball live ${sport} failed with ${response.status}: ${body.slice(0, 240)}`);
+  }
   const body = await response.json() as { events?: EspnFootballEvent[] };
   return body.events ?? [];
 };
@@ -1213,7 +1229,12 @@ const refreshLiveSport = async (sport: LiveSport) => {
     ? (await Promise.all(nhlEvents.map((event) => normalizeEspnTeamEvent("NHL", event))))
       .filter((match): match is NonNullable<typeof match> => Boolean(match))
     : [];
-  const primaryNormalized = [...mlbNormalized, ...soccerNormalized, ...footballNormalized, ...nhlNormalized];
+  const basketballEvents = sport === "NBA" || sport === "NCAAMB" ? await fetchEspnBasketballLive(sport) : [];
+  const basketballNormalized = sport === "NBA" || sport === "NCAAMB"
+    ? (await Promise.all(basketballEvents.map((event) => normalizeEspnTeamEvent(sport, event))))
+      .filter((match): match is NonNullable<typeof match> => Boolean(match))
+    : [];
+  const primaryNormalized = [...mlbNormalized, ...soccerNormalized, ...footballNormalized, ...nhlNormalized, ...basketballNormalized];
 
   let matches: ParlayLiveMatch[] = [];
   let liveEvents: ParlayLiveEvent[] = [];
@@ -1246,6 +1267,7 @@ const refreshLiveSport = async (sport: LiveSport) => {
     soccerFetched: soccerEvents.length,
     footballFetched: footballEvents.length,
     nhlFetched: nhlEvents.length,
+    basketballFetched: basketballEvents.length,
     imported: normalized.length,
     recent,
     notifications: notifications.length
@@ -1265,6 +1287,7 @@ export const refreshLiveSports = async (sports: LiveSport[] = ["MLB", "EPL"]) =>
     soccerFetched: results.reduce((sum, result) => sum + result.soccerFetched, 0),
     footballFetched: results.reduce((sum, result) => sum + result.footballFetched, 0),
     nhlFetched: results.reduce((sum, result) => sum + result.nhlFetched, 0),
+    basketballFetched: results.reduce((sum, result) => sum + result.basketballFetched, 0),
     imported: results.reduce((sum, result) => sum + result.imported, 0),
     recent: results.reduce((sum, result) => sum + result.recent, 0),
     notifications: results.reduce((sum, result) => sum + result.notifications, 0)
@@ -1276,6 +1299,8 @@ export const refreshLiveMlb = async () => refreshLiveSports(["MLB"]);
 export const refreshLiveMlbAndNcaaf = async () => refreshLiveSports(["MLB", "NHL", "NCAAF"]);
 
 export const refreshLiveNfl = async () => refreshLiveSports(["NFL"]);
+
+export const refreshLiveBasketball = async () => refreshLiveSports(["NBA", "NCAAMB"]);
 
 export const getLiveStates = async (sport: SportKey) => {
   const result = await query<{
@@ -1323,7 +1348,7 @@ export const getLiveStates = async (sport: SportKey) => {
         WHERE sport = $1
           AND (
             ($1 = 'MLB' AND provider = 'mlb-stats-api')
-            OR ($1 IN ('NHL', 'NFL', 'NCAAF', 'EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
+            OR ($1 IN ('NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF', 'EPL', 'WORLDCUP') AND provider = 'espn-scoreboard')
           )
           AND in_play = true
           AND (

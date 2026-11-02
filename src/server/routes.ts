@@ -6528,7 +6528,7 @@ export const registerRoutes = (router: Router) => {
   router.get("/live/:sport", async (req, res, next) => {
     try {
       const sport = req.params.sport.toUpperCase();
-      if (sport !== "WORLDCUP" && sport !== "EPL" && sport !== "NHL" && sport !== "NCAAF" && sport !== "NFL") {
+      if (sport !== "WORLDCUP" && sport !== "EPL" && sport !== "NHL" && sport !== "NBA" && sport !== "NCAAMB" && sport !== "NCAAF" && sport !== "NFL") {
         res.status(404).json({ error: "Live scoreboard is not available for this sport" });
         return;
       }

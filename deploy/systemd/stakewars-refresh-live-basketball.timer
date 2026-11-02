@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh StakeWars basketball scores every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=stakewars-refresh-live-basketball.service
+
+[Install]
+WantedBy=timers.target

@@ -56,6 +56,13 @@ test("NBA spreads, totals, and moneylines settle through the shared engine", () 
   assert.equal(outcomeForSelection({ selectedTeam: "Over", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "totals", spread: 225.5, game, sport: "NBA" }), "won");
 });
 
+test("NCAAB spreads, totals, and moneylines settle through the shared engine", () => {
+  const game = { startsOn: "2026-11-02", awayTeam: "Auburn Tigers", homeTeam: "Houston Cougars", awayScore: 71, homeScore: 68 };
+  assert.equal(outcomeForSelection({ selectedTeam: "Auburn Tigers", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "h2h", spread: 0, game, sport: "NCAAMB" }), "won");
+  assert.equal(outcomeForSelection({ selectedTeam: "Houston Cougars", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "spreads", spread: 2.5, game, sport: "NCAAMB" }), "lost");
+  assert.equal(outcomeForSelection({ selectedTeam: "Under", awayTeam: game.awayTeam, homeTeam: game.homeTeam, marketKey: "totals", spread: 140.5, game, sport: "NCAAMB" }), "won");
+});
+
 const nbaLine = (marketKey: "h2h" | "spreads" = "spreads"): CandidateLine => ({
   id: "nba-line", provider_event_id: "nba-game", sport: "NBA",
   starts_at: new Date("2026-10-22T23:00:00Z"), away_team: "Cleveland Cavaliers",
