@@ -4,6 +4,7 @@ import { query, transaction } from "./db.js";
 const MODEL_VERSION = "nfl-boxscore-projection-v2";
 const ESPN_SUMMARY = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=";
 const ESPN_ROSTER = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/teams/";
+const responseCache = new Map<string, Promise<any>>();
 
 type Position = "QB" | "RB" | "WR" | "TE";
 type StatLine = {
@@ -56,9 +57,19 @@ export const parseFootballTeamBoxScore = (team: any): TeamGame => {
 };
 
 const fetchJson = async (url: string) => {
-  const response = await fetch(url, { signal: AbortSignal.timeout(12_000) });
-  if (!response.ok) throw new Error(`NFL projection source returned ${response.status}`);
-  return response.json() as Promise<any>;
+  const cached = responseCache.get(url);
+  if (cached) return cached;
+  const request = fetch(url, { signal: AbortSignal.timeout(12_000) }).then(async (response) => {
+    if (!response.ok) throw new Error(`NFL projection source returned ${response.status}`);
+    return response.json() as Promise<any>;
+  });
+  responseCache.set(url, request);
+  try {
+    return await request;
+  } catch (error) {
+    responseCache.delete(url);
+    throw error;
+  }
 };
 
 const weightedAverage = (values: number[]) => {
@@ -162,9 +173,12 @@ export const generateNflPlayerProjections = async (gameId: string) => {
     }).filter((player): player is typeof player & { position: Position } => Boolean(player.position));
     const opportunities = (line: StatLine, position: Position) => position === "QB" ? line.passAttempts : position === "RB" ? line.carries + line.targets : line.targets;
     const score = (player: typeof candidates[number]) => opportunities(player.baseline, player.position) + opportunities(player.latest, player.position) * 2;
-    const limits: Record<Position, number> = { QB: 1, RB: 2, WR: 3, TE: 1 };
+    const limits: Record<Position, number | null> = { QB: 1, RB: null, WR: null, TE: null };
     for (const position of ["QB", "RB", "WR", "TE"] as Position[]) {
-      const selected = candidates.filter((player) => player.position === position).sort((a, b) => score(b) - score(a)).slice(0, limits[position]);
+      const ranked = candidates
+        .filter((player) => player.position === position && score(player) > 0)
+        .sort((a, b) => score(b) - score(a));
+      const selected = limits[position] === null ? ranked : ranked.slice(0, limits[position] ?? 0);
       selected.forEach((player, index) => rows.push({
         team, opponent, playerId: player.playerId, playerName: player.playerName, position, roleRank: index + 1,
         projectedStats: projectPlayer(position, player.baseline, teamGames, teamProjection),
@@ -186,4 +200,32 @@ export const generateNflPlayerProjections = async (gameId: string) => {
     );
   });
   return rows.length;
+};
+
+export const generateNflWeekPlayerProjections = async (season: number, week: number) => {
+  const games = await query<{ id: string; awayTeam: string; homeTeam: string; startsAt: Date }>(`
+    SELECT game.id, game.away_team AS "awayTeam", game.home_team AS "homeTeam",
+      game.starts_at AS "startsAt"
+    FROM nfl_confidence_game game
+    JOIN nfl_confidence_pool pool ON pool.id = game.pool_id
+    WHERE pool.status = 'active' AND game.season = $1 AND game.week = $2
+    ORDER BY game.starts_at, game.away_team
+  `, [season, week]);
+  const results: Array<{
+    gameId: string; matchup: string; projections: number; error?: string;
+  }> = [];
+  for (const game of games.rows) {
+    try {
+      const projections = await generateNflPlayerProjections(game.id);
+      results.push({ gameId: game.id, matchup: `${game.awayTeam} @ ${game.homeTeam}`, projections });
+    } catch (error) {
+      results.push({
+        gameId: game.id,
+        matchup: `${game.awayTeam} @ ${game.homeTeam}`,
+        projections: 0,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+  return results;
 };

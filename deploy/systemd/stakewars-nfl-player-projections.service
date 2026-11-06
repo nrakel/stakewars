@@ -1,0 +1,16 @@
+[Unit]
+Description=Generate StakeWars NFL player projections for the active week
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=stakewars
+Group=stakewars
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run ai:nfl-player-projections:prod -- --current-week
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/stakewars

@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh NFL player projections before game slates
+
+[Timer]
+OnCalendar=Thu,Sat,Sun *-*-* 06:00:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=5m
+Unit=stakewars-nfl-player-projections.service
+
+[Install]
+WantedBy=timers.target
