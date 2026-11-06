@@ -57,6 +57,8 @@
     "ai:nfl-contests:prod": "node dist/scripts/pick-nfl-contests-for-chine.js",
     "ai:nfl-player-projections": "tsx scripts/generate-nfl-player-projections.ts",
     "ai:nfl-player-projections:prod": "node dist/scripts/generate-nfl-player-projections.js",
+    "refresh:nfl-player-props": "tsx scripts/refresh-upcoming-nfl-player-props.ts",
+    "refresh:nfl-player-props:prod": "node dist/scripts/refresh-upcoming-nfl-player-props.js",
     "ai:daily-model-report": "tsx scripts/daily-model-performance-report.ts",
     "ai:daily-model-report:prod": "node dist/scripts/daily-model-performance-report.js",
     "ai:compare": "tsx scripts/compare-ai-variants.ts",

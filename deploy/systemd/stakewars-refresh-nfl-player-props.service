@@ -1,0 +1,16 @@
+[Unit]
+Description=Refresh StakeWars NFL player props inside the two-hour pregame window
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=stakewars
+Group=stakewars
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run refresh:nfl-player-props:prod
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/stakewars

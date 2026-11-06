@@ -1,0 +1,12 @@
+[Unit]
+Description=Check for NFL games entering the two-hour player-prop window
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+AccuracySec=15s
+Persistent=true
+Unit=stakewars-refresh-nfl-player-props.service
+
+[Install]
+WantedBy=timers.target
