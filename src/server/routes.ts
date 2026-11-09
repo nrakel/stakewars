@@ -2819,7 +2819,15 @@ export const registerRoutes = (router: Router) => {
           FROM chine_daily_pick pick
           LEFT JOIN game_line line ON line.id = pick.game_line_id
           LEFT JOIN LATERAL (
-            SELECT candidate.*
+            SELECT
+              candidate.provider_game_id,
+              candidate.starts_at,
+              candidate.starts_on,
+              candidate.fetched_at,
+              CASE WHEN candidate.away_team = pick.away_team
+                THEN candidate.away_score ELSE candidate.home_score END AS away_score,
+              CASE WHEN candidate.home_team = pick.home_team
+                THEN candidate.home_score ELSE candidate.away_score END AS home_score
             FROM game_result candidate
             WHERE candidate.sport = pick.sport
               AND (
@@ -2831,8 +2839,8 @@ export const registerRoutes = (router: Router) => {
                   )
                 )
                 OR (
-                  candidate.away_team = pick.away_team
-                  AND candidate.home_team = pick.home_team
+                  ((candidate.away_team = pick.away_team AND candidate.home_team = pick.home_team)
+                    OR (candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team))
                   AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)) <= 43200
                 )
               )
@@ -2848,7 +2856,6 @@ export const registerRoutes = (router: Router) => {
             LIMIT 1
           ) result ON true
           WHERE pick.pick_date = $1
-            AND pick.sport <> 'NCAAMB'
           ORDER BY pick.confidence DESC, pick.starts_at ASC, pick.sport ASC
         `,
         [date]
@@ -2875,18 +2882,27 @@ export const registerRoutes = (router: Router) => {
           FROM chine_daily_pick pick
           LEFT JOIN game_line line ON line.id = pick.game_line_id
           JOIN LATERAL (
-            SELECT candidate.* FROM game_result candidate
+            SELECT
+              candidate.provider_game_id,
+              candidate.starts_at,
+              candidate.starts_on,
+              candidate.fetched_at,
+              CASE WHEN candidate.away_team = pick.away_team
+                THEN candidate.away_score ELSE candidate.home_score END AS away_score,
+              CASE WHEN candidate.home_team = pick.home_team
+                THEN candidate.home_score ELSE candidate.away_score END AS home_score
+            FROM game_result candidate
             WHERE candidate.sport = pick.sport
               AND ((candidate.provider_game_id IS NOT NULL AND (
                 line.provider_event_id = 'espn:' || candidate.provider_game_id
                 OR position('espn:' || candidate.provider_game_id || '|' IN coalesce(line.provider_event_id, '')) > 0
-              )) OR (candidate.away_team = pick.away_team AND candidate.home_team = pick.home_team
+              )) OR (((candidate.away_team = pick.away_team AND candidate.home_team = pick.home_team)
+                OR (candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team))
                 AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)) <= 43200))
             ORDER BY abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)), candidate.fetched_at DESC
             LIMIT 1
           ) result ON true
           WHERE pick.pick_date <= $1::date
-            AND pick.sport <> 'NCAAMB'
             AND (pick.sport <> 'NBA' OR pick.market_key = 'spreads')
         `,
         [date]

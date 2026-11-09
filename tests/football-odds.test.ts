@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { eventKey, scoreLine } from "../src/server/ai.js";
+import { eventKey, scoreLine, scoreNcaambSpreadLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
 import { footballEventIdentity, footballTeamKey, isExpectedSportEvent } from "../src/server/odds.js";
 import { collegeEventKey, normalizeCollegeAlias } from "../src/server/collegeTeams.js";
@@ -64,6 +64,35 @@ test("NCAAB event keys keep unrelated matchups separate", () => {
   const illinois = collegeEventKey("NCAAMB", startsAt, "Illinois Fighting Illini", "Texas Tech Red Raiders");
 
   assert.notEqual(clemson, illinois);
+});
+
+test("NCAAMB model converts projected margin edge into spread confidence", () => {
+  const line = {
+    id: "ncaamb-line", provider_event_id: "event", sport: "NCAAMB" as const,
+    starts_at: new Date("2026-11-10T20:00:00Z"), home_team: "Home Tigers",
+    away_team: "Away Bears", selected_team: "Home Tigers", spread: "-3.5",
+    odds_american: -110, market_key: "spreads" as const
+  };
+  const context = {
+    selectedGamesPlayed: 10, opponentGamesPlayed: 10,
+    selectedPointsFor5: 82, opponentPointsFor5: 69,
+    selectedPointsAgainst5: 64, opponentPointsAgainst5: 74,
+    selectedMargin5: 18, opponentMargin5: -5,
+    selectedMargin10: 12, opponentMargin10: -2,
+    strengthOfScheduleDiff: 4, selectedRestDays: 3, opponentRestDays: 1,
+    restDaysDiff: 2, selectedBackToBack: false, opponentBackToBack: false,
+    selectedMarginVolatility10: 8, opponentMarginVolatility10: 12,
+    homeCourtAdjustment: 3.2, projectedMargin: 10, listedSpread: -3.5,
+    projectedMarginVsSpread: 6.5, dataCompleteness: 1, injuryDataAvailable: false as const,
+    openingOddsAmerican: -110, previousOddsAmerican: -110, lineMovementAmerican: 0,
+    lineMovementImplied: 0, openingSpread: -2.5, previousSpread: -3,
+    lineMovementSpread: 0.5, lineSnapshotCount: 3
+  };
+  const scored = scoreNcaambSpreadLine(line, new Map([[eventKey(line), 2]]), context);
+
+  assert.ok(scored.confidence > 0.6);
+  assert.ok(scored.reasons.includes("Projected margin clears the listed spread"));
+  assert.equal(scored.features.injuryDataAvailable, false);
 });
 
 test("settlement start matching tolerates a kickoff change across UTC midnight", () => {

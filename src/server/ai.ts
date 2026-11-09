@@ -312,6 +312,33 @@ export type BasketballHeuristicContext = {
   dataCompleteness: number;
 } & MarketMovementContext;
 
+export type NcaambHeuristicContext = {
+  selectedGamesPlayed: number;
+  opponentGamesPlayed: number;
+  selectedPointsFor5: number | null;
+  opponentPointsFor5: number | null;
+  selectedPointsAgainst5: number | null;
+  opponentPointsAgainst5: number | null;
+  selectedMargin5: number | null;
+  opponentMargin5: number | null;
+  selectedMargin10: number | null;
+  opponentMargin10: number | null;
+  strengthOfScheduleDiff: number | null;
+  selectedRestDays: number | null;
+  opponentRestDays: number | null;
+  restDaysDiff: number | null;
+  selectedBackToBack: boolean;
+  opponentBackToBack: boolean;
+  selectedMarginVolatility10: number | null;
+  opponentMarginVolatility10: number | null;
+  homeCourtAdjustment: number;
+  projectedMargin: number;
+  listedSpread: number;
+  projectedMarginVsSpread: number;
+  dataCompleteness: number;
+  injuryDataAvailable: false;
+} & MarketMovementContext;
+
 type NhlHeuristicContext = {
   selectedGamesPlayed: number | null;
   opponentGamesPlayed: number | null;
@@ -1929,10 +1956,76 @@ export const scoreNbaSpreadLine = (
   };
 };
 
+export const scoreNcaambSpreadLine = (
+  line: CandidateLine,
+  eventMarketCounts: Map<string, number>,
+  context: NcaambHeuristicContext | null,
+  options: ScoreOptions = { modelVersion }
+): ScoredCandidate => {
+  const implied = impliedProbability(line.odds_american);
+  if (line.market_key !== "spreads") {
+    return {
+      ...line, score: -100, confidence: 0.1, impliedProbability: implied,
+      fairProbability: implied, edge: 0,
+      features: {
+        impliedProbability: implied, fairProbability: implied, edge: 0,
+        modelVersion: options.modelVersion, modelProfile: "ncaamb-spread-v1",
+        rejectedReason: "NCAAMB experimental model is spread-only"
+      },
+      reasons: ["NCAAMB spread-only model rejects non-spread market"]
+    };
+  }
+
+  const reasons: string[] = [];
+  const atsEdgePoints = context?.projectedMarginVsSpread ?? 0;
+  const completeness = context?.dataCompleteness ?? 0;
+  const modeledCoverProbability = 1 / (1 + Math.exp(-atsEdgePoints / 8.5));
+  const evidenceWeight = 0.2 + completeness * 0.6;
+  let fair = implied + (modeledCoverProbability - implied) * evidenceWeight;
+
+  if ((context?.lineSnapshotCount ?? 0) >= 2) {
+    fair += clamp((context?.lineMovementSpread ?? 0) * 0.003, -0.008, 0.008);
+    if ((context?.lineMovementSpread ?? 0) >= 1) reasons.push("Spread movement supports the pick");
+    else if ((context?.lineMovementSpread ?? 0) <= -1) reasons.push("Spread movement opposes the pick");
+  }
+  if (atsEdgePoints >= 3) reasons.push("Projected margin clears the listed spread");
+  else if (atsEdgePoints >= 1.5) reasons.push("Projected margin shows a spread edge");
+  else if (atsEdgePoints <= -1.5) reasons.push("Projected margin trails the listed spread");
+  if (((context?.selectedPointsFor5 ?? 0) - (context?.opponentPointsFor5 ?? 0)) >= 7) reasons.push("Recent scoring-offense edge");
+  if (((context?.selectedPointsAgainst5 ?? 0) - (context?.opponentPointsAgainst5 ?? 0)) <= -7) reasons.push("Recent scoring-defense edge");
+  if ((context?.strengthOfScheduleDiff ?? 0) >= 3) reasons.push("Stronger recent schedule");
+  if ((context?.restDaysDiff ?? 0) >= 2) reasons.push("Rest advantage");
+  else if ((context?.restDaysDiff ?? 0) <= -2) reasons.push("Rest disadvantage");
+  if ((context?.homeCourtAdjustment ?? 0) > 0) reasons.push("Home-court advantage");
+  if (completeness < 0.5) reasons.push("Limited early-season college sample");
+
+  fair = clamp(fair, 0.22, 0.78);
+  const edge = fair - implied;
+  return {
+    ...line,
+    score: edge * 100 + fair * 10 + Math.max(atsEdgePoints, 0) * 0.2,
+    confidence: fair,
+    impliedProbability: implied,
+    fairProbability: fair,
+    edge,
+    features: {
+      impliedProbability: implied, fairProbability: fair, edge,
+      isHome: line.selected_team === line.home_team,
+      isFavorite: Number(line.spread) < 0,
+      isMoneyline: false,
+      marketCompleteness: eventMarketCounts.get(eventKey(line)) ?? 1,
+      modelVersion: options.modelVersion, modelProfile: "ncaamb-spread-v1",
+      confidenceBucket: confidenceBucket(fair), decimalOdds: americanToDecimal(line.odds_american),
+      ...context
+    },
+    reasons: reasons.length ? reasons : ["NCAAMB projected margin versus spread"]
+  };
+};
+
 export const scoreLine = (
   line: CandidateLine,
   eventMarketCounts: Map<string, number>,
-  heuristicContext: MlbHeuristicContext | FootballHeuristicContext | NhlHeuristicContext | BasketballHeuristicContext | null = null,
+  heuristicContext: MlbHeuristicContext | FootballHeuristicContext | NhlHeuristicContext | BasketballHeuristicContext | NcaambHeuristicContext | null = null,
   options: ScoreOptions = { modelVersion }
 ): ScoredCandidate => {
   if (isFootballSpreadSport(line.sport)) {
@@ -1943,6 +2036,9 @@ export const scoreLine = (
   }
   if (line.sport === "NBA") {
     return scoreNbaSpreadLine(line, eventMarketCounts, heuristicContext as BasketballHeuristicContext | null, options);
+  }
+  if (line.sport === "NCAAMB") {
+    return scoreNcaambSpreadLine(line, eventMarketCounts, heuristicContext as NcaambHeuristicContext | null, options);
   }
 
   const context = heuristicContext as MlbHeuristicContext | null;
@@ -3055,6 +3151,124 @@ const rotationContinuity = (games: BasketballTeamGame[]) => {
   return [...recent].filter((player) => prior.has(player)).length / Math.max(recent.size, prior.size);
 };
 
+type NcaambTeamGame = {
+  startsOn: string;
+  opponentKey: string;
+  pointsFor: number;
+  pointsAgainst: number;
+  margin: number;
+};
+
+const ncaambForm = (games: NcaambTeamGame[], count: number) => {
+  const sample = games.slice(-count);
+  if (!sample.length) return null;
+  const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const margins = sample.map((game) => game.margin);
+  const meanMargin = average(margins);
+  return {
+    games: sample.length,
+    pointsFor: average(sample.map((game) => game.pointsFor)),
+    pointsAgainst: average(sample.map((game) => game.pointsAgainst)),
+    margin: meanMargin,
+    volatility: Math.sqrt(average(margins.map((margin) => (margin - meanMargin) ** 2)))
+  };
+};
+
+export const buildNcaambContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
+  const collegeLines = lines.filter((line) => line.sport === "NCAAMB" && line.market_key === "spreads");
+  if (!collegeLines.length) return new Map<string, NcaambHeuristicContext>();
+  await primeCollegeTeamAliases(client);
+  const dates = collegeLines.map((line) => dateOnly(line.starts_at)).sort();
+  const historyStart = new Date(`${dates[0]}T00:00:00Z`);
+  historyStart.setUTCDate(historyStart.getUTCDate() - 240);
+  const [results, movements] = await Promise.all([
+    client.query<{
+      starts_on: string; away_team: string; home_team: string; away_score: number; home_score: number;
+    }>(`
+      SELECT starts_on::text, away_team, home_team, away_score, home_score
+      FROM game_result
+      WHERE sport = 'NCAAMB' AND starts_on BETWEEN $1::date AND $2::date
+      ORDER BY starts_on, starts_at NULLS LAST
+    `, [dateOnly(historyStart), dates.at(-1)]),
+    buildMarketMovements(client, collegeLines, "NCAAMB")
+  ]);
+
+  const history = new Map<string, NcaambTeamGame[]>();
+  for (const game of results.rows) {
+    const awayKey = collegeTeamKey("NCAAMB", game.away_team);
+    const homeKey = collegeTeamKey("NCAAMB", game.home_team);
+    history.set(awayKey, [...(history.get(awayKey) ?? []), {
+      startsOn: game.starts_on, opponentKey: homeKey,
+      pointsFor: game.away_score, pointsAgainst: game.home_score,
+      margin: game.away_score - game.home_score
+    }]);
+    history.set(homeKey, [...(history.get(homeKey) ?? []), {
+      startsOn: game.starts_on, opponentKey: awayKey,
+      pointsFor: game.home_score, pointsAgainst: game.away_score,
+      margin: game.home_score - game.away_score
+    }]);
+  }
+  const power = new Map([...history].map(([team, games]) => [team, ncaambForm(games, 20)?.margin ?? 0]));
+  const contexts = new Map<string, NcaambHeuristicContext>();
+  for (const line of collegeLines) {
+    const startsOn = dateOnly(line.starts_at);
+    const selectedKey = collegeTeamKey("NCAAMB", line.selected_team);
+    const opponentName = line.selected_team === line.away_team ? line.home_team : line.away_team;
+    const opponentKey = collegeTeamKey("NCAAMB", opponentName);
+    const selectedGames = (history.get(selectedKey) ?? []).filter((game) => game.startsOn < startsOn);
+    const opponentGames = (history.get(opponentKey) ?? []).filter((game) => game.startsOn < startsOn);
+    const selected5 = ncaambForm(selectedGames, 5);
+    const opponent5 = ncaambForm(opponentGames, 5);
+    const selected10 = ncaambForm(selectedGames, 10);
+    const opponent10 = ncaambForm(opponentGames, 10);
+    const average = (values: number[]) => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+    const selectedSos = average(selectedGames.slice(-10).map((game) => power.get(game.opponentKey) ?? 0));
+    const opponentSos = average(opponentGames.slice(-10).map((game) => power.get(game.opponentKey) ?? 0));
+    const sosDiff = diffOrNull(selectedSos, opponentSos);
+    const selectedLast = selectedGames.at(-1);
+    const opponentLast = opponentGames.at(-1);
+    const selectedRestDays = selectedLast ? Math.max(0, daysBetween(selectedLast.startsOn, startsOn) - 1) : null;
+    const opponentRestDays = opponentLast ? Math.max(0, daysBetween(opponentLast.startsOn, startsOn) - 1) : null;
+    const restDaysDiff = diffOrNull(selectedRestDays, opponentRestDays);
+    const homeCourtAdjustment = line.selected_team === line.home_team ? 3.2 : -3.2;
+    const recentMargin = (selected10?.margin ?? 0) - (opponent10?.margin ?? 0);
+    const shortFormMargin = (selected5?.margin ?? 0) - (opponent5?.margin ?? 0);
+    const restAdjustment = clamp((restDaysDiff ?? 0) * 0.35, -1.5, 1.5);
+    const projectedMargin = recentMargin * 0.65 + shortFormMargin * 0.2 + (sosDiff ?? 0) * 0.15
+      + homeCourtAdjustment + restAdjustment;
+    const listedSpread = Number(line.spread);
+    const sampleCompleteness = Math.min(Math.min(selectedGames.length, opponentGames.length) / 10, 1);
+    const availableComponents = [selected10, opponent10, selectedSos, opponentSos, selectedRestDays, opponentRestDays]
+      .filter((value) => value !== null).length;
+    const movement = movements.get(line.id);
+    contexts.set(line.id, {
+      selectedGamesPlayed: selectedGames.length, opponentGamesPlayed: opponentGames.length,
+      selectedPointsFor5: selected5?.pointsFor ?? null, opponentPointsFor5: opponent5?.pointsFor ?? null,
+      selectedPointsAgainst5: selected5?.pointsAgainst ?? null, opponentPointsAgainst5: opponent5?.pointsAgainst ?? null,
+      selectedMargin5: selected5?.margin ?? null, opponentMargin5: opponent5?.margin ?? null,
+      selectedMargin10: selected10?.margin ?? null, opponentMargin10: opponent10?.margin ?? null,
+      strengthOfScheduleDiff: sosDiff,
+      selectedRestDays, opponentRestDays, restDaysDiff,
+      selectedBackToBack: selectedRestDays === 0, opponentBackToBack: opponentRestDays === 0,
+      selectedMarginVolatility10: selected10?.volatility ?? null,
+      opponentMarginVolatility10: opponent10?.volatility ?? null,
+      homeCourtAdjustment, projectedMargin, listedSpread,
+      projectedMarginVsSpread: projectedMargin + listedSpread,
+      dataCompleteness: sampleCompleteness * (availableComponents / 6),
+      injuryDataAvailable: false,
+      openingOddsAmerican: movement?.openingOddsAmerican ?? null,
+      previousOddsAmerican: movement?.previousOddsAmerican ?? null,
+      lineMovementAmerican: movement?.lineMovementAmerican ?? null,
+      lineMovementImplied: movement?.lineMovementImplied ?? null,
+      openingSpread: movement?.openingSpread ?? null,
+      previousSpread: movement?.previousSpread ?? null,
+      lineMovementSpread: movement?.lineMovementSpread ?? null,
+      lineSnapshotCount: movement?.lineSnapshotCount ?? null
+    });
+  }
+  return contexts;
+};
+
 export const buildBasketballContexts = async (client: pg.PoolClient, lines: CandidateLine[]) => {
   const nbaLines = lines.filter((line) => line.sport === "NBA" && line.market_key === "spreads");
   if (!nbaLines.length) return new Map<string, BasketballHeuristicContext>();
@@ -3848,8 +4062,8 @@ export const generateAiPicks = async ({
   aiRoundRobinBankrollFraction?: number;
   aiRoundRobinPicks?: number;
 } = {}) => {
-  // NBA is observation-only until its spread model has enough tracked results to validate.
-  if (sport === "NBA") placeWagers = false;
+  // Basketball models are observation-only until they have enough tracked results to validate.
+  if (sport === "NBA" || sport === "NCAAMB") placeWagers = false;
   const result = await transaction(async (client) => {
     const runId = randomUUID();
     const today = forDate ?? centralDate();
@@ -3894,7 +4108,7 @@ export const generateAiPicks = async ({
           AND starts_at > now()
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $2::date
           AND ($3::text IS NULL OR market_key = $3::text)
-          AND ($1::text NOT IN ('NFL', 'NCAAF', 'NBA') OR market_key = 'spreads')
+          AND ($1::text NOT IN ('NFL', 'NCAAF', 'NBA', 'NCAAMB') OR market_key = 'spreads')
         ORDER BY starts_at ASC, market_key ASC
       `,
       [sport, today, marketKey ?? null]
@@ -3909,6 +4123,7 @@ export const generateAiPicks = async ({
     const nhlContexts = await buildNhlContexts(client, activeLines.rows);
     const footballContexts = await buildFootballContexts(client, activeLines.rows);
     const basketballContexts = await buildBasketballContexts(client, activeLines.rows);
+    const ncaambContexts = await buildNcaambContexts(client, activeLines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, today)
       : undefined;
@@ -3919,6 +4134,8 @@ export const generateAiPicks = async ({
           ? nhlContexts.get(line.id) ?? null
           : line.sport === "NBA"
             ? basketballContexts.get(line.id) ?? null
+          : line.sport === "NCAAMB"
+            ? ncaambContexts.get(line.id) ?? null
           : mlbContexts.get(line.id) ?? null, {
         modelVersion: activeModelVersion,
         confidenceCalibration
@@ -4578,7 +4795,7 @@ export const snapshotAiCandidates = async ({
         WHERE is_active = true
           AND sport = $1
           AND starts_at > now()
-          AND ($1::text NOT IN ('NFL', 'NCAAF', 'NBA') OR market_key = 'spreads')
+          AND ($1::text NOT IN ('NFL', 'NCAAF', 'NBA', 'NCAAMB') OR market_key = 'spreads')
         ORDER BY starts_at ASC, market_key ASC
       `,
       [sport]
@@ -4593,6 +4810,7 @@ export const snapshotAiCandidates = async ({
     const nhlContexts = await buildNhlContexts(client, activeLines.rows);
     const footballContexts = await buildFootballContexts(client, activeLines.rows);
     const basketballContexts = await buildBasketballContexts(client, activeLines.rows);
+    const ncaambContexts = await buildNcaambContexts(client, activeLines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, today)
       : undefined;
@@ -4602,6 +4820,8 @@ export const snapshotAiCandidates = async ({
         ? nhlContexts.get(line.id) ?? null
         : line.sport === "NBA"
           ? basketballContexts.get(line.id) ?? null
+        : line.sport === "NCAAMB"
+          ? ncaambContexts.get(line.id) ?? null
         : mlbContexts.get(line.id) ?? null, {
       modelVersion: activeModelVersion,
       confidenceCalibration
@@ -4666,6 +4886,15 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
   return transaction(async (client) => {
     await primeCollegeTeamAliases(client);
 
+    // NCAAMB is intentionally spread-only. Remove pre-model moneyline snapshots
+    // instead of leaving unsupported picks visible when no spread is available.
+    await client.query(`
+      DELETE FROM chine_daily_pick
+      WHERE pick_date = $1::date
+        AND sport = 'NCAAMB'
+        AND market_key <> 'spreads'
+    `, [forDate]);
+
     const existingCollegePicks = await client.query<{
       id: string; awayTeam: string; homeTeam: string; startsAt: Date; confidence: string;
     }>(`
@@ -4709,10 +4938,11 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
           market_key
         FROM game_line
         WHERE is_active = true
-          AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAF')
+          AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF')
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
           AND (
             (sport IN ('NFL', 'NCAAF', 'NBA') AND market_key = 'spreads')
+            OR (sport = 'NCAAMB' AND market_key = 'spreads')
             OR (sport = 'NHL' AND market_key IN ('h2h', 'spreads'))
             OR (sport = 'MLB' AND market_key = 'h2h')
           )
@@ -4735,6 +4965,7 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
     const nhlContexts = await buildNhlContexts(client, nhlLines);
     const footballContexts = await buildFootballContexts(client, footballLines);
     const basketballContexts = await buildBasketballContexts(client, lines.rows);
+    const ncaambContexts = await buildNcaambContexts(client, lines.rows);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, forDate)
       : undefined;
@@ -4748,6 +4979,8 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
           ? nhlContexts.get(line.id) ?? null
           : line.sport === "NBA"
             ? basketballContexts.get(line.id) ?? null
+          : line.sport === "NCAAMB"
+            ? ncaambContexts.get(line.id) ?? null
           : line.sport === "MLB"
             ? mlbContexts.get(line.id) ?? null
             : null,
