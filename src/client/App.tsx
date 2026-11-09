@@ -3712,10 +3712,12 @@ function App() {
     refreshChineNflPicks().catch((err) => setChineNflPicksNotice((err as Error).message));
   }, [activePage, token, chineNflPicks]);
 
-  const refreshChineDailyPicks = async (date = chineDailyPicksDate) => {
+  const refreshChineDailyPicks = async (date = chineDailyPicksDate, silent = false) => {
     if (!token) return;
-    setChineDailyPicksPending(true);
-    setChineDailyPicksNotice("");
+    if (!silent) {
+      setChineDailyPicksPending(true);
+      setChineDailyPicksNotice("");
+    }
     try {
       const result = await api<ChineDailyPicksState>(`/chine/daily-picks?date=${encodeURIComponent(date)}`, {}, token);
       setChineDailyPicks(result);
@@ -3724,16 +3726,23 @@ function App() {
         setChineDailyPicksSport("ALL");
       }
     } catch (err) {
-      setChineDailyPicksNotice((err as Error).message);
+      if (!silent) setChineDailyPicksNotice((err as Error).message);
     } finally {
-      setChineDailyPicksPending(false);
+      if (!silent) setChineDailyPicksPending(false);
     }
   };
 
   useEffect(() => {
-    if (activePage !== "daily-picks" || !token || chineDailyPicks) return;
-    refreshChineDailyPicks().catch((err) => setChineDailyPicksNotice((err as Error).message));
-  }, [activePage, token, chineDailyPicks]);
+    if (activePage !== "daily-picks" || !token) return;
+    if (!chineDailyPicks) {
+      refreshChineDailyPicks().catch((err) => setChineDailyPicksNotice((err as Error).message));
+    }
+    if (chineDailyPicksDate !== centralDate()) return;
+    const timer = window.setInterval(() => {
+      refreshChineDailyPicks(chineDailyPicksDate, true).catch(() => undefined);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [activePage, token, chineDailyPicksDate, Boolean(chineDailyPicks)]);
 
   const joinNflConfidence = async () => {
     if (!token) return;

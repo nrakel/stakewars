@@ -4781,7 +4781,19 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
             confidence, model_version
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-          ON CONFLICT (pick_date, sport, game_key) DO NOTHING
+          ON CONFLICT (pick_date, sport, game_key) DO UPDATE SET
+            game_line_id = EXCLUDED.game_line_id,
+            away_team = EXCLUDED.away_team,
+            home_team = EXCLUDED.home_team,
+            starts_at = EXCLUDED.starts_at,
+            selected_team = EXCLUDED.selected_team,
+            market_key = EXCLUDED.market_key,
+            spread = EXCLUDED.spread,
+            odds_american = EXCLUDED.odds_american,
+            confidence = EXCLUDED.confidence,
+            model_version = EXCLUDED.model_version,
+            recorded_at = now()
+          WHERE chine_daily_pick.starts_at > now()
           RETURNING id
         `,
         [
