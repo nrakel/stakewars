@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { footballTeamKey } from "./odds.js";
 import { refreshNbaContext } from "./nba-context.js";
-import { collegeTeamKey, primeCollegeTeamAliases } from "./collegeTeams.js";
+import { collegeEventKey, collegeTeamKey, primeCollegeTeamAliases } from "./collegeTeams.js";
 
 export const legacyModelVersion = "phase3-context-heuristic-v6";
 export const modelVersion = "phase3-context-heuristic-v9";
@@ -538,11 +538,7 @@ const stableProviderMatchId = (providerEventId: string | null) => {
 
 export const eventKey = (line: CandidateLine) => {
   if (line.sport === "NCAAMB") {
-    const teams = [
-      collegeTeamKey("NCAAMB", line.away_team),
-      collegeTeamKey("NCAAMB", line.home_team)
-    ].sort();
-    return `NCAAMB:${centralDate(line.starts_at)}:${teams.join(":")}`;
+    return collegeEventKey("NCAAMB", line.starts_at, line.away_team, line.home_team);
   }
   return stableProviderMatchId(line.provider_event_id)
     ?? `${line.sport}:${line.starts_at.toISOString()}:${line.away_team}:${line.home_team}:${line.market_key}`;
@@ -4713,12 +4709,12 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
           market_key
         FROM game_line
         WHERE is_active = true
-          AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF')
+          AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAF')
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
           AND (
             (sport IN ('NFL', 'NCAAF', 'NBA') AND market_key = 'spreads')
             OR (sport = 'NHL' AND market_key IN ('h2h', 'spreads'))
-            OR (sport IN ('MLB', 'NCAAMB') AND market_key = 'h2h')
+            OR (sport = 'MLB' AND market_key = 'h2h')
           )
         ORDER BY starts_at ASC, sport ASC
       `,

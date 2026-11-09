@@ -60,6 +60,27 @@ export const resolveCollegeTeam = (sport: CollegeSport, name: string, provider =
 export const collegeTeamKey = (sport: CollegeSport, name: string, provider = "*") =>
   resolveCollegeTeam(sport, name, provider)?.id ?? `name:${normalizeCollegeAlias(name)}`;
 
+const centralDate = (date: Date) => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Chicago",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+};
+
+export const collegeEventKey = (
+  sport: CollegeSport,
+  startsAt: Date,
+  awayTeam: string,
+  homeTeam: string
+) => {
+  const teams = [collegeTeamKey(sport, awayTeam), collegeTeamKey(sport, homeTeam)].sort();
+  return `${sport}:${centralDate(startsAt)}:${teams.join(":")}`;
+};
+
 const directory = {
   NCAAF: ["football", "college-football"],
   NCAAMB: ["basketball", "mens-college-basketball"]

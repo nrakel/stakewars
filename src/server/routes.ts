@@ -15,6 +15,7 @@ import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
 import { nflPlayerKey } from "./nflPlayerProps.js";
 import { outcomeForSelection } from "./settlement.js";
+import { collegeEventKey } from "./collegeTeams.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
   dailyAiParlayBankrollFraction,
@@ -866,6 +867,8 @@ const gameEventKey = (row: {
   marketKey?: string;
 }) => row.sport === "NFL" || row.sport === "NCAAF"
   ? footballEventKey(row)
+  : row.sport === "NCAAMB"
+    ? collegeEventKey("NCAAMB", row.startsAt, row.awayTeam, row.homeTeam)
   : providerEventBase(row.providerEventId)
     ?? `${row.sport}:${row.startsAt.toISOString()}:${row.awayTeam}:${row.homeTeam}`;
 
@@ -2845,6 +2848,7 @@ export const registerRoutes = (router: Router) => {
             LIMIT 1
           ) result ON true
           WHERE pick.pick_date = $1
+            AND pick.sport <> 'NCAAMB'
           ORDER BY pick.confidence DESC, pick.starts_at ASC, pick.sport ASC
         `,
         [date]
@@ -2882,6 +2886,7 @@ export const registerRoutes = (router: Router) => {
             LIMIT 1
           ) result ON true
           WHERE pick.pick_date <= $1::date
+            AND pick.sport <> 'NCAAMB'
             AND (pick.sport <> 'NBA' OR pick.market_key = 'spreads')
         `,
         [date]
@@ -5734,7 +5739,7 @@ export const registerRoutes = (router: Router) => {
                 AND gl.starts_at > now()
                 AND gl.sport <> 'WORLDCUP'
             ) ranked
-            WHERE sport_row_number <= 240
+            WHERE sport_row_number <= CASE WHEN sport = 'NCAAMB' THEN 1200 ELSE 240 END
           )
           SELECT
             gl.id,

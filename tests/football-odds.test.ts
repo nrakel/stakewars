@@ -3,7 +3,7 @@ import test from "node:test";
 import { eventKey, scoreLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
 import { footballEventIdentity, footballTeamKey, isExpectedSportEvent } from "../src/server/odds.js";
-import { normalizeCollegeAlias } from "../src/server/collegeTeams.js";
+import { collegeEventKey, normalizeCollegeAlias } from "../src/server/collegeTeams.js";
 import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
 
 const baseEvent = {
@@ -56,6 +56,14 @@ test("NCAAB daily pick keys ignore provider ids and home-away inversion", () => 
   });
 
   assert.equal(first, reversed);
+});
+
+test("NCAAB event keys keep unrelated matchups separate", () => {
+  const startsAt = new Date("2026-11-10T01:00:00Z");
+  const clemson = collegeEventKey("NCAAMB", startsAt, "North Dakota Fighting Hawks", "Clemson Tigers");
+  const illinois = collegeEventKey("NCAAMB", startsAt, "Illinois Fighting Illini", "Texas Tech Red Raiders");
+
+  assert.notEqual(clemson, illinois);
 });
 
 test("settlement start matching tolerates a kickoff change across UTC midnight", () => {
