@@ -1894,6 +1894,7 @@ function AuthPanel({
 
 function App() {
   const [token, setToken] = useState(() => localStorage.getItem("stakewars_token") ?? "");
+  const [authRestoring, setAuthRestoring] = useState(() => Boolean(localStorage.getItem("stakewars_token")));
   const [user, setUser] = useState<SessionUser | null>(null);
   const [bankroll, setBankroll] = useState<Bankroll | null>(null);
   const [lines, setLines] = useState<GameLine[]>([]);
@@ -2568,12 +2569,48 @@ function App() {
   };
 
   useEffect(() => {
-    refresh().catch((error) => {
-      if (error instanceof ApiError && error.status === 401) {
-        localStorage.removeItem("stakewars_token");
-        setToken("");
-      }
-    });
+    const authToken = localStorage.getItem("stakewars_token") ?? "";
+    if (!authToken) {
+      setAuthRestoring(false);
+      void refresh("").catch(() => undefined);
+      return;
+    }
+
+    let cancelled = false;
+    api<{ user: SessionUser; bankroll: Bankroll }>("/me", {}, authToken)
+      .then((result) => {
+        if (cancelled) return;
+        setUser(result.user);
+        setBankroll(result.bankroll);
+        setFullName(result.user.fullName ?? "");
+        setEmail(result.user.email ?? "");
+        setDisplayName(result.user.displayName ?? "");
+        setPayoutMethod(result.user.payoutMethod);
+        setPayoutHandle(result.user.payoutHandle ?? "");
+        setPhoneLast4(result.user.phoneLast4 ?? "");
+        setAuthRestoring(false);
+        void refresh(authToken).catch((error) => {
+          if (error instanceof ApiError && error.status === 401) {
+            localStorage.removeItem("stakewars_token");
+            setToken("");
+            setUser(null);
+          }
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        if (error instanceof ApiError && error.status === 401) {
+          localStorage.removeItem("stakewars_token");
+          setToken("");
+        } else {
+          setNotice((error as Error).message);
+        }
+        setAuthRestoring(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -5322,6 +5359,16 @@ function App() {
 
   if (legalPath) {
     return <LegalPage kind={legalPath} />;
+  }
+
+  if (!user && authRestoring) {
+    return (
+      <section className="session-restoring" aria-live="polite" aria-label="Restoring session">
+        <img src="/icons/icon-192.png" alt="" />
+        <strong>StakeWars</strong>
+        <span>Loading...</span>
+      </section>
+    );
   }
 
   if (!user) {
