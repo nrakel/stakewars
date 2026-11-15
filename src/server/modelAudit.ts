@@ -8,6 +8,7 @@ type AuditRow = {
   pushes: string;
   winPct: string | null;
   netUnits: string;
+  roi: string | null;
   avgConfidence: string | null;
   avgEdge: string | null;
 };
@@ -20,6 +21,7 @@ export type ChineModelAuditGroup = {
   pushes: number;
   winPct: number | null;
   netUnits: number;
+  roi: number | null;
   avgConfidence: number | null;
   avgEdge: number | null;
 };
@@ -51,6 +53,7 @@ const mapRows = (rows: AuditRow[]): ChineModelAuditGroup[] => rows.map((row) => 
   pushes: Number(row.pushes),
   winPct: row.winPct === null ? null : Number(row.winPct),
   netUnits: Number(row.netUnits),
+  roi: row.roi === null ? null : Number(row.roi),
   avgConfidence: row.avgConfidence === null ? null : Number(row.avgConfidence),
   avgEdge: row.avgEdge === null ? null : Number(row.avgEdge)
 }));
@@ -105,7 +108,8 @@ const baseSettledPicksSql = `
         WHEN status = 'won' THEN win_profit_units
         WHEN status = 'lost' THEN -1::numeric
         ELSE 0::numeric
-      END AS profit_units
+      END AS profit_units,
+      CASE WHEN status = 'void' THEN 0::numeric ELSE 1::numeric END AS staked_units
     FROM settled_picks
   )
 `;
@@ -127,6 +131,10 @@ const aggregateSql = (labelExpression: string, extraFrom = "") => `
       )::text
     END AS "winPct",
     round(sum(profit_units), 4)::text AS "netUnits",
+    CASE
+      WHEN sum(staked_units) = 0 THEN NULL
+      ELSE round(sum(profit_units) / nullif(sum(staked_units), 0), 4)::text
+    END AS roi,
     round(avg(confidence), 4)::text AS "avgConfidence",
     round(avg(edge), 4)::text AS "avgEdge"
   FROM scored
@@ -152,6 +160,10 @@ const orderedAggregateSql = (labelExpression: string, orderExpression: string) =
       )::text
     END AS "winPct",
     round(sum(profit_units), 4)::text AS "netUnits",
+    CASE
+      WHEN sum(staked_units) = 0 THEN NULL
+      ELSE round(sum(profit_units) / nullif(sum(staked_units), 0), 4)::text
+    END AS roi,
     round(avg(confidence), 4)::text AS "avgConfidence",
     round(avg(edge), 4)::text AS "avgEdge",
     ${orderExpression} AS sort_order

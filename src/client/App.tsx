@@ -429,6 +429,7 @@ type ChineModelAuditGroup = {
   pushes: number;
   winPct: number | null;
   netUnits: number;
+  roi: number | null;
   avgConfidence: number | null;
   avgEdge: number | null;
 };
@@ -548,6 +549,7 @@ function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this g
               <th>W-L-P</th>
               <th>Win %</th>
               <th>Net Units</th>
+              <th>ROI</th>
               <th>Avg Conf</th>
               <th>Avg Edge</th>
             </tr>
@@ -560,13 +562,14 @@ function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this g
                 <td>{row.wins}-{row.losses}-{row.pushes}</td>
                 <td>{pct(row.winPct)}</td>
                 <td>{units(row.netUnits)}</td>
+                <td>{pct(row.roi)}</td>
                 <td>{pct(row.avgConfidence)}</td>
                 <td>{pct(row.avgEdge)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7}>{emptyLabel}</td>
+                <td colSpan={8}>{emptyLabel}</td>
               </tr>
             )}
           </tbody>
@@ -6696,7 +6699,7 @@ function App() {
             <div className="notification-card model-audit-card">
               <div>
                 <strong>Chine Model Audit</strong>
-                <span>Settled locked Chine picks, scored as one simulated unit per pick. This measures heuristic quality without parlay staking noise.</span>
+                <span>Settled locked Chine picks, scored as one simulated unit per pick. ROI is net units divided by graded units risked, excluding voids.</span>
               </div>
               <div className="notification-actions">
                 <button className="secondary-action" onClick={() => void refreshChineModelAudit()}>Refresh audit</button>
