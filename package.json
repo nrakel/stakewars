@@ -35,6 +35,8 @@
     "refresh:visitors:prod": "node dist/scripts/refresh-visitor-metrics.js",
     "sync:college-programs": "tsx scripts/sync-college-programs.ts",
     "sync:college-programs:prod": "node dist/scripts/sync-college-programs.js",
+    "refresh:chine-benchmark": "tsx scripts/refresh-chine-sp500-benchmark.ts",
+    "refresh:chine-benchmark:prod": "node dist/scripts/refresh-chine-sp500-benchmark.js",
     "ai:snapshot": "tsx scripts/snapshot-ai-candidates.ts",
     "ai:snapshot:prod": "node dist/scripts/snapshot-ai-candidates.js",
     "backfill:parlay": "tsx scripts/backfill-parlay-history.ts",
@@ -98,7 +100,7 @@
     "nightly": "tsx scripts/nightly-automation.ts",
     "nightly:prod": "node dist/scripts/nightly-automation.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.server.json --noEmit",
-    "test": "node --import tsx --test tests/tower-engine.test.ts tests/merch.test.ts tests/football-odds.test.ts tests/nhl.test.ts tests/live-notifications.test.ts tests/nfl-player-projections.test.ts tests/nba-context.test.ts",
+    "test": "node --import tsx --test tests/tower-engine.test.ts tests/merch.test.ts tests/football-odds.test.ts tests/nhl.test.ts tests/live-notifications.test.ts tests/nfl-player-projections.test.ts tests/nba-context.test.ts tests/chine-benchmark.test.ts",
     "simulate:tower": "tsx scripts/simulate-tower.ts",
     "security:smoke": "tsx scripts/security-smoke.ts"
   },

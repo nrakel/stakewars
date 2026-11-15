@@ -430,6 +430,11 @@ type ChineModelAuditGroup = {
   winPct: number | null;
   netUnits: number;
   roi: number | null;
+  sp500Roi: number | null;
+  roiVsSp500: number | null;
+  firstWagerDate: string | null;
+  sp500StartDate: string | null;
+  sp500ThroughDate: string | null;
   avgConfidence: number | null;
   avgEdge: number | null;
 };
@@ -536,7 +541,7 @@ const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve,
 const pct = (value: number | null | undefined) => value == null ? "-" : `${(value * 100).toFixed(1)}%`;
 const units = (value: number | null | undefined) => value == null ? "-" : `${value >= 0 ? "+" : ""}${value.toFixed(2)}u`;
 
-function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this group yet." }: { title: string; rows: ChineModelAuditGroup[]; emptyLabel?: string }) {
+function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this group yet.", showBenchmark = false }: { title: string; rows: ChineModelAuditGroup[]; emptyLabel?: string; showBenchmark?: boolean }) {
   return (
     <div className="model-audit-table">
       <h3>{title}</h3>
@@ -550,6 +555,9 @@ function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this g
               <th>Win %</th>
               <th>Net Units</th>
               <th>ROI</th>
+              {showBenchmark && <th>S&amp;P 500</th>}
+              {showBenchmark && <th>vs S&amp;P</th>}
+              {showBenchmark && <th>Since</th>}
               <th>Avg Conf</th>
               <th>Avg Edge</th>
             </tr>
@@ -563,13 +571,16 @@ function ModelAuditTable({ title, rows, emptyLabel = "No settled picks in this g
                 <td>{pct(row.winPct)}</td>
                 <td>{units(row.netUnits)}</td>
                 <td>{pct(row.roi)}</td>
+                {showBenchmark && <td>{pct(row.sp500Roi)}</td>}
+                {showBenchmark && <td>{pct(row.roiVsSp500)}</td>}
+                {showBenchmark && <td>{row.firstWagerDate ?? "-"}</td>}
                 <td>{pct(row.avgConfidence)}</td>
                 <td>{pct(row.avgEdge)}</td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8}>{emptyLabel}</td>
+                <td colSpan={showBenchmark ? 11 : 8}>{emptyLabel}</td>
               </tr>
             )}
           </tbody>
@@ -6725,7 +6736,7 @@ function App() {
                 </small>
               )}
               <div className="model-audit-grid">
-                <ModelAuditTable title="Summary" rows={chineModelAudit?.summary ?? []} />
+                <ModelAuditTable title="Summary" rows={chineModelAudit?.summary ?? []} showBenchmark />
                 <ModelAuditTable title="Confidence Buckets" rows={chineModelAudit?.confidenceBuckets ?? []} />
                 <ModelAuditTable title="Market" rows={chineModelAudit?.markets ?? []} />
                 <ModelAuditTable title="Edge Range" rows={chineModelAudit?.edgeRanges ?? []} />

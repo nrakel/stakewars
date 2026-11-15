@@ -22,6 +22,11 @@ export type ChineModelAuditGroup = {
   winPct: number | null;
   netUnits: number;
   roi: number | null;
+  sp500Roi: number | null;
+  roiVsSp500: number | null;
+  firstWagerDate: string | null;
+  sp500StartDate: string | null;
+  sp500ThroughDate: string | null;
   avgConfidence: number | null;
   avgEdge: number | null;
 };
@@ -54,6 +59,11 @@ const mapRows = (rows: AuditRow[]): ChineModelAuditGroup[] => rows.map((row) => 
   winPct: row.winPct === null ? null : Number(row.winPct),
   netUnits: Number(row.netUnits),
   roi: row.roi === null ? null : Number(row.roi),
+  sp500Roi: null,
+  roiVsSp500: null,
+  firstWagerDate: null,
+  sp500StartDate: null,
+  sp500ThroughDate: null,
   avgConfidence: row.avgConfidence === null ? null : Number(row.avgConfidence),
   avgEdge: row.avgEdge === null ? null : Number(row.avgEdge)
 }));
@@ -184,6 +194,7 @@ export const getChineModelAudit = async ({
   const params = [since, through, sport];
   const [
     summary,
+    sportSummaries,
     confidenceBuckets,
     markets,
     reasons,
@@ -194,9 +205,11 @@ export const getChineModelAudit = async ({
     starterEdge,
     bullpenEdge,
     marketMovement,
-    availableSports
+    availableSports,
+    benchmarks
   ] = await Promise.all([
     query<AuditRow>(aggregateSql("'All settled locked Chine picks'"), params),
+    query<AuditRow>(aggregateSql("sport"), params),
     query<AuditRow>(orderedAggregateSql(
       `CASE
         WHEN confidence >= 0.80 THEN '80%+'
@@ -308,8 +321,42 @@ export const getChineModelAudit = async ({
         AND ($1::date IS NULL OR p.published_for >= $1::date)
         AND ($2::date IS NULL OR p.published_for <= $2::date)
       ORDER BY sport
-    `, [since, through])
+    `, [since, through]),
+    query<{
+      benchmarkKey: string;
+      firstWagerDate: string;
+      startDate: string;
+      throughDate: string;
+      roi: string;
+    }>(`
+      SELECT benchmark_key AS "benchmarkKey", first_wager_date::text AS "firstWagerDate",
+        benchmark_start_date::text AS "startDate", benchmark_through_date::text AS "throughDate",
+        benchmark_roi::text AS roi
+      FROM chine_sp500_benchmark
+    `)
   ]);
+
+  const benchmarkByKey = new Map(benchmarks.rows.map((row) => [row.benchmarkKey, row]));
+  const addBenchmark = (row: ChineModelAuditGroup, key: string): ChineModelAuditGroup => {
+    const benchmark = benchmarkByKey.get(key);
+    const sp500Roi = benchmark ? Number(benchmark.roi) : null;
+    return {
+      ...row,
+      label: key === "OVERALL" ? "Overall" : key,
+      sp500Roi,
+      roiVsSp500: row.roi === null || sp500Roi === null ? null : row.roi - sp500Roi,
+      firstWagerDate: benchmark?.firstWagerDate ?? null,
+      sp500StartDate: benchmark?.startDate ?? null,
+      sp500ThroughDate: benchmark?.throughDate ?? null
+    };
+  };
+  const overallSummary = mapRows(summary.rows).map((row) => addBenchmark(row, sport ?? "OVERALL"));
+  const summaryRows = sport
+    ? overallSummary
+    : [
+      ...overallSummary,
+      ...mapRows(sportSummaries.rows).map((row) => addBenchmark(row, row.label))
+    ];
 
   return {
     generatedAt: new Date().toISOString(),
@@ -317,7 +364,7 @@ export const getChineModelAudit = async ({
     through,
     sport,
     availableSports: availableSports.rows.map((row) => row.sport),
-    summary: mapRows(summary.rows),
+    summary: summaryRows,
     confidenceBuckets: mapRows(confidenceBuckets.rows),
     markets: mapRows(markets.rows),
     reasons: mapRows(reasons.rows),

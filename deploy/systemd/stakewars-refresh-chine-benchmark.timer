@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh StakeWars Chine benchmark on weekday nights
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 00:00:00 America/Chicago
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+

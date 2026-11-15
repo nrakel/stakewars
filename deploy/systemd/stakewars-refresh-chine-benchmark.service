@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh StakeWars Chine S&P 500 comparison
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/stakewars
+EnvironmentFile=/etc/stakewars/stakewars.env
+ExecStart=/usr/bin/npm run refresh:chine-benchmark:prod
+User=stakewars
+Group=stakewars
+

@@ -251,6 +251,23 @@ Run manually if needed:
 systemctl start stakewars-nightly.service
 ```
 
+## Chine S&P 500 benchmark
+
+The Chine Model Audit compares its one-unit ROI with the S&P 500 price return
+over the same period. Benchmark data comes from the Federal Reserve FRED
+`SP500` daily-close series. Each sport begins on its first Chine wager date; if
+that date is not a trading day, the most recent prior close is used. This is a
+price-index comparison and does not include reinvested dividends.
+
+Production refreshes the cached benchmark at midnight America/Chicago every
+weekday:
+
+```bash
+systemctl list-timers stakewars-refresh-chine-benchmark.timer --all
+journalctl -u stakewars-refresh-chine-benchmark.service -n 100 --no-pager
+npm run refresh:chine-benchmark:prod
+```
+
 ## College program registry
 
 NCAAF and NCAAB share a canonical ESPN-ID-based program registry. Refresh the
