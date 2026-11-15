@@ -544,6 +544,9 @@ export const fetchBasketballFinals = async (sport: "NBA" | "NCAAMB", startDate: 
     const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/basketball/${league}/scoreboard`);
     url.searchParams.set("limit", "300");
     url.searchParams.set("dates", date.replace(/-/g, ""));
+    if (sport === "NCAAMB") {
+      url.searchParams.set("groups", "50");
+    }
 
     const response = await fetch(url, { headers: espnFetchHeaders });
     if (!response.ok) {

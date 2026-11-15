@@ -2839,8 +2839,10 @@ export const registerRoutes = (router: Router) => {
                   )
                 )
                 OR (
-                  ((candidate.away_team = pick.away_team AND candidate.home_team = pick.home_team)
-                    OR (candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team))
+                  ((translate(lower(candidate.away_team), 'é', 'e') = translate(lower(pick.away_team), 'é', 'e')
+                      AND translate(lower(candidate.home_team), 'é', 'e') = translate(lower(pick.home_team), 'é', 'e'))
+                    OR (translate(lower(candidate.away_team), 'é', 'e') = translate(lower(pick.home_team), 'é', 'e')
+                      AND translate(lower(candidate.home_team), 'é', 'e') = translate(lower(pick.away_team), 'é', 'e')))
                   AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)) <= 43200
                 )
               )
@@ -2896,8 +2898,10 @@ export const registerRoutes = (router: Router) => {
               AND ((candidate.provider_game_id IS NOT NULL AND (
                 line.provider_event_id = 'espn:' || candidate.provider_game_id
                 OR position('espn:' || candidate.provider_game_id || '|' IN coalesce(line.provider_event_id, '')) > 0
-              )) OR (((candidate.away_team = pick.away_team AND candidate.home_team = pick.home_team)
-                OR (candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team))
+              )) OR (((translate(lower(candidate.away_team), 'é', 'e') = translate(lower(pick.away_team), 'é', 'e')
+                  AND translate(lower(candidate.home_team), 'é', 'e') = translate(lower(pick.home_team), 'é', 'e'))
+                OR (translate(lower(candidate.away_team), 'é', 'e') = translate(lower(pick.home_team), 'é', 'e')
+                  AND translate(lower(candidate.home_team), 'é', 'e') = translate(lower(pick.away_team), 'é', 'e')))
                 AND abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)) <= 43200))
             ORDER BY abs(extract(epoch from coalesce(candidate.starts_at, candidate.starts_on::timestamptz) - pick.starts_at)), candidate.fetched_at DESC
             LIMIT 1
