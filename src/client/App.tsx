@@ -4476,6 +4476,10 @@ function App() {
   const ChineDailyPicksPage = () => {
     const state = chineDailyPicks;
     const picks = (state?.picks ?? []).filter((pick) => chineDailyPicksSport === "ALL" || pick.sport === chineDailyPicksSport);
+    const filteredResults = picks.reduce((summary, pick) => {
+      summary[pick.result] += 1;
+      return summary;
+    }, { won: 0, lost: 0, push: 0, void: 0, pending: 0 });
     const confidenceBandClass = (confidence: number) => confidence >= 0.75 ? "high" : confidence >= 0.65 ? "medium" : "low";
     const changeDate = async (date: string) => {
       setChineDailyPicksDate(date);
@@ -4537,6 +4541,26 @@ function App() {
             </button>
           ))}
         </div>
+        {state && (
+          <div className="survivor-status-grid">
+            <div className="metric-card">
+              <span>Record</span>
+              <strong>
+                {filteredResults.won}-{filteredResults.lost}
+                {filteredResults.push > 0 ? `-${filteredResults.push}` : ""}
+              </strong>
+              <small>
+                {chineDailyPicksSport === "ALL" ? "All sports" : chineDailyPicksSport}
+                {filteredResults.void > 0 ? ` • ${filteredResults.void} void` : ""}
+              </small>
+            </div>
+            <div className="metric-card">
+              <span>Pending</span>
+              <strong>{filteredResults.pending}</strong>
+              <small>{picks.length} total picks</small>
+            </div>
+          </div>
+        )}
         {performance && (
           <p className="muted">
             Tracked {chineDailyPicksSport === "ALL" ? "overall" : chineDailyPicksSport} results through {state?.date}: {performance.wins}-{performance.losses}
