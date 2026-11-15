@@ -214,15 +214,33 @@ The trainer stores official MLB final scores in `game_result`, grades each store
 
 ## Podcast voice integration
 
-Admin > Podcast can generate the existing Markdown prep file and an owner-only
-ElevenLabs voice sample. Configure production with:
+Admin > Podcast can generate the existing Markdown prep file, a persisted daily
+`Chine Sheets` script, and an owner-only ElevenLabs voice sample. Script
+generation uses the three highest-confidence stored Chine picks for the chosen
+date and only the model explanations, reasons, and captured features already in
+StakeWars. It requests 900-1300 words of natural sports-show prose and refuses
+to invent news, injuries, weather, or matchup context that is not supplied.
+
+Each date has one saved draft in `podcast_script`. Opening the page retrieves
+that draft without generating new text; pressing Generate/Regenerate is the
+only operation that invokes OpenAI. The visible transcript retains the Chine
+brand spelling, while the separately stored audio-ready text changes the whole
+word `Chine` to `Sheen` for correct pronunciation. Apply migration
+`087_podcast_script.sql` before using this feature.
+
+Configure production with:
 
 ```bash
 ELEVENLABS_API_KEY=sk_your_server_side_key
 ELEVENLABS_VOICE_ID=your_voice_id
 ELEVENLABS_MODEL_ID=eleven_v4
 ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+OPENAI_API_KEY=sk_your_server_side_key
+OPENAI_MODEL=gpt-5.4-nano
 ```
+
+`OPENAI_API_KEY` is required for script generation. If it is absent, the API
+returns a configuration error and does not substitute a lower-quality template.
 
 The API key and voice ID are read only by the server and must never be exposed
 to the browser or committed to Git. `POST /api/admin/podcast/test-voice`

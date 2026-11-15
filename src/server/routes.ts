@@ -16,6 +16,7 @@ import { getChineModelAudit } from "./modelAudit.js";
 import { nflPlayerKey } from "./nflPlayerProps.js";
 import { outcomeForSelection } from "./settlement.js";
 import { elevenLabsClient, ElevenLabsError } from "./elevenLabs.js";
+import { generateChineSheetsScript, type PodcastScriptPick } from "./podcast.js";
 import { collegeEventKey } from "./collegeTeams.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
@@ -350,6 +351,41 @@ type PodcastPickRow = {
   oddsAmerican: number;
   marketKey: string;
 };
+
+type PodcastScriptRow = {
+  episodeDate: string;
+  title: string;
+  transcript: string;
+  speechText: string;
+  wordCount: number;
+  pickIds: string[];
+  modelId: string;
+  status: string;
+  generatedAt: string;
+};
+
+const getPodcastPicks = async (date: string, limit?: number) => query<PodcastPickRow>(
+  `
+    SELECT
+      p.id, p.selected_team AS "selectedTeam", p.published_for::text AS "publishedFor",
+      p.score, p.confidence, p.reasons, p.features, p.explanation, p.locked_at AS "lockedAt",
+      p.wager_id AS "wagerId", p.model_version AS "modelVersion",
+      p.locked_odds_american AS "lockedOddsAmerican", p.locked_spread::text AS "lockedSpread",
+      p.locked_line_captured_at AS "lockedLineCapturedAt", p.closing_odds_american AS "closingOddsAmerican",
+      p.closing_spread::text AS "closingSpread", p.closing_captured_at AS "closingCapturedAt",
+      w.status::text AS "wagerStatus", w.stake_cents AS "stakeCents",
+      w.potential_payout_cents AS "potentialReturnCents", gl.sport, gl.league,
+      gl.starts_at AS "startsAt", gl.home_team AS "homeTeam", gl.away_team AS "awayTeam",
+      gl.spread::text AS spread, gl.odds_american AS "oddsAmerican", gl.market_key AS "marketKey"
+    FROM ai_pick p
+    JOIN game_line gl ON gl.id = p.game_line_id
+    LEFT JOIN wager w ON w.id = p.wager_id
+    WHERE p.published_for = $1::date
+    ORDER BY p.confidence DESC NULLS LAST, p.score DESC NULLS LAST, gl.starts_at ASC
+    ${limit ? "LIMIT $2" : ""}
+  `,
+  limit ? [date, limit] : [date]
+);
 
 const buildPodcastMarkdown = (date: string, picks: PodcastPickRow[]) => {
   const generatedAt = podcastDateTime(new Date());
@@ -4894,6 +4930,72 @@ export const registerRoutes = (router: Router) => {
       res.setHeader("content-type", "text/markdown; charset=utf-8");
       res.setHeader("content-disposition", `attachment; filename="stakewars-chine-podcast-${date}.md"`);
       res.send(body);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.get("/admin/podcast/script", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const date = optionalDateParam.parse(typeof req.query.date === "string" ? req.query.date : undefined) ?? centralDate();
+      const result = await query<PodcastScriptRow>(
+        `
+          SELECT episode_date::text AS "episodeDate", title, transcript, speech_text AS "speechText",
+                 word_count AS "wordCount", pick_ids AS "pickIds", model_id AS "modelId",
+                 status, generated_at AS "generatedAt"
+          FROM podcast_script
+          WHERE episode_date = $1::date
+        `,
+        [date]
+      );
+      res.json({ script: result.rows[0] ?? null });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/podcast/script", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      if (!config.openAiApiKey) {
+        res.status(503).json({ error: "Podcast script generation requires OPENAI_API_KEY in the production environment." });
+        return;
+      }
+      const input = z.object({ date: optionalDateParam }).parse(req.body);
+      const date = input.date ?? centralDate();
+      const picks = await getPodcastPicks(date, 3);
+      const generated = await generateChineSheetsScript(date, picks.rows as PodcastScriptPick[]);
+      const result = await query<PodcastScriptRow>(
+        `
+          INSERT INTO podcast_script (
+            id, episode_date, title, transcript, speech_text, word_count, pick_ids,
+            model_id, status, generated_at, generated_by, updated_at
+          )
+          VALUES ($1, $2::date, $3, $4, $5, $6, $7::uuid[], $8, 'draft', now(), $9, now())
+          ON CONFLICT (episode_date) DO UPDATE SET
+            title = EXCLUDED.title,
+            transcript = EXCLUDED.transcript,
+            speech_text = EXCLUDED.speech_text,
+            word_count = EXCLUDED.word_count,
+            pick_ids = EXCLUDED.pick_ids,
+            model_id = EXCLUDED.model_id,
+            status = 'draft',
+            generated_at = now(),
+            generated_by = EXCLUDED.generated_by,
+            updated_at = now()
+          RETURNING episode_date::text AS "episodeDate", title, transcript, speech_text AS "speechText",
+                    word_count AS "wordCount", pick_ids AS "pickIds", model_id AS "modelId",
+                    status, generated_at AS "generatedAt"
+        `,
+        [randomUUID(), date, generated.title, generated.transcript, generated.speechText,
+          generated.wordCount, generated.pickIds, generated.modelId, req.user!.id]
+      );
+      await logAdminAction(req, "admin.podcast.script.generate", {
+        date,
+        pickIds: generated.pickIds,
+        wordCount: generated.wordCount,
+        modelId: generated.modelId
+      });
+      res.json({ script: result.rows[0] });
     } catch (error) {
       next(error);
     }

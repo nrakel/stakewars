@@ -458,6 +458,18 @@ type ChineModelAudit = {
   marketMovement: ChineModelAuditGroup[];
 };
 
+type PodcastScript = {
+  episodeDate: string;
+  title: string;
+  transcript: string;
+  speechText: string;
+  wordCount: number;
+  pickIds: string[];
+  modelId: string;
+  status: string;
+  generatedAt: string;
+};
+
 type VerificationRequiredResponse = {
   verificationRequired: true;
   userId: string;
@@ -2058,6 +2070,8 @@ function App() {
   const [podcastDate, setPodcastDate] = useState(() => centralDate());
   const [podcastNotice, setPodcastNotice] = useState("");
   const [podcastGenerating, setPodcastGenerating] = useState(false);
+  const [podcastScript, setPodcastScript] = useState<PodcastScript | null>(null);
+  const [podcastScriptGenerating, setPodcastScriptGenerating] = useState(false);
   const [podcastVoiceTesting, setPodcastVoiceTesting] = useState(false);
   const [podcastVoiceSampleUrl, setPodcastVoiceSampleUrl] = useState("");
   const [supportOpen, setSupportOpen] = useState(false);
@@ -4002,6 +4016,39 @@ function App() {
       setPodcastGenerating(false);
     }
   };
+
+  const refreshPodcastScript = async (date = podcastDate) => {
+    if (!token || !isNateRakelAccount || !date) return;
+    try {
+      const result = await api<{ script: PodcastScript | null }>(`/admin/podcast/script?date=${encodeURIComponent(date)}`, {}, token);
+      setPodcastScript(result.script);
+    } catch (err) {
+      setPodcastNotice((err as Error).message);
+    }
+  };
+
+  const generatePodcastScript = async () => {
+    if (!token || !isNateRakelAccount || podcastScriptGenerating || !podcastDate) return;
+    setPodcastNotice("");
+    setPodcastScriptGenerating(true);
+    try {
+      const result = await api<{ script: PodcastScript }>("/admin/podcast/script", {
+        method: "POST",
+        body: JSON.stringify({ date: podcastDate })
+      }, token);
+      setPodcastScript(result.script);
+      setPodcastNotice("Chine Sheets script generated and saved.");
+    } catch (err) {
+      setPodcastNotice((err as Error).message);
+    } finally {
+      setPodcastScriptGenerating(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!token || !isNateRakelAccount || !podcastDate) return;
+    void refreshPodcastScript(podcastDate);
+  }, [token, isNateRakelAccount, podcastDate]);
 
   const testPodcastVoice = async () => {
     if (!token || !isNateRakelAccount || podcastVoiceTesting) return;
@@ -6810,8 +6857,8 @@ function App() {
             {adminSection === "podcast" && (
             <div className="notification-card podcast-admin-card">
               <div>
-                <strong>Podcast</strong>
-                <span>Generate a daily Markdown prep file with Chine&apos;s picks and detailed game-by-game model analysis.</span>
+                <strong>Chine Sheets</strong>
+                <span>Generate and preserve a natural daily sports-show script focused on Chine&apos;s top three picks.</span>
               </div>
               <div className="reddit-editor podcast-editor">
                 <label>
@@ -6819,6 +6866,9 @@ function App() {
                   <input type="date" value={podcastDate} onChange={(event) => setPodcastDate(event.target.value)} />
                 </label>
                 <div className="notification-actions">
+                  <button className="primary" disabled={podcastScriptGenerating || !podcastDate} onClick={generatePodcastScript}>
+                    <Radio size={16} /> {podcastScriptGenerating ? "Writing script..." : podcastScript ? "Regenerate script" : "Generate script"}
+                  </button>
                   <button className="primary" disabled={podcastGenerating || !podcastDate} onClick={generatePodcastFile}>
                     <Download size={16} /> {podcastGenerating ? "Generating..." : "Generate podcast file"}
                   </button>
@@ -6828,7 +6878,19 @@ function App() {
                 </div>
                 {podcastVoiceSampleUrl && <audio controls preload="metadata" src={podcastVoiceSampleUrl} />}
               </div>
+              {podcastScript && (
+                <div className="podcast-script-preview">
+                  <div>
+                    <strong>{podcastScript.title}</strong>
+                    <small className="muted">
+                      {podcastScript.wordCount.toLocaleString()} words • {podcastScript.pickIds.length} picks • Generated {new Date(podcastScript.generatedAt).toLocaleString()}
+                    </small>
+                  </div>
+                  <textarea aria-label="Chine Sheets transcript" readOnly rows={20} value={podcastScript.transcript} />
+                </div>
+              )}
               <small className="muted">The file includes selected team, odds, start time, confidence, score, wager status, model explanation, reason labels, and every captured model feature for each pick.</small>
+              <small className="muted">The saved transcript displays Chine normally. Its audio-ready copy automatically uses Sheen for pronunciation.</small>
               <small className="muted">Test Voice generates one short ElevenLabs sample and consumes a small number of characters.</small>
               {podcastNotice && <p className={podcastNotice.includes("generated") ? "success" : "error"}>{podcastNotice}</p>}
             </div>

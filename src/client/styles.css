@@ -1432,6 +1432,26 @@ textarea {
   width: min(100%, 520px);
 }
 
+.podcast-script-preview {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #edf0ed;
+  padding-top: 12px;
+}
+
+.podcast-script-preview > div {
+  display: grid;
+  gap: 3px;
+}
+
+.podcast-script-preview textarea {
+  width: 100%;
+  min-height: 360px;
+  resize: vertical;
+  font: inherit;
+  line-height: 1.55;
+}
+
 .reddit-lock-status {
   display: inline-flex;
   align-items: center;
