@@ -2824,10 +2824,10 @@ export const registerRoutes = (router: Router) => {
               candidate.starts_at,
               candidate.starts_on,
               candidate.fetched_at,
-              CASE WHEN candidate.away_team = pick.away_team
-                THEN candidate.away_score ELSE candidate.home_score END AS away_score,
-              CASE WHEN candidate.home_team = pick.home_team
-                THEN candidate.home_score ELSE candidate.away_score END AS home_score
+              CASE WHEN candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team
+                THEN candidate.home_score ELSE candidate.away_score END AS away_score,
+              CASE WHEN candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team
+                THEN candidate.away_score ELSE candidate.home_score END AS home_score
             FROM game_result candidate
             WHERE candidate.sport = pick.sport
               AND (
@@ -2887,10 +2887,10 @@ export const registerRoutes = (router: Router) => {
               candidate.starts_at,
               candidate.starts_on,
               candidate.fetched_at,
-              CASE WHEN candidate.away_team = pick.away_team
-                THEN candidate.away_score ELSE candidate.home_score END AS away_score,
-              CASE WHEN candidate.home_team = pick.home_team
-                THEN candidate.home_score ELSE candidate.away_score END AS home_score
+              CASE WHEN candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team
+                THEN candidate.home_score ELSE candidate.away_score END AS away_score,
+              CASE WHEN candidate.away_team = pick.home_team AND candidate.home_team = pick.away_team
+                THEN candidate.away_score ELSE candidate.home_score END AS home_score
             FROM game_result candidate
             WHERE candidate.sport = pick.sport
               AND ((candidate.provider_game_id IS NOT NULL AND (
