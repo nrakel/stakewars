@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastSystemPrompt, podcastWordCount } from "../src/server/podcast.js";
+import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastSpokenText, podcastSystemPrompt, podcastWordCount } from "../src/server/podcast.js";
 
 test("podcast speech text pronounces Chine as Sheen without changing embedded text", () => {
   assert.equal(
@@ -12,15 +12,26 @@ test("podcast speech text pronounces Chine as Sheen without changing embedded te
 test("podcast feature context keeps relevant facts and excludes unrelated internals", () => {
   assert.deepEqual(podcastFeatureContext({
     selectedStarterEra: 2.91,
+    selectedRecentMargin: 1.833333333333,
+    opponentRecentMargins: [-5.6666666667, 2],
     weatherSummary: "windy",
     selectedPointPct: 0.69,
     internalDebugValue: 42,
     selectedBullpenEra: null
   }), {
-    selectedStarterEra: 2.91,
+    selectedStarterEra: 2.9,
+    selectedRecentMargin: 1.8,
+    opponentRecentMargins: [-5.7, 2],
     weatherSummary: "windy",
     selectedPercentOfAvailableStandingsPointsEarned: "69 percent"
   });
+});
+
+test("podcast spoken text rounds long decimals to one place", () => {
+  assert.equal(
+    podcastSpokenText("Detroit 1.833333333333 and New England -5.6666666667."),
+    "Detroit 1.8 and New England -5.7."
+  );
 });
 
 test("podcast prompt uses no more than three picks", () => {

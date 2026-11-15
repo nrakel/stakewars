@@ -45,11 +45,25 @@ const podcastFeatureKey = (key: string) => key
   .replace(/venuePointPct/g, "venuePercentOfAvailableStandingsPointsEarned")
   .replace(/pointPct/g, "percentOfAvailableStandingsPointsEarned");
 
-const podcastFeatureValue = (key: string, value: unknown) => (
-  /pointPct/i.test(key) && typeof value === "number" && Math.abs(value) <= 1
-    ? `${Math.round(value * 100)} percent`
-    : value
+const spokenNumber = (value: number) => Number.isInteger(value) ? value : Number(value.toFixed(1));
+
+export const podcastSpokenText = (value: string) => value.replace(
+  /-?\d+\.\d{2,}/g,
+  (match) => spokenNumber(Number(match)).toFixed(1)
 );
+
+const podcastFeatureValue = (key: string, value: unknown): unknown => {
+  if (/pointPct/i.test(key) && typeof value === "number" && Math.abs(value) <= 1) {
+    return `${Math.round(value * 100)} percent`;
+  }
+  if (typeof value === "number") return spokenNumber(value);
+  if (typeof value === "string") return podcastSpokenText(value);
+  if (Array.isArray(value)) return value.map((item) => podcastFeatureValue(key, item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([childKey, item]) => [childKey, podcastFeatureValue(childKey, item)]));
+  }
+  return value;
+};
 
 export const podcastFeatureContext = (features: Record<string, unknown> | null) => Object.fromEntries(
   Object.entries(features ?? {})
@@ -83,7 +97,7 @@ export const buildPodcastPromptData = (date: string, picks: PodcastScriptPick[])
     selection: pick.selectedTeam,
     line: lineText(pick),
     confidencePercent: pick.confidence == null ? null : Math.round(Number(pick.confidence) * 100),
-    modelReasons: pick.reasons ?? [],
+    modelReasons: (pick.reasons ?? []).map(podcastSpokenText),
     verifiedModelContext: podcastFeatureContext(pick.features)
   }))
 });
