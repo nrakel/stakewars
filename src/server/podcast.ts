@@ -37,9 +37,24 @@ const outputText = (body: unknown) => {
 
 const usefulFeature = /injur|weather|travel|rest|venue|division|playoff|margin|starter|bullpen|offense|defense|point|goal|run|pace|tempo|strength|schedule|lineMovement|projected|recent|availability|home|road|pitch|quarterback|passing|rushing|scoring/i;
 
+const podcastFeatureKey = (key: string) => key
+  .replace(/RecentPointPct/g, "RecentPercentOfAvailableStandingsPointsEarned")
+  .replace(/VenuePointPct/g, "VenuePercentOfAvailableStandingsPointsEarned")
+  .replace(/PointPct/g, "PercentOfAvailableStandingsPointsEarned")
+  .replace(/recentPointPct/g, "recentPercentOfAvailableStandingsPointsEarned")
+  .replace(/venuePointPct/g, "venuePercentOfAvailableStandingsPointsEarned")
+  .replace(/pointPct/g, "percentOfAvailableStandingsPointsEarned");
+
+const podcastFeatureValue = (key: string, value: unknown) => (
+  /pointPct/i.test(key) && typeof value === "number" && Math.abs(value) <= 1
+    ? `${Math.round(value * 100)} percent`
+    : value
+);
+
 export const podcastFeatureContext = (features: Record<string, unknown> | null) => Object.fromEntries(
   Object.entries(features ?? {})
     .filter(([key, value]) => usefulFeature.test(key) && value != null && value !== "")
+    .map(([key, value]) => [podcastFeatureKey(key), podcastFeatureValue(key, value)])
     .slice(0, 60)
 );
 
@@ -49,6 +64,8 @@ export const podcastSpeechText = (transcript: string) => transcript
   .replace(/\bchine\b/g, "sheen");
 
 export const podcastWordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
+export const podcastSystemPrompt = `Write a single-host daily sports podcast script for Chine Sheets. Aim for 950 words and never exceed 1200 words, producing roughly 5 to 10 minutes of speech. Focus on no more than the three supplied picks. Sound like a natural sports host, not a stat dump: establish the matchup, explain why Chine made each pick, connect statistics conversationally, and use transitions between games. Use only facts explicitly supplied in the input. Never invent injuries, weather, venue details, player names, rivalry context, playoff implications, or news. If an interesting contextual note is not supplied, omit it. Confidence is a model estimate, never a guarantee. Translate every model feature into language a casual sports listener will understand. Never read an internal feature name or unexplained analytics term aloud. Lead with what a metric means, then use the number as support. Define any necessary technical statistic immediately in the same sentence. The first time scoring margin appears, explain that it is the average amount by which the team outscores or is outscored by opponents, using points, runs, or goals as appropriate for that sport. Later references may say scoring margin without repeating the definition. Convert ratios such as 0.69 to natural percentages such as 69 percent when that is clearer. For example, describe NHL season points percentage as the share of available standings points a team has earned, rather than calling it simply "season points percentage." Start exactly with: "Welcome to today's StakeWars podcast. I am Chine, your host, and we have a lot of action to get to, so let's get started." End with a concise recap and an invitation to compete at stakewars.ai. Return spoken prose only, in paragraphs, with no Markdown, headings, stage directions, bullet points, citations, or music instructions.`;
 
 const lineText = (pick: PodcastScriptPick) => pick.marketKey === "h2h"
   ? `moneyline ${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican}`
@@ -66,7 +83,6 @@ export const buildPodcastPromptData = (date: string, picks: PodcastScriptPick[])
     selection: pick.selectedTeam,
     line: lineText(pick),
     confidencePercent: pick.confidence == null ? null : Math.round(Number(pick.confidence) * 100),
-    storedExplanation: pick.explanation,
     modelReasons: pick.reasons ?? [],
     verifiedModelContext: podcastFeatureContext(pick.features)
   }))
@@ -87,11 +103,11 @@ export const generateChineSheetsScript = async (date: string, picks: PodcastScri
       },
       body: JSON.stringify({
         model: config.openAiModel,
-        max_output_tokens: 2600,
+        max_output_tokens: 1900,
         input: [
           {
             role: "system",
-            content: `Write a single-host daily sports podcast script for Chine Sheets. Write 900 to 1300 words, suitable for roughly 5 to 10 minutes of speech. Focus on no more than the three supplied picks. Sound like a natural sports host, not a stat dump: establish the matchup, explain why Chine made each pick, connect statistics conversationally, and use transitions between games. Use only facts explicitly supplied in the input. Never invent injuries, weather, venue details, player names, rivalry context, playoff implications, or news. If an interesting contextual note is not supplied, omit it. Confidence is a model estimate, never a guarantee. Start exactly with: "Welcome to today's StakeWars podcast. I am Chine, your host, and we have a lot of action to get to, so let's get started." End with a concise recap and an invitation to compete at stakewars.ai. Return spoken prose only, in paragraphs, with no Markdown, headings, stage directions, bullet points, citations, or music instructions.`
+            content: podcastSystemPrompt
           },
           {
             role: "user",

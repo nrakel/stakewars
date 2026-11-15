@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastWordCount } from "../src/server/podcast.js";
+import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastSystemPrompt, podcastWordCount } from "../src/server/podcast.js";
 
 test("podcast speech text pronounces Chine as Sheen without changing embedded text", () => {
   assert.equal(
@@ -13,11 +13,13 @@ test("podcast feature context keeps relevant facts and excludes unrelated intern
   assert.deepEqual(podcastFeatureContext({
     selectedStarterEra: 2.91,
     weatherSummary: "windy",
+    selectedPointPct: 0.69,
     internalDebugValue: 42,
     selectedBullpenEra: null
   }), {
     selectedStarterEra: 2.91,
-    weatherSummary: "windy"
+    weatherSummary: "windy",
+    selectedPercentOfAvailableStandingsPointsEarned: "69 percent"
   });
 });
 
@@ -31,4 +33,12 @@ test("podcast prompt uses no more than three picks", () => {
   assert.equal(data.picks.length, 3);
   assert.equal(data.picks[0]?.confidencePercent, 72);
   assert.equal(podcastWordCount("one two\nthree"), 3);
+});
+
+test("podcast prompt requires casual-language explanations for analytics", () => {
+  assert.match(podcastSystemPrompt, /casual sports listener/i);
+  assert.match(podcastSystemPrompt, /share of available standings points/i);
+  assert.match(podcastSystemPrompt, /Convert ratios/i);
+  assert.match(podcastSystemPrompt, /first time scoring margin appears/i);
+  assert.match(podcastSystemPrompt, /outscores or is outscored/i);
 });
