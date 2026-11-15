@@ -212,6 +212,25 @@ npm run ai:training:prod -- 2026-06-24 2026-06-24
 
 The trainer stores official MLB final scores in `game_result`, grades each stored `ai_pick_candidate` against moneyline or runline rules, and writes normalized outcomes to `ai_training_example` with profit measured per $100 stake.
 
+## Podcast voice integration
+
+Admin > Podcast can generate the existing Markdown prep file and an owner-only
+ElevenLabs voice sample. Configure production with:
+
+```bash
+ELEVENLABS_API_KEY=sk_your_server_side_key
+ELEVENLABS_VOICE_ID=your_voice_id
+ELEVENLABS_MODEL_ID=eleven_v4
+ELEVENLABS_OUTPUT_FORMAT=mp3_44100_128
+```
+
+The API key and voice ID are read only by the server and must never be exposed
+to the browser or committed to Git. `POST /api/admin/podcast/test-voice`
+requires Nate Rakel's authenticated account, generates fixed short text, logs
+the model, format, and character count in the admin audit log, and returns an
+uncached MP3. Each click consumes ElevenLabs characters. Production may
+optionally restrict the ElevenLabs key to the server's public `/32` address.
+
 Evaluate the current AI heuristic against historical MLB lines:
 
 ```bash

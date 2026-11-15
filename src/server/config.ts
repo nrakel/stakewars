@@ -67,6 +67,10 @@ export const config = {
   sesFromEmail: process.env.SES_FROM_EMAIL,
   sesFromName: process.env.SES_FROM_NAME ?? "StakeWars",
   emailBccAddress: process.env.EMAIL_BCC_ADDRESS ?? "support@stakewars.ai",
+  elevenLabsApiKey: process.env.ELEVENLABS_API_KEY,
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID,
+  elevenLabsModelId: process.env.ELEVENLABS_MODEL_ID ?? "eleven_v4",
+  elevenLabsOutputFormat: process.env.ELEVENLABS_OUTPUT_FORMAT ?? "mp3_44100_128",
   merchStoreUrl: normalizeMerchStoreUrl(process.env.MERCH_STORE_URL ?? defaultMerchStoreUrl),
   towerEnabled: process.env.STAKEWARS_TOWER_ENABLED === "true"
 };

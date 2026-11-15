@@ -2058,6 +2058,8 @@ function App() {
   const [podcastDate, setPodcastDate] = useState(() => centralDate());
   const [podcastNotice, setPodcastNotice] = useState("");
   const [podcastGenerating, setPodcastGenerating] = useState(false);
+  const [podcastVoiceTesting, setPodcastVoiceTesting] = useState(false);
+  const [podcastVoiceSampleUrl, setPodcastVoiceSampleUrl] = useState("");
   const [supportOpen, setSupportOpen] = useState(false);
   const [supportCategory, setSupportCategory] = useState<SupportCategory | "">("");
   const [supportMessage, setSupportMessage] = useState("");
@@ -4000,6 +4002,36 @@ function App() {
       setPodcastGenerating(false);
     }
   };
+
+  const testPodcastVoice = async () => {
+    if (!token || !isNateRakelAccount || podcastVoiceTesting) return;
+    setPodcastNotice("");
+    setPodcastVoiceTesting(true);
+    try {
+      const response = await fetch("/api/admin/podcast/test-voice", {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? "Voice test failed.");
+      }
+      const blob = await response.blob();
+      setPodcastVoiceSampleUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return URL.createObjectURL(blob);
+      });
+      setPodcastNotice("Voice sample generated.");
+    } catch (err) {
+      setPodcastNotice((err as Error).message);
+    } finally {
+      setPodcastVoiceTesting(false);
+    }
+  };
+
+  useEffect(() => () => {
+    if (podcastVoiceSampleUrl) URL.revokeObjectURL(podcastVoiceSampleUrl);
+  }, [podcastVoiceSampleUrl]);
 
   const refreshAdminPrizes = async () => {
     if (!token || !isNateRakelAccount) return;
@@ -6790,9 +6822,14 @@ function App() {
                   <button className="primary" disabled={podcastGenerating || !podcastDate} onClick={generatePodcastFile}>
                     <Download size={16} /> {podcastGenerating ? "Generating..." : "Generate podcast file"}
                   </button>
+                  <button className="secondary-action" disabled={podcastVoiceTesting} onClick={testPodcastVoice}>
+                    <Radio size={16} /> {podcastVoiceTesting ? "Generating sample..." : "Test Voice"}
+                  </button>
                 </div>
+                {podcastVoiceSampleUrl && <audio controls preload="metadata" src={podcastVoiceSampleUrl} />}
               </div>
               <small className="muted">The file includes selected team, odds, start time, confidence, score, wager status, model explanation, reason labels, and every captured model feature for each pick.</small>
+              <small className="muted">Test Voice generates one short ElevenLabs sample and consumes a small number of characters.</small>
               {podcastNotice && <p className={podcastNotice.includes("generated") ? "success" : "error"}>{podcastNotice}</p>}
             </div>
             )}

@@ -123,6 +123,7 @@ app.use(helmet({
       "frame-ancestors": ["'self'"],
       "img-src": ["'self'", "data:"],
       "manifest-src": ["'self'"],
+      "media-src": ["'self'", "blob:"],
       "object-src": ["'none'"],
       "script-src": ["'self'"],
       "script-src-attr": ["'none'"],

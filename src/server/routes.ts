@@ -15,6 +15,7 @@ import { getVisitorMetrics } from "./visitorMetrics.js";
 import { getChineModelAudit } from "./modelAudit.js";
 import { nflPlayerKey } from "./nflPlayerProps.js";
 import { outcomeForSelection } from "./settlement.js";
+import { elevenLabsClient, ElevenLabsError } from "./elevenLabs.js";
 import { collegeEventKey } from "./collegeTeams.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
@@ -4894,6 +4895,29 @@ export const registerRoutes = (router: Router) => {
       res.setHeader("content-disposition", `attachment; filename="stakewars-chine-podcast-${date}.md"`);
       res.send(body);
     } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/podcast/test-voice", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const speech = await elevenLabsClient.generateSpeech(
+        "StakeWars audio is connected. Chine is ready to compete."
+      );
+      await logAdminAction(req, "admin.podcast.test_voice", {
+        characters: speech.characterCount,
+        model: speech.modelId,
+        outputFormat: speech.outputFormat
+      });
+      res.setHeader("cache-control", "no-store, private");
+      res.setHeader("content-type", speech.contentType);
+      res.setHeader("content-disposition", 'inline; filename="stakewars-voice-test.mp3"');
+      res.send(speech.audio);
+    } catch (error) {
+      if (error instanceof ElevenLabsError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
       next(error);
     }
   });
