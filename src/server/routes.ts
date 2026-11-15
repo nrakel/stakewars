@@ -391,6 +391,118 @@ const getPodcastPicks = async (date: string, limit?: number) => query<PodcastPic
   limit ? [date, limit] : [date]
 );
 
+type PodcastNflContextRow = {
+  season: number;
+  week: number;
+  team: string;
+  opponent: string;
+  playerName: string;
+  position: string;
+  projectedStats: Record<string, number>;
+  modelInputs: {
+    offense?: { passYards?: number; rushYards?: number };
+    opponentDefense?: { passYardsAllowed?: number; rushYardsAllowed?: number };
+  };
+};
+
+const addPodcastGameContext = async (picks: PodcastPickRow[]): Promise<PodcastScriptPick[]> => Promise.all(
+  picks.map(async (pick) => {
+    if (pick.sport !== "NFL") return pick;
+    const game = await query<{ id: string; season: number; week: number }>(
+      `
+        SELECT id, season, week
+        FROM nfl_confidence_game
+        WHERE lower(away_team) = lower($1)
+          AND lower(home_team) = lower($2)
+          AND abs(extract(epoch FROM (starts_at - $3::timestamptz))) <= 21600
+        ORDER BY abs(extract(epoch FROM (starts_at - $3::timestamptz)))
+        LIMIT 1
+      `,
+      [pick.awayTeam, pick.homeTeam, pick.startsAt]
+    );
+    if (!game.rows[0]) return pick;
+    const { id: gameId, season, week } = game.rows[0];
+    const players = await query<PodcastNflContextRow>(
+      `
+        SELECT season, week, team, opponent, player_name AS "playerName", position,
+               projected_stats AS "projectedStats", model_inputs AS "modelInputs"
+        FROM nfl_player_projection
+        WHERE game_id = $1 AND role_rank = 1 AND position IN ('QB', 'RB')
+        ORDER BY team, position
+      `,
+      [gameId]
+    );
+    const defenses = await query<{
+      team: string;
+      rushYardsAllowed: number;
+      passYardsAllowed: number;
+      rushRank: number;
+      passRank: number;
+      teamsRanked: number;
+    }>(
+      `
+        WITH defense_values AS (
+          SELECT DISTINCT ON (opponent)
+            opponent AS team,
+            (model_inputs->'opponentDefense'->>'rushYardsAllowed')::numeric AS rush_yards_allowed,
+            (model_inputs->'opponentDefense'->>'passYardsAllowed')::numeric AS pass_yards_allowed
+          FROM nfl_player_projection
+          WHERE season = $1 AND week = $2 AND position = 'QB' AND role_rank = 1
+            AND model_inputs->'opponentDefense'->>'rushYardsAllowed' IS NOT NULL
+            AND model_inputs->'opponentDefense'->>'passYardsAllowed' IS NOT NULL
+          ORDER BY opponent, generated_at DESC
+        ), ranked AS (
+          SELECT team, rush_yards_allowed, pass_yards_allowed,
+                 rank() OVER (ORDER BY rush_yards_allowed ASC) AS rush_rank,
+                 rank() OVER (ORDER BY pass_yards_allowed ASC) AS pass_rank,
+                 count(*) OVER () AS teams_ranked
+          FROM defense_values
+        )
+        SELECT team, rush_yards_allowed::float8 AS "rushYardsAllowed",
+               pass_yards_allowed::float8 AS "passYardsAllowed",
+               rush_rank::int AS "rushRank", pass_rank::int AS "passRank",
+               teams_ranked::int AS "teamsRanked"
+        FROM ranked
+        WHERE lower(team) IN (lower($3), lower($4))
+      `,
+      [season, week, pick.awayTeam, pick.homeTeam]
+    );
+    const featuredPlayers = players.rows.map((player) => ({
+      team: player.team,
+      opponent: player.opponent,
+      name: player.playerName,
+      position: player.position,
+      projectedStats: podcastFeatureValueForContext(player.projectedStats),
+      recentTeamOffense: podcastFeatureValueForContext(player.modelInputs.offense ?? {})
+    }));
+    const defenseContext = defenses.rows.map((defense) => ({
+      team: defense.team,
+      recentRushYardsAllowedPerGame: Number(defense.rushYardsAllowed.toFixed(1)),
+      recentPassYardsAllowedPerGame: Number(defense.passYardsAllowed.toFixed(1)),
+      runDefenseRankAmongModeledSlate: defense.rushRank,
+      passDefenseRankAmongModeledSlate: defense.passRank,
+      teamsInModeledSlate: defense.teamsRanked
+    }));
+    return {
+      ...pick,
+      verifiedGameContext: {
+        source: "StakeWars NFL player projections built from ESPN box scores and current rosters",
+        featuredPlayers,
+        recentDefenseContext: defenseContext
+      }
+    };
+  })
+);
+
+const podcastFeatureValueForContext = (value: unknown): unknown => {
+  if (typeof value === "number") return Number.isInteger(value) ? value : Number(value.toFixed(1));
+  if (Array.isArray(value)) return value.map(podcastFeatureValueForContext);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, podcastFeatureValueForContext(item)]));
+  }
+  return value;
+};
+
 const buildPodcastMarkdown = (date: string, picks: PodcastPickRow[]) => {
   const generatedAt = podcastDateTime(new Date());
   const lines = [
@@ -4968,7 +5080,8 @@ export const registerRoutes = (router: Router) => {
       const input = z.object({ date: optionalDateParam }).parse(req.body);
       const date = input.date ?? centralDate();
       const picks = await getPodcastPicks(date, 3);
-      const generated = await generateChineSheetsScript(date, picks.rows as PodcastScriptPick[]);
+      const contextualPicks = await addPodcastGameContext(picks.rows);
+      const generated = await generateChineSheetsScript(date, contextualPicks);
       const result = await query<PodcastScriptRow>(
         `
           INSERT INTO podcast_script (

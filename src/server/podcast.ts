@@ -15,6 +15,7 @@ export type PodcastScriptPick = {
   spread: string;
   oddsAmerican: number;
   marketKey: string;
+  verifiedGameContext?: Record<string, unknown> | null;
 };
 
 const outputText = (body: unknown) => {
@@ -79,11 +80,66 @@ export const podcastSpeechText = (transcript: string) => transcript
 
 export const podcastWordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
 
-export const podcastSystemPrompt = `Write a single-host daily sports podcast script for Chine Sheets. Aim for 950 words and never exceed 1200 words, producing roughly 5 to 10 minutes of speech. Focus on no more than the three supplied picks. Sound like a natural sports host, not a stat dump: establish the matchup, explain why Chine made each pick, connect statistics conversationally, and use transitions between games. Use only facts explicitly supplied in the input. Never invent injuries, weather, venue details, player names, rivalry context, playoff implications, or news. If an interesting contextual note is not supplied, omit it. Confidence is a model estimate, never a guarantee. Translate every model feature into language a casual sports listener will understand. Never read an internal feature name or unexplained analytics term aloud. Lead with what a metric means, then use the number as support. Define any necessary technical statistic immediately in the same sentence. The first time scoring margin appears, explain that it is the average amount by which the team outscores or is outscored by opponents, using points, runs, or goals as appropriate for that sport. Later references may say scoring margin without repeating the definition. Convert ratios such as 0.69 to natural percentages such as 69 percent when that is clearer. For example, describe NHL season points percentage as the share of available standings points a team has earned, rather than calling it simply "season points percentage." Start exactly with: "Welcome to today's StakeWars podcast. I am Chine, your host, and we have a lot of action to get to, so let's get started." End with a concise recap and an invitation to compete at stakewars.ai. Return spoken prose only, in paragraphs, with no Markdown, headings, stage directions, bullet points, citations, or music instructions.`;
+export const podcastSystemPrompt = `Write a single-host daily sports show for Chine Sheets, aimed at a casual sports fan who wants strong opinions and entertaining game stories—not an analytics lecture. Aim for 850 to 1150 words and never exceed 1300 words, producing roughly 5 to 10 minutes of speech. Focus on no more than the three supplied picks.
 
-const lineText = (pick: PodcastScriptPick) => pick.marketKey === "h2h"
-  ? `moneyline ${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican}`
-  : `spread ${pick.spread}, ${pick.oddsAmerican > 0 ? "+" : ""}${pick.oddsAmerican}`;
+Open exactly with: "Welcome to today's StakeWars podcast. I am Chine, your host, and we have a lot of action to get to, so let's get started." Immediately follow with a lively cold-open tease that gives listeners a reason to stay for all three games.
+
+For each game, follow a natural radio-show arc without announcing the structure: open with a hook or tension point; state Chine's pick and opinion clearly; use only the two or three most persuasive supplied statistics; explain what those facts mean on the field, court, rink, or diamond; identify the most plausible way the pick could go wrong; then close with a confident, memorable take. There is an absolute maximum of three supporting numerical facts per game beyond the betting line and confidence; omit every additional number, even if it is available. Use transitions that connect the games instead of saying "first," "next," and "finally" mechanically. Vary sentence length and rhythm. Add restrained wit, playful confidence, and occasional swagger, but do not force jokes or insult teams or fans.
+
+When verified game context supplies player names, make the recognizable players and their matchup the center of the story. Mention the projected starting quarterbacks, and bring in a lead running back when the ground matchup matters. Player identity and the on-field conflict should lead; averages and rankings should support the opinion. Write like a knowledgeable friend making a direct case: start with the player or matchup that makes the pick compelling, explain why that advantage matters, acknowledge the opponent's best answer, and explain why the pick can withstand it. A defense rank in the input is only its rank among the teams in that week's modeled slate, not an official full-league rank, so qualify it that way if used. Use a ranking only when it genuinely supports the pick or clearly explains the opponent's best counterargument. Do not infer a player's style of play merely from the player's name or projection. Do not claim career awards, proven pedigree, injury status, roster status, or biographical facts unless the input explicitly supplies them.
+
+Statistics are supporting evidence, never the story. Do not recite feature lists or comparison windows. Do not mention every available statistic. Never say phrases such as "the model shows," "the model lists," "the reasons include," "the selected team," "the opponent," "the inputs," "the context," "moneyline-to-spread energy," or "betting like you believe it." Name the actual teams. Mention confidence once per pick at most. Assume a casual sports fan already understands moneylines and point spreads; do not explain basic betting mechanics or tell the listener to place a real-money bet. Read betting lines exactly in the natural form supplied. Never call a favorite's spread "negative," and never pronounce a whole or half-point spread as "point-zero" or "point-five." Say "favored by three points" and "three-and-a-half points." Do not read internal feature names aloud. Translate analytics into ordinary sports language. If scoring margin is used, define it once on first use as the average amount by which a team outscores or is outscored by opponents, then move on. Express standings-point ratios as natural percentages and explain them as the share of available standings points earned. Round spoken figures naturally and avoid false precision.
+
+Use only facts explicitly supplied in the input. Never invent injuries, weather, venue details, player names, rivalry context, playoff implications, or news. If an interesting note is not supplied, build interest from the matchup tension and the pick's strongest verified advantages rather than fabricating a storyline. Confidence is an estimate, never a guarantee.
+
+End with a fast recap that does not repeat the supporting statistics, one confident challenge to the listener, and an invitation to compete at stakewars.ai. Return spoken prose only, in paragraphs, with no Markdown, headings, stage directions, bullet points, citations, or music instructions.`;
+
+const smallNumbers = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const tensNumbers = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+
+const spokenWholeNumber = (value: number): string => {
+  const whole = Math.abs(Math.trunc(value));
+  if (whole < 20) return smallNumbers[whole] ?? String(whole);
+  if (whole < 100) {
+    const tens = tensNumbers[Math.floor(whole / 10)] ?? "";
+    const ones = whole % 10;
+    return ones ? `${tens}-${smallNumbers[ones]}` : tens;
+  }
+  return String(whole);
+};
+
+export const spokenSpread = (value: number) => {
+  const absolute = Math.abs(value);
+  const whole = Math.floor(absolute);
+  const fraction = Math.round((absolute - whole) * 10);
+  if (fraction === 0) return spokenWholeNumber(whole);
+  if (fraction === 5) return `${spokenWholeNumber(whole)}-and-a-half`;
+  return `${spokenWholeNumber(whole)}-point-${spokenWholeNumber(fraction)}`;
+};
+
+export const spokenAmericanOdds = (value: number) => {
+  const absolute = Math.abs(value);
+  const sign = value >= 0 ? "plus" : "minus";
+  if (absolute >= 100 && absolute <= 999) {
+    const lead = spokenWholeNumber(Math.floor(absolute / 100));
+    const remainder = absolute % 100;
+    if (remainder === 0) return `${sign} ${lead}-hundred`;
+    if (remainder < 10) return `${sign} ${lead}-oh-${spokenWholeNumber(remainder)}`;
+    return `${sign} ${lead}-${spokenWholeNumber(remainder)}`;
+  }
+  return `${sign} ${spokenWholeNumber(absolute)}`;
+};
+
+const lineText = (pick: PodcastScriptPick) => {
+  if (pick.marketKey === "h2h") return `${pick.selectedTeam} to win at ${spokenAmericanOdds(pick.oddsAmerican)}`;
+  const spread = Number(pick.spread);
+  const odds = spokenAmericanOdds(pick.oddsAmerican);
+  const unit = pick.sport === "MLB" ? "runs" : pick.sport === "NHL" ? "goals" : "points";
+  if (!Number.isFinite(spread) || spread === 0) return `${pick.selectedTeam} at pick'em, ${odds}`;
+  return spread < 0
+    ? `The ${pick.selectedTeam} are favored by ${spokenSpread(spread)} ${unit} at ${odds}`
+    : `The ${pick.selectedTeam} are getting ${spokenSpread(spread)} ${unit} at ${odds}`;
+};
 
 export const buildPodcastPromptData = (date: string, picks: PodcastScriptPick[]) => ({
   episodeDate: date,
@@ -98,7 +154,8 @@ export const buildPodcastPromptData = (date: string, picks: PodcastScriptPick[])
     line: lineText(pick),
     confidencePercent: pick.confidence == null ? null : Math.round(Number(pick.confidence) * 100),
     modelReasons: (pick.reasons ?? []).map(podcastSpokenText),
-    verifiedModelContext: podcastFeatureContext(pick.features)
+    verifiedModelContext: podcastFeatureContext(pick.features),
+    verifiedGameContext: pick.verifiedGameContext ?? null
   }))
 });
 
@@ -136,8 +193,11 @@ export const generateChineSheetsScript = async (date: string, picks: PodcastScri
     const transcript = outputText(body);
     if (!transcript) throw new Error("Podcast script generation returned no text.");
     const wordCount = podcastWordCount(transcript);
-    if (wordCount < 750 || wordCount > 1500) {
-      throw new Error(`Podcast script length was ${wordCount} words; expected approximately 900 to 1300.`);
+    if (wordCount < 750 || wordCount > 1350) {
+      throw new Error(`Podcast script length was ${wordCount} words; expected approximately 850 to 1150.`);
+    }
+    if (!/stakewars\.ai/i.test(transcript)) {
+      throw new Error("Podcast script generation returned an incomplete transcript.");
     }
     return {
       title: `Chine Sheets - ${date}`,

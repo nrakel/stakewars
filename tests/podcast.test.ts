@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastSpokenText, podcastSystemPrompt, podcastWordCount } from "../src/server/podcast.js";
+import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastSpokenText, podcastSystemPrompt, podcastWordCount, spokenAmericanOdds, spokenSpread } from "../src/server/podcast.js";
 import { podcastEpisodePath, podcastMixArgs } from "../src/server/podcastAudio.js";
 
 test("podcast speech text pronounces Chine as Sheen without changing embedded text", () => {
@@ -35,6 +35,19 @@ test("podcast spoken text rounds long decimals to one place", () => {
   );
 });
 
+test("podcast betting lines use natural spoken language", () => {
+  assert.equal(spokenSpread(-3), "three");
+  assert.equal(spokenSpread(3.5), "three-and-a-half");
+  assert.equal(spokenAmericanOdds(-120), "minus one-twenty");
+  assert.equal(spokenAmericanOdds(105), "plus one-oh-five");
+  const data = buildPodcastPromptData("2026-11-15", [{
+    id: "line-test", selectedTeam: "Kansas City Chiefs", confidence: 0.86, reasons: [], features: {}, explanation: null,
+    sport: "NFL", league: "NFL", startsAt: "2026-11-15T18:00:00Z", homeTeam: "Atlanta Falcons",
+    awayTeam: "Kansas City Chiefs", spread: "-3.0", oddsAmerican: -120, marketKey: "spreads"
+  }]);
+  assert.equal(data.picks[0]?.line, "The Kansas City Chiefs are favored by three points at minus one-twenty");
+});
+
 test("podcast prompt uses no more than three picks", () => {
   const pick = (id: string) => ({
     id, selectedTeam: "Home", confidence: 0.72, reasons: [], features: {}, explanation: "Stored fact.",
@@ -48,10 +61,20 @@ test("podcast prompt uses no more than three picks", () => {
 });
 
 test("podcast prompt requires casual-language explanations for analytics", () => {
-  assert.match(podcastSystemPrompt, /casual sports listener/i);
+  assert.match(podcastSystemPrompt, /casual sports fan/i);
   assert.match(podcastSystemPrompt, /share of available standings points/i);
-  assert.match(podcastSystemPrompt, /Convert ratios/i);
-  assert.match(podcastSystemPrompt, /first time scoring margin appears/i);
+  assert.match(podcastSystemPrompt, /two or three most persuasive/i);
+  assert.match(podcastSystemPrompt, /absolute maximum of three supporting numerical facts/i);
+  assert.match(podcastSystemPrompt, /most plausible way the pick could go wrong/i);
+  assert.match(podcastSystemPrompt, /restrained wit/i);
+  assert.match(podcastSystemPrompt, /Statistics are supporting evidence, never the story/i);
+  assert.match(podcastSystemPrompt, /projected starting quarterbacks/i);
+  assert.match(podcastSystemPrompt, /among the teams in that week's modeled slate/i);
+  assert.match(podcastSystemPrompt, /Player identity and the on-field conflict should lead/i);
+  assert.match(podcastSystemPrompt, /knowledgeable friend making a direct case/i);
+  assert.match(podcastSystemPrompt, /does not repeat the supporting statistics/i);
+  assert.match(podcastSystemPrompt, /850 to 1150 words/i);
+  assert.match(podcastSystemPrompt, /If scoring margin is used/i);
   assert.match(podcastSystemPrompt, /outscores or is outscored/i);
 });
 
