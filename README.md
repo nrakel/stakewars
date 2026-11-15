@@ -281,6 +281,15 @@ Production runs `stakewars-sync-college-programs.timer` weekly. Provider names
 that resolve to more than one school are stored as ambiguous and rejected until
 an explicit provider alias is added; they are never matched by best guess.
 
+NCAAMB Daily Picks are also validated against ESPN's Division I scoreboard
+before they are recorded. The scoreboard request must include `groups=50`; a
+large `limit` alone returns only ESPN's featured games. A sportsbook matchup is
+eligible only when its two canonical ESPN team identities and Central game date
+match one ESPN event. Unmatched or mixed-team sportsbook events are omitted
+from Daily Picks instead of being displayed as pending or assigned a result by
+approximate matching. The same `groups=50` scope is used by NCAAMB live scores
+and settlement collection.
+
 ## Historical backfill
 
 Backfill Parlay MLB historical responses and normalized historical lines:

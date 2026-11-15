@@ -5,7 +5,7 @@ import { config } from "./config.js";
 import { query, transaction } from "./db.js";
 import { footballTeamKey } from "./odds.js";
 import { refreshNbaContext } from "./nba-context.js";
-import { collegeEventKey, collegeTeamKey, primeCollegeTeamAliases } from "./collegeTeams.js";
+import { collegeEventKey, collegeTeamKey, fetchCollegeScheduleEventKeys, primeCollegeTeamAliases } from "./collegeTeams.js";
 
 export const legacyModelVersion = "phase3-context-heuristic-v6";
 export const modelVersion = "phase3-context-heuristic-v9";
@@ -4885,6 +4885,7 @@ export const snapshotAiCandidates = async ({
 export const recordDailyChinePicks = async (forDate = centralDate()) => {
   return transaction(async (client) => {
     await primeCollegeTeamAliases(client);
+    const ncaambScheduleKeys = await fetchCollegeScheduleEventKeys("NCAAMB", forDate);
 
     // NCAAMB is intentionally spread-only. Remove pre-model moneyline snapshots
     // instead of leaving unsupported picks visible when no spread is available.
@@ -4894,6 +4895,13 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
         AND sport = 'NCAAMB'
         AND market_key <> 'spreads'
     `, [forDate]);
+
+    await client.query(`
+      DELETE FROM chine_daily_pick
+      WHERE pick_date = $1::date
+        AND sport = 'NCAAMB'
+        AND NOT (game_key = ANY($2::text[]))
+    `, [forDate, [...ncaambScheduleKeys]]);
 
     const existingCollegePicks = await client.query<{
       id: string; awayTeam: string; homeTeam: string; startsAt: Date; confidence: string;
@@ -4951,26 +4959,30 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
       [forDate]
     );
 
-    if (!lines.rows.length) return { recorded: 0 };
+    const eligibleLines = lines.rows.filter((line) => (
+      line.sport !== "NCAAMB" || ncaambScheduleKeys.has(eventKey(line))
+    ));
+
+    if (!eligibleLines.length) return { recorded: 0 };
 
     const eventMarketCounts = new Map<string, number>();
-    for (const line of lines.rows) {
+    for (const line of eligibleLines) {
       eventMarketCounts.set(eventKey(line), (eventMarketCounts.get(eventKey(line)) ?? 0) + 1);
     }
 
-    const mlbLines = lines.rows.filter((line) => line.sport === "MLB");
-    const nhlLines = lines.rows.filter((line) => line.sport === "NHL");
-    const footballLines = lines.rows.filter((line) => isFootballSpreadSport(line.sport));
+    const mlbLines = eligibleLines.filter((line) => line.sport === "MLB");
+    const nhlLines = eligibleLines.filter((line) => line.sport === "NHL");
+    const footballLines = eligibleLines.filter((line) => isFootballSpreadSport(line.sport));
     const mlbContexts = await buildMlbContexts(client, mlbLines);
     const nhlContexts = await buildNhlContexts(client, nhlLines);
     const footballContexts = await buildFootballContexts(client, footballLines);
-    const basketballContexts = await buildBasketballContexts(client, lines.rows);
-    const ncaambContexts = await buildNcaambContexts(client, lines.rows);
+    const basketballContexts = await buildBasketballContexts(client, eligibleLines);
+    const ncaambContexts = await buildNcaambContexts(client, eligibleLines);
     const confidenceCalibration = activeModelVersion === modelVersion
       ? await buildConfidenceCalibration(client, forDate)
       : undefined;
 
-    const scored = lines.rows.map((line) => scoreLine(
+    const scored = eligibleLines.map((line) => scoreLine(
       line,
       eventMarketCounts,
       isFootballSpreadSport(line.sport)

@@ -81,6 +81,42 @@ export const collegeEventKey = (
   return `${sport}:${centralDate(startsAt)}:${teams.join(":")}`;
 };
 
+export const fetchCollegeScheduleEventKeys = async (sport: CollegeSport, date: string) => {
+  const [category, league] = directory[sport];
+  const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/${category}/${league}/scoreboard`);
+  url.searchParams.set("limit", "500");
+  url.searchParams.set("dates", date.replace(/-/g, ""));
+  if (sport === "NCAAMB") url.searchParams.set("groups", "50");
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`ESPN ${sport} schedule failed with ${response.status} for ${date}`);
+  }
+  const body = await response.json() as {
+    events?: Array<{
+      date?: string;
+      competitions?: Array<{
+        competitors?: Array<{
+          homeAway?: "home" | "away";
+          team?: { displayName?: string; name?: string; shortDisplayName?: string };
+        }>;
+      }>;
+    }>;
+  };
+  const keys = new Set<string>();
+  for (const event of body.events ?? []) {
+    const startsAt = event.date ? new Date(event.date) : null;
+    const competitors = event.competitions?.[0]?.competitors ?? [];
+    const away = competitors.find((team) => team.homeAway === "away")?.team;
+    const home = competitors.find((team) => team.homeAway === "home")?.team;
+    const awayName = away?.displayName ?? away?.name ?? away?.shortDisplayName;
+    const homeName = home?.displayName ?? home?.name ?? home?.shortDisplayName;
+    if (!startsAt || Number.isNaN(startsAt.getTime()) || !awayName || !homeName) continue;
+    keys.add(collegeEventKey(sport, startsAt, awayName, homeName));
+  }
+  return keys;
+};
+
 const directory = {
   NCAAF: ["football", "college-football"],
   NCAAMB: ["basketball", "mens-college-basketball"]
