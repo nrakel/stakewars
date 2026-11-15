@@ -17,6 +17,7 @@ import { nflPlayerKey } from "./nflPlayerProps.js";
 import { outcomeForSelection } from "./settlement.js";
 import { elevenLabsClient, ElevenLabsError } from "./elevenLabs.js";
 import { generateChineSheetsScript, type PodcastScriptPick } from "./podcast.js";
+import { generatePodcastEpisodeAudio, podcastEpisodePath } from "./podcastAudio.js";
 import { collegeEventKey } from "./collegeTeams.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
@@ -362,6 +363,9 @@ type PodcastScriptRow = {
   modelId: string;
   status: string;
   generatedAt: string;
+  audioReady: boolean;
+  audioGeneratedAt: string | null;
+  audioCharacterCount: number | null;
 };
 
 const getPodcastPicks = async (date: string, limit?: number) => query<PodcastPickRow>(
@@ -4942,7 +4946,8 @@ export const registerRoutes = (router: Router) => {
         `
           SELECT episode_date::text AS "episodeDate", title, transcript, speech_text AS "speechText",
                  word_count AS "wordCount", pick_ids AS "pickIds", model_id AS "modelId",
-                 status, generated_at AS "generatedAt"
+                 status, generated_at AS "generatedAt", (audio_path IS NOT NULL) AS "audioReady",
+                 audio_generated_at AS "audioGeneratedAt", audio_character_count AS "audioCharacterCount"
           FROM podcast_script
           WHERE episode_date = $1::date
         `,
@@ -4981,10 +4986,16 @@ export const registerRoutes = (router: Router) => {
             status = 'draft',
             generated_at = now(),
             generated_by = EXCLUDED.generated_by,
+            audio_path = NULL,
+            audio_generated_at = NULL,
+            audio_character_count = NULL,
+            audio_model_id = NULL,
+            audio_intro_version = NULL,
             updated_at = now()
           RETURNING episode_date::text AS "episodeDate", title, transcript, speech_text AS "speechText",
                     word_count AS "wordCount", pick_ids AS "pickIds", model_id AS "modelId",
-                    status, generated_at AS "generatedAt"
+                    status, generated_at AS "generatedAt", false AS "audioReady",
+                    audio_generated_at AS "audioGeneratedAt", audio_character_count AS "audioCharacterCount"
         `,
         [randomUUID(), date, generated.title, generated.transcript, generated.speechText,
           generated.wordCount, generated.pickIds, generated.modelId, req.user!.id]
@@ -4996,6 +5007,78 @@ export const registerRoutes = (router: Router) => {
         modelId: generated.modelId
       });
       res.json({ script: result.rows[0] });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  router.post("/admin/podcast/audio", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const input = z.object({ date: optionalDateParam }).parse(req.body);
+      const date = input.date ?? centralDate();
+      const scriptResult = await query<{ speechText: string }>(
+        `SELECT speech_text AS "speechText" FROM podcast_script WHERE episode_date = $1::date`,
+        [date]
+      );
+      const script = scriptResult.rows[0];
+      if (!script) {
+        res.status(404).json({ error: "Generate and review the Chine Sheets script before generating episode audio." });
+        return;
+      }
+      const episode = await generatePodcastEpisodeAudio(date, script.speechText);
+      await query(
+        `
+          UPDATE podcast_script
+          SET audio_path = $2,
+              audio_generated_at = now(),
+              audio_character_count = $3,
+              audio_model_id = $4,
+              audio_intro_version = 'chine-sheets-intro-v1',
+              updated_at = now()
+          WHERE episode_date = $1::date
+        `,
+        [date, episode.outputPath, episode.characterCount, episode.modelId]
+      );
+      await logAdminAction(req, "admin.podcast.audio.generate", {
+        date,
+        characterCount: episode.characterCount,
+        modelId: episode.modelId,
+        outputFormat: episode.outputFormat,
+        introCreated: episode.introCreated
+      });
+      res.json({
+        audioReady: true,
+        audioGeneratedAt: new Date().toISOString(),
+        characterCount: episode.characterCount,
+        introCreated: episode.introCreated
+      });
+    } catch (error) {
+      if (error instanceof ElevenLabsError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      next(error);
+    }
+  });
+
+  router.get("/admin/podcast/audio", requireNateRakelAccount, async (req, res, next) => {
+    try {
+      const date = optionalDateParam.parse(typeof req.query.date === "string" ? req.query.date : undefined) ?? centralDate();
+      const result = await query<{ audioReady: boolean }>(
+        `SELECT (audio_path IS NOT NULL) AS "audioReady" FROM podcast_script WHERE episode_date = $1::date`,
+        [date]
+      );
+      if (!result.rows[0]?.audioReady) {
+        res.status(404).json({ error: "Podcast episode audio has not been generated." });
+        return;
+      }
+      const download = req.query.download === "1";
+      res.setHeader("cache-control", "no-store, private");
+      res.setHeader("content-type", "audio/mpeg");
+      res.setHeader("content-disposition", `${download ? "attachment" : "inline"}; filename="chine-sheets-${date}.mp3"`);
+      res.sendFile(podcastEpisodePath(date), (error) => {
+        if (error && !res.headersSent) next(error);
+      });
     } catch (error) {
       next(error);
     }

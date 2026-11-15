@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { buildPodcastPromptData, podcastFeatureContext, podcastSpeechText, podcastSpokenText, podcastSystemPrompt, podcastWordCount } from "../src/server/podcast.js";
+import { podcastEpisodePath, podcastMixArgs } from "../src/server/podcastAudio.js";
 
 test("podcast speech text pronounces Chine as Sheen without changing embedded text", () => {
   assert.equal(
@@ -52,4 +53,15 @@ test("podcast prompt requires casual-language explanations for analytics", () =>
   assert.match(podcastSystemPrompt, /Convert ratios/i);
   assert.match(podcastSystemPrompt, /first time scoring margin appears/i);
   assert.match(podcastSystemPrompt, /outscores or is outscored/i);
+});
+
+test("podcast audio mix fades the reusable intro under delayed narration", () => {
+  const args = podcastMixArgs("intro.mp3", "narration.mp3", "episode.mp3");
+  assert.ok(args.includes("intro.mp3"));
+  assert.ok(args.includes("narration.mp3"));
+  assert.ok(args.includes("episode.mp3"));
+  assert.match(args.join(" "), /afade=t=out/);
+  assert.match(args.join(" "), /adelay=3000/);
+  assert.match(args.join(" "), /amix=inputs=2/);
+  assert.throws(() => podcastEpisodePath("../../etc/passwd"), /Invalid podcast episode date/);
 });

@@ -1452,6 +1452,10 @@ textarea {
   line-height: 1.55;
 }
 
+.podcast-script-preview audio {
+  width: min(100%, 720px);
+}
+
 .reddit-lock-status {
   display: inline-flex;
   align-items: center;

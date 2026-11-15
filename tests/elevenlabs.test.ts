@@ -56,3 +56,27 @@ test("ElevenLabs client sanitizes authentication errors", async () => {
     && !error.message.includes("private-voice-id")
   ));
 });
+
+test("ElevenLabs client generates a reusable sports intro sound effect", async () => {
+  let requestedUrl = "";
+  let requestedBody: Record<string, unknown> = {};
+  const client = new ElevenLabsClient({
+    apiKey: "test-key",
+    voiceId: "test-voice",
+    outputFormat: "mp3_44100_128",
+    fetchImpl: (async (input, init) => {
+      requestedUrl = String(input);
+      requestedBody = JSON.parse(String(init?.body));
+      return new Response(new Uint8Array([4, 5, 6]), {
+        headers: { "content-type": "audio/mpeg", "character-cost": "480" }
+      });
+    }) as typeof fetch
+  });
+  const result = await client.generateSoundEffect("Upbeat sports intro", 12);
+  assert.equal(requestedUrl, "https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128");
+  assert.equal(requestedBody.duration_seconds, 12);
+  assert.equal(requestedBody.model_id, "eleven_text_to_sound_v3");
+  assert.equal(requestedBody.loop, false);
+  assert.equal(result.characterCount, 480);
+  assert.equal(result.audio.length, 3);
+});

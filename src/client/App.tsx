@@ -468,6 +468,9 @@ type PodcastScript = {
   modelId: string;
   status: string;
   generatedAt: string;
+  audioReady: boolean;
+  audioGeneratedAt: string | null;
+  audioCharacterCount: number | null;
 };
 
 type VerificationRequiredResponse = {
@@ -2072,6 +2075,9 @@ function App() {
   const [podcastGenerating, setPodcastGenerating] = useState(false);
   const [podcastScript, setPodcastScript] = useState<PodcastScript | null>(null);
   const [podcastScriptGenerating, setPodcastScriptGenerating] = useState(false);
+  const [podcastAudioGenerating, setPodcastAudioGenerating] = useState(false);
+  const [podcastAudioLoading, setPodcastAudioLoading] = useState(false);
+  const [podcastEpisodeUrl, setPodcastEpisodeUrl] = useState("");
   const [podcastVoiceTesting, setPodcastVoiceTesting] = useState(false);
   const [podcastVoiceSampleUrl, setPodcastVoiceSampleUrl] = useState("");
   const [supportOpen, setSupportOpen] = useState(false);
@@ -4022,6 +4028,12 @@ function App() {
     try {
       const result = await api<{ script: PodcastScript | null }>(`/admin/podcast/script?date=${encodeURIComponent(date)}`, {}, token);
       setPodcastScript(result.script);
+      if (!result.script?.audioReady) {
+        setPodcastEpisodeUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return "";
+        });
+      }
     } catch (err) {
       setPodcastNotice((err as Error).message);
     }
@@ -4037,6 +4049,10 @@ function App() {
         body: JSON.stringify({ date: podcastDate })
       }, token);
       setPodcastScript(result.script);
+      setPodcastEpisodeUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return "";
+      });
       setPodcastNotice("Chine Sheets script generated and saved.");
     } catch (err) {
       setPodcastNotice((err as Error).message);
@@ -4049,6 +4065,65 @@ function App() {
     if (!token || !isNateRakelAccount || !podcastDate) return;
     void refreshPodcastScript(podcastDate);
   }, [token, isNateRakelAccount, podcastDate]);
+
+  const loadPodcastEpisode = async (download = false) => {
+    if (!token || !isNateRakelAccount || !podcastDate || podcastAudioLoading) return;
+    setPodcastAudioLoading(true);
+    setPodcastNotice("");
+    try {
+      const response = await fetch(`/api/admin/podcast/audio?date=${encodeURIComponent(podcastDate)}${download ? "&download=1" : ""}`, {
+        headers: { authorization: `Bearer ${token}` }
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error ?? "Podcast audio could not be loaded.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (download) {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `chine-sheets-${podcastDate}.mp3`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      } else {
+        setPodcastEpisodeUrl((current) => {
+          if (current) URL.revokeObjectURL(current);
+          return url;
+        });
+      }
+    } catch (err) {
+      setPodcastNotice((err as Error).message);
+    } finally {
+      setPodcastAudioLoading(false);
+    }
+  };
+
+  const generatePodcastAudio = async () => {
+    if (!token || !isNateRakelAccount || !podcastDate || !podcastScript || podcastAudioGenerating) return;
+    setPodcastAudioGenerating(true);
+    setPodcastNotice("");
+    try {
+      const result = await api<{ audioReady: boolean; audioGeneratedAt: string; characterCount: number }>("/admin/podcast/audio", {
+        method: "POST",
+        body: JSON.stringify({ date: podcastDate })
+      }, token);
+      setPodcastScript((current) => current ? {
+        ...current,
+        audioReady: result.audioReady,
+        audioGeneratedAt: result.audioGeneratedAt,
+        audioCharacterCount: result.characterCount
+      } : current);
+      setPodcastNotice("Chine Sheets episode audio generated.");
+      await loadPodcastEpisode();
+    } catch (err) {
+      setPodcastNotice((err as Error).message);
+    } finally {
+      setPodcastAudioGenerating(false);
+    }
+  };
 
   const testPodcastVoice = async () => {
     if (!token || !isNateRakelAccount || podcastVoiceTesting) return;
@@ -4079,6 +4154,10 @@ function App() {
   useEffect(() => () => {
     if (podcastVoiceSampleUrl) URL.revokeObjectURL(podcastVoiceSampleUrl);
   }, [podcastVoiceSampleUrl]);
+
+  useEffect(() => () => {
+    if (podcastEpisodeUrl) URL.revokeObjectURL(podcastEpisodeUrl);
+  }, [podcastEpisodeUrl]);
 
   const refreshAdminPrizes = async () => {
     if (!token || !isNateRakelAccount) return;
@@ -6875,6 +6954,9 @@ function App() {
                   <button className="secondary-action" disabled={podcastVoiceTesting} onClick={testPodcastVoice}>
                     <Radio size={16} /> {podcastVoiceTesting ? "Generating sample..." : "Test Voice"}
                   </button>
+                  <button className="primary" disabled={!podcastScript || podcastAudioGenerating} onClick={generatePodcastAudio}>
+                    <Radio size={16} /> {podcastAudioGenerating ? "Producing episode..." : podcastScript?.audioReady ? "Regenerate episode audio" : "Generate episode audio"}
+                  </button>
                 </div>
                 {podcastVoiceSampleUrl && <audio controls preload="metadata" src={podcastVoiceSampleUrl} />}
               </div>
@@ -6887,11 +6969,25 @@ function App() {
                     </small>
                   </div>
                   <textarea aria-label="Chine Sheets transcript" readOnly rows={20} value={podcastScript.transcript} />
+                  {podcastScript.audioReady && (
+                    <div className="notification-actions">
+                      {!podcastEpisodeUrl && (
+                        <button className="secondary-action" disabled={podcastAudioLoading} onClick={() => void loadPodcastEpisode()}>
+                          <Radio size={16} /> {podcastAudioLoading ? "Loading..." : "Load episode audio"}
+                        </button>
+                      )}
+                      <button className="secondary-action" disabled={podcastAudioLoading} onClick={() => void loadPodcastEpisode(true)}>
+                        <Download size={16} /> Download MP3
+                      </button>
+                    </div>
+                  )}
+                  {podcastEpisodeUrl && <audio controls preload="metadata" src={podcastEpisodeUrl} />}
                 </div>
               )}
               <small className="muted">The file includes selected team, odds, start time, confidence, score, wager status, model explanation, reason labels, and every captured model feature for each pick.</small>
               <small className="muted">The saved transcript displays Chine normally. Its audio-ready copy automatically uses Sheen for pronunciation.</small>
               <small className="muted">Test Voice generates one short ElevenLabs sample and consumes a small number of characters.</small>
+              <small className="muted">Generate episode audio uses ElevenLabs characters for the full narration. The standard intro is generated once and reused.</small>
               {podcastNotice && <p className={podcastNotice.includes("generated") ? "success" : "error"}>{podcastNotice}</p>}
             </div>
             )}

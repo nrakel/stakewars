@@ -228,6 +228,16 @@ brand spelling, while the separately stored audio-ready text changes the whole
 word `Chine` to `Sheen` for correct pronunciation. Apply migration
 `087_podcast_script.sql` before using this feature.
 
+Generate episode audio sends the saved speech text to ElevenLabs, then mixes it
+with a reusable 12-second upbeat sports-and-crowd intro using the pinned
+`ffmpeg-static` binary. Narration begins three seconds into the intro while the
+music fades underneath it. The intro is generated through ElevenLabs Sound
+Effects only when `data/podcast/chine-sheets-intro-v1.mp3` does not exist; all
+later episodes reuse it. Completed MP3 files are private files under
+`data/podcast/` and are served only by Nate's authenticated Admin endpoint.
+Regenerating a script invalidates its prior audio. Apply
+`088_podcast_audio.sql` before generating audio.
+
 Configure production with:
 
 ```bash
