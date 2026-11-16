@@ -2946,6 +2946,7 @@ export const registerRoutes = (router: Router) => {
 
   router.get("/chine/daily-picks", requireAuth, async (req, res, next) => {
     try {
+      res.set("Cache-Control", "no-store");
       const today = centralDate();
       const date = optionalDateParam.parse(typeof req.query.date === "string" ? req.query.date : undefined) ?? today;
       if (date > today) {

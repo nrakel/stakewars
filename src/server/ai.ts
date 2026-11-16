@@ -4947,6 +4947,7 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
         FROM game_line
         WHERE is_active = true
           AND sport IN ('MLB', 'NHL', 'NFL', 'NBA', 'NCAAMB', 'NCAAF')
+          AND starts_at > now()
           AND (starts_at AT TIME ZONE 'America/Chicago')::date = $1::date
           AND (
             (sport IN ('NFL', 'NCAAF', 'NBA') AND market_key = 'spreads')
@@ -5034,7 +5035,24 @@ export const recordDailyChinePicks = async (forDate = centralDate()) => {
             confidence = EXCLUDED.confidence,
             model_version = EXCLUDED.model_version,
             recorded_at = now()
-          WHERE chine_daily_pick.starts_at > now()
+          WHERE chine_daily_pick.starts_at > now() + interval '10 minutes'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM live_game_state live
+              WHERE live.sport = chine_daily_pick.sport
+                AND (
+                  (lower(live.away_team) = lower(chine_daily_pick.away_team)
+                    AND lower(live.home_team) = lower(chine_daily_pick.home_team))
+                  OR
+                  (lower(live.away_team) = lower(chine_daily_pick.home_team)
+                    AND lower(live.home_team) = lower(chine_daily_pick.away_team))
+                )
+                AND abs(extract(epoch FROM (live.starts_at - chine_daily_pick.starts_at))) <= 43200
+                AND (
+                  live.in_play = true
+                  OR lower(coalesce(live.game_status, '')) NOT IN ('', 'scheduled', 'pre', 'pre-game', 'pregame')
+                )
+            )
           RETURNING id
         `,
         [
