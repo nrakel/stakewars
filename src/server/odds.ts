@@ -490,6 +490,19 @@ const footballBookmakerFallbacks = () => unique([
   "novig"
 ].filter(Boolean));
 
+const standardBookmakerFallbacks = () => unique([
+  ...config.parlayBookmakers,
+  "bovada",
+  "fanduel",
+  "draftkings",
+  "betmgm",
+  "caesars",
+  "betrivers",
+  "hardrock",
+  "novig",
+  "pinnacle"
+].filter(Boolean));
+
 export const isUnavailableBookmakerError = (error: unknown) =>
   error instanceof Error
   && (error.message.includes("UNKNOWN_BOOKMAKER") || error.message.includes("BOOKMAKER_NOT_AVAILABLE"));
@@ -1056,6 +1069,37 @@ const fetchSportOdds = async (sportKey: string, markets: MarketKey[], bookmakers
   return (await response.json()) as ParlayEvent[];
 };
 
+const fetchBookmakerGroups = async (
+  sport: LocalSport,
+  sportKey: string,
+  markets: MarketKey[],
+  bookmakerPriority: string[],
+  stopAfterFirstAvailable = false
+) => {
+  const eventGroups: ParlayEvent[][] = [];
+  const bookmakerFetches: Array<{ bookmakers: string[]; events: number; error?: string }> = [];
+  let successfulFetches = 0;
+  let lastError: unknown;
+
+  for (const bookmaker of bookmakerPriority) {
+    try {
+      const events = await fetchSportOdds(sportKey, markets, [bookmaker]);
+      successfulFetches += 1;
+      eventGroups.push(events);
+      bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
+      if (stopAfterFirstAvailable && events.length > 0) break;
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`Skipping failed ${sport} bookmaker ${bookmaker}: ${message}`);
+      bookmakerFetches.push({ bookmakers: [bookmaker], events: 0, error: message.slice(0, 240) });
+    }
+  }
+
+  if (successfulFetches === 0 && lastError) throw lastError;
+  return { eventGroups, bookmakerFetches };
+};
+
 const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets: MarketKey[]) => {
   if (soccerSports.has(sport)) {
     const events = await fetchSportOdds(sportKey, markets, []);
@@ -1068,21 +1112,9 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
 
   if (sport === "NFL" || sport === "NCAAF") {
     const bookmakerPriority = footballBookmakerFallbacks();
-    const eventGroups: ParlayEvent[][] = [];
-    const bookmakerFetches: Array<{ bookmakers: string[]; events: number }> = [];
-    for (const bookmaker of bookmakerPriority) {
-      let events: ParlayEvent[];
-      try {
-        events = await fetchSportOdds(sportKey, markets, [bookmaker]);
-      } catch (error) {
-        if (!isUnavailableBookmakerError(error)) throw error;
-        console.warn(`Skipping unavailable ${sport} bookmaker: ${bookmaker}`);
-        bookmakerFetches.push({ bookmakers: [bookmaker], events: 0 });
-        continue;
-      }
-      eventGroups.push(events);
-      bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
-    }
+    const { eventGroups, bookmakerFetches } = await fetchBookmakerGroups(
+      sport, sportKey, markets, bookmakerPriority
+    );
 
     const schedule = sport === "NCAAF"
       ? await fetchEspnFootballSchedule(sport, eventGroups)
@@ -1108,6 +1140,20 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
     };
   }
 
+  if (sport === "NBA" || sport === "NHL") {
+    const bookmakerPriority = standardBookmakerFallbacks();
+    const { eventGroups, bookmakerFetches } = await fetchBookmakerGroups(
+      sport, sportKey, markets, bookmakerPriority, true
+    );
+    const merged = mergeEvents(eventGroups, sport);
+    return {
+      events: merged.events,
+      bookmakerPriority,
+      bookmakerFetches,
+      batchAliases: merged.batchAliases
+    };
+  }
+
   if (sport !== "MLB") {
     const events = await fetchSportOdds(sportKey, markets, config.parlayBookmakers);
     return {
@@ -1118,13 +1164,9 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
   }
 
   const bookmakerPriority = mlbBookmakerFallbacks();
-  const eventGroups: ParlayEvent[][] = [];
-  const bookmakerFetches: Array<{ bookmakers: string[]; events: number }> = [];
-  for (const bookmaker of bookmakerPriority) {
-    const events = await fetchSportOdds(sportKey, markets, [bookmaker]);
-    eventGroups.push(events);
-    bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
-  }
+  const { eventGroups, bookmakerFetches } = await fetchBookmakerGroups(
+    sport, sportKey, markets, bookmakerPriority
+  );
 
   const merged = mergeEvents(eventGroups, sport);
   return {
