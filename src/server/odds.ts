@@ -484,12 +484,15 @@ const footballBookmakerFallbacks = () => unique([
   "fanduel",
   "draftkings",
   "betmgm",
-  "pinnacle",
   "caesars",
   "betrivers",
   "hardrock",
   "novig"
 ].filter(Boolean));
+
+export const isUnavailableBookmakerError = (error: unknown) =>
+  error instanceof Error
+  && (error.message.includes("UNKNOWN_BOOKMAKER") || error.message.includes("BOOKMAKER_NOT_AVAILABLE"));
 
 const hasCompleteMarket = (
   outcomes: ParlayOutcome[] | undefined,
@@ -1068,7 +1071,15 @@ const fetchMergedSportOdds = async (sport: LocalSport, sportKey: string, markets
     const eventGroups: ParlayEvent[][] = [];
     const bookmakerFetches: Array<{ bookmakers: string[]; events: number }> = [];
     for (const bookmaker of bookmakerPriority) {
-      const events = await fetchSportOdds(sportKey, markets, [bookmaker]);
+      let events: ParlayEvent[];
+      try {
+        events = await fetchSportOdds(sportKey, markets, [bookmaker]);
+      } catch (error) {
+        if (!isUnavailableBookmakerError(error)) throw error;
+        console.warn(`Skipping unavailable ${sport} bookmaker: ${bookmaker}`);
+        bookmakerFetches.push({ bookmakers: [bookmaker], events: 0 });
+        continue;
+      }
       eventGroups.push(events);
       bookmakerFetches.push({ bookmakers: [bookmaker], events: events.length });
     }

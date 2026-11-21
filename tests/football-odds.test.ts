@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { eventKey, scoreLine, scoreNcaambSpreadLine } from "../src/server/ai.js";
 import { nflSeasonWeek } from "../src/server/betting.js";
-import { footballEventIdentity, footballTeamKey, isExpectedSportEvent } from "../src/server/odds.js";
+import {
+  footballEventIdentity,
+  footballTeamKey,
+  isExpectedSportEvent,
+  isUnavailableBookmakerError
+} from "../src/server/odds.js";
 import { collegeEventKey, normalizeCollegeAlias } from "../src/server/collegeTeams.js";
 import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
 
@@ -14,6 +19,18 @@ const baseEvent = {
   home_team: "Rutgers",
   away_team: "Massachusetts"
 };
+
+test("football refresh skips an unavailable fallback bookmaker", () => {
+  assert.equal(
+    isUnavailableBookmakerError(new Error('Parlay API failed: {"error":"UNKNOWN_BOOKMAKER"}')),
+    true
+  );
+  assert.equal(
+    isUnavailableBookmakerError(new Error('Parlay API failed: {"error":"BOOKMAKER_NOT_AVAILABLE"}')),
+    true
+  );
+  assert.equal(isUnavailableBookmakerError(new Error("Parlay API failed with 500")), false);
+});
 
 test("NFL season week advances from the configured Monday start", () => {
   assert.equal(nflSeasonWeek("2026-09-07", new Date("2026-09-10T18:00:00Z")), 1);
