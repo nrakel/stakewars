@@ -27,6 +27,8 @@ export const normalizeCollegeAlias = (value: string) => value
   .replace(/\s+/g, " ");
 
 let aliases = new Map<string, ResolvedTeam | null>();
+const scheduleCache = new Map<string, { expiresAt: number; promise: Promise<Set<string>> }>();
+const scheduleCacheTtlMs = 5 * 60 * 1000;
 
 const aliasKey = (sport: CollegeSport, provider: string, name: string) =>
   `${sport}|${provider}|${normalizeCollegeAlias(name)}`;
@@ -81,7 +83,7 @@ export const collegeEventKey = (
   return `${sport}:${centralDate(startsAt)}:${teams.join(":")}`;
 };
 
-export const fetchCollegeScheduleEventKeys = async (sport: CollegeSport, date: string) => {
+const loadCollegeScheduleEventKeys = async (sport: CollegeSport, date: string) => {
   const [category, league] = directory[sport];
   const url = new URL(`https://site.api.espn.com/apis/site/v2/sports/${category}/${league}/scoreboard`);
   url.searchParams.set("limit", "500");
@@ -116,6 +118,27 @@ export const fetchCollegeScheduleEventKeys = async (sport: CollegeSport, date: s
   }
   return keys;
 };
+
+export const fetchCollegeScheduleEventKeys = async (sport: CollegeSport, date: string) => {
+  const cacheKey = `${sport}:${date}`;
+  const cached = scheduleCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.promise;
+
+  const promise = loadCollegeScheduleEventKeys(sport, date).catch((error) => {
+    scheduleCache.delete(cacheKey);
+    throw error;
+  });
+  scheduleCache.set(cacheKey, { expiresAt: Date.now() + scheduleCacheTtlMs, promise });
+  return promise;
+};
+
+export const isCanonicalCollegeEvent = (
+  sport: CollegeSport,
+  startsAt: Date,
+  awayTeam: string,
+  homeTeam: string,
+  scheduleKeys: Set<string>
+) => scheduleKeys.has(collegeEventKey(sport, startsAt, awayTeam, homeTeam));
 
 const directory = {
   NCAAF: ["football", "college-football"],

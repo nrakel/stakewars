@@ -18,7 +18,13 @@ import { outcomeForSelection } from "./settlement.js";
 import { elevenLabsClient, ElevenLabsError } from "./elevenLabs.js";
 import { generateChineSheetsScript, type PodcastScriptPick } from "./podcast.js";
 import { generatePodcastEpisodeAudio, podcastEpisodePath } from "./podcastAudio.js";
-import { collegeEventKey } from "./collegeTeams.js";
+import {
+  collegeEventKey,
+  fetchCollegeScheduleEventKeys,
+  isCanonicalCollegeEvent,
+  primeCollegeTeamAliases,
+  type CollegeSport
+} from "./collegeTeams.js";
 import {
   dailyAiHighBankrollStraightBankrollFraction,
   dailyAiParlayBankrollFraction,
@@ -7399,6 +7405,38 @@ export const registerRoutes = (router: Router) => {
             });
           }
           selectedLines.push(currentLine);
+        }
+
+        const collegeLines = selectedLines.filter((line) => line.sport === "NCAAF" || line.sport === "NCAAMB");
+        if (collegeLines.length > 0) {
+          await primeCollegeTeamAliases(client);
+          const schedules = new Map<string, Set<string>>();
+          for (const line of collegeLines) {
+            const sport = line.sport as CollegeSport;
+            const gameDate = centralDate(line.starts_at);
+            const scheduleKey = `${sport}:${gameDate}`;
+            let schedule = schedules.get(scheduleKey);
+            if (!schedule) {
+              try {
+                schedule = await fetchCollegeScheduleEventKeys(sport, gameDate);
+              } catch (error) {
+                console.error(`College wager schedule validation failed for ${scheduleKey}`, error);
+                throw new WagerValidationError(
+                  "College game validation is temporarily unavailable. Please try again shortly.",
+                  "LINE_UNAVAILABLE"
+                );
+              }
+              schedules.set(scheduleKey, schedule);
+            }
+            if (!isCanonicalCollegeEvent(
+              sport, line.starts_at, line.away_team, line.home_team, schedule
+            )) {
+              throw new WagerValidationError(
+                `${line.away_team} @ ${line.home_team} could not be verified against the official ${sport} schedule`,
+                "LINE_UNAVAILABLE"
+              );
+            }
+          }
         }
 
         if (lineMoves.length > 0 && !input.acceptLineMoves) {

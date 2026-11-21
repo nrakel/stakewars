@@ -8,7 +8,7 @@ import {
   isExpectedSportEvent,
   isUnavailableBookmakerError
 } from "../src/server/odds.js";
-import { collegeEventKey, normalizeCollegeAlias } from "../src/server/collegeTeams.js";
+import { collegeEventKey, isCanonicalCollegeEvent, normalizeCollegeAlias } from "../src/server/collegeTeams.js";
 import { settlementStartTimeDifferenceMinutes } from "../src/server/settlement.js";
 
 const baseEvent = {
@@ -81,6 +81,17 @@ test("NCAAB event keys keep unrelated matchups separate", () => {
   const illinois = collegeEventKey("NCAAMB", startsAt, "Illinois Fighting Illini", "Texas Tech Red Raiders");
 
   assert.notEqual(clemson, illinois);
+});
+
+test("college wager validation requires the exact sport, date, and matchup", () => {
+  const startsAt = new Date("2026-11-21T20:30:00Z");
+  const schedule = new Set([
+    collegeEventKey("NCAAF", startsAt, "UCLA Bruins", "Michigan Wolverines")
+  ]);
+
+  assert.equal(isCanonicalCollegeEvent("NCAAF", startsAt, "UCLA Bruins", "Michigan Wolverines", schedule), true);
+  assert.equal(isCanonicalCollegeEvent("NCAAMB", startsAt, "UCLA Bruins", "Michigan Wolverines", schedule), false);
+  assert.equal(isCanonicalCollegeEvent("NCAAF", startsAt, "Cal Poly", "UCLA", schedule), false);
 });
 
 test("NCAAMB model converts projected margin edge into spread confidence", () => {
